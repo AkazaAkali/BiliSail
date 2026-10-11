@@ -27,6 +27,57 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  for (final kind in [PlaybackMediaKind.progressive, PlaybackMediaKind.dash]) {
+    test(
+      'single local file uses progressive open; missing DASH audio still fails: $kind',
+      () async {
+        final engine = _FakeEngine();
+        final pending = Completer<PlaybackMedia>()
+          ..complete(
+            PlaybackMedia(
+              video: PlaybackTrack(
+                urls: [Uri.file('C:/offline/media.mp4')],
+                codec: 'avc1',
+                bandwidth: 1000,
+              ),
+              audio: null,
+              quality: 80,
+              qualities: const [80],
+              duration: const Duration(minutes: 2),
+              headers: const {},
+              kind: kind,
+            ),
+          );
+        final content = _FakeContentRepository()..pending = pending;
+        final session = PlaybackSession(
+          engine: engine,
+          repository: _FakeRepository(),
+          contentRepository: content,
+          progress: _FakeProgress(),
+          accountScope: () => 'guest',
+        );
+        addTearDown(session.close);
+        await session.open(
+          _detail('1'),
+          _part('101'),
+          target: const OfflinePlaybackTarget('merged'),
+        );
+        if (kind == PlaybackMediaKind.progressive) {
+          expect(session.error, isNull);
+          expect(engine.sources.single, isA<ProgressiveSource>());
+          expect(engine.openedUris.single.scheme, 'file');
+          await session.togglePlaying();
+          await session.seek(const Duration(seconds: 5));
+          await session.pause();
+          expect(engine.currentSnapshot.position, const Duration(seconds: 5));
+        } else {
+          expect(session.error, '未取得点播音频轨道');
+          expect(engine.sources, isEmpty);
+        }
+      },
+    );
+  }
+
   for (final quality in [0, 250, 400, 20000]) {
     test('new live owner uses its own default qn $quality', () async {
       final content = _FakeContentRepository();

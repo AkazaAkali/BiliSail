@@ -173,28 +173,31 @@ void main() {
     await repository.close();
   });
 
-  testWidgets('merge option is explicit and passed to the queue', (
-    tester,
-  ) async {
-    final repository = _DownloadRepository(canMerge: true);
-    await _pump(
+  for (final output in [DownloadOutput.mp4, DownloadOutput.mkv]) {
+    testWidgets('${output.name} format is explicit and passed to the queue', (
       tester,
-      DownloadDialog(items: [_item(1)]),
-      repository,
-      _SourceRepository(),
-    );
-    expect(repository.enqueued, isEmpty);
-    final checkbox = find.widgetWithText(CheckboxListTile, '合并为单个 MP4');
-    await tester.ensureVisible(checkbox);
-    await tester.tap(checkbox);
-    await tester.pump();
-    await tester.tap(find.text('开始下载'));
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(repository.selection?.output, DownloadOutput.mp4);
-    await repository.close();
-  });
+    ) async {
+      final repository = _DownloadRepository(canMerge: true);
+      await _pump(
+        tester,
+        DownloadDialog(items: [_item(1)]),
+        repository,
+        _SourceRepository(),
+      );
+      expect(repository.enqueued, isEmpty);
+      await tester.ensureVisible(find.text('音视频分轨').last);
+      await tester.tap(find.text('音视频分轨').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(output.label).last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('开始下载'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(repository.selection?.output, output);
+      await repository.close();
+    });
+  }
 
-  testWidgets('unavailable native capability disables only the merge option', (
+  testWidgets('unavailable native capability disables MP4 and MKV entries', (
     tester,
   ) async {
     final repository = _DownloadRepository();
@@ -204,10 +207,19 @@ void main() {
       repository,
       _SourceRepository(),
     );
-    final checkbox = tester.widget<CheckboxListTile>(
-      find.widgetWithText(CheckboxListTile, '合并为单个 MP4'),
+    await tester.ensureVisible(find.text('音视频分轨').last);
+    await tester.tap(find.text('音视频分轨').last);
+    await tester.pumpAndSettle();
+    final mp4 = tester.widget<DropdownMenuItem<DownloadOutput>>(
+      find.widgetWithText(DropdownMenuItem<DownloadOutput>, '合并 MP4').last,
     );
-    expect(checkbox.onChanged, isNull);
+    final mkv = tester.widget<DropdownMenuItem<DownloadOutput>>(
+      find.widgetWithText(DropdownMenuItem<DownloadOutput>, '合并 MKV').last,
+    );
+    expect(mp4.enabled, isFalse);
+    expect(mkv.enabled, isFalse);
+    await tester.tap(find.text('音视频分轨').last);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('开始下载'));
     await tester.pump(const Duration(milliseconds: 300));
     expect(repository.selection?.output, DownloadOutput.separate);

@@ -83,6 +83,8 @@ final class DownloadFileStore {
       'manifest.json',
       'media.mp4',
       'media.mp4.part',
+      'media.mkv',
+      'media.mkv.part',
     }.contains(name)) {
       throw const AppFailure(AppFailureKind.storage, '下载文件名无效');
     }
@@ -185,21 +187,20 @@ final class DownloadFileStore {
         !task.tracks.every((track) => track.complete)) {
       throw const AppFailure(AppFailureKind.storage, '媒体轨道尚未完成');
     }
-    if (task.selection.output == DownloadOutput.mp4 &&
-        task.mergedMedia == null) {
+    if (task.selection.output.isMerged && task.mergedMedia == null) {
       throw const AppFailure(AppFailureKind.storage, '合并文件尚未完成');
     }
     await _atomicWrite(
       await taskFile(task, 'manifest.json'),
       utf8.encode(
         jsonEncode({
-          'version': task.selection.output == DownloadOutput.mp4 ? 2 : 1,
+          'version': task.selection.output.isMerged ? 2 : 1,
           'id': task.id,
           'scope': task.scope,
           'itemKey': task.item.key,
           'quality': task.selection.quality,
           'codec': task.selection.codec.name,
-          if (task.selection.output == DownloadOutput.mp4)
+          if (task.selection.output.isMerged)
             'merged': {
               'fileName': task.mergedMedia?.fileName,
               'bytes': task.mergedMedia?.bytes,
@@ -231,8 +232,7 @@ final class DownloadFileStore {
     try {
       final Object? decoded = jsonDecode(await manifest.readAsString());
       if (decoded is! Map ||
-          decoded['version'] !=
-              (task.selection.output == DownloadOutput.mp4 ? 2 : 1) ||
+          decoded['version'] != (task.selection.output.isMerged ? 2 : 1) ||
           decoded['id'] != task.id ||
           decoded['scope'] != task.scope ||
           decoded['itemKey'] != task.item.key ||
@@ -257,7 +257,7 @@ final class DownloadFileStore {
           return false;
         }
       }
-      if (task.selection.output == DownloadOutput.mp4) {
+      if (task.selection.output.isMerged) {
         final output = task.mergedMedia;
         final merged = decoded['merged'];
         if (output == null ||
@@ -276,7 +276,7 @@ final class DownloadFileStore {
   }
 
   Future<DownloadMergedMedia> completeMerged(DownloadTask task) async {
-    final part = await taskFile(task, 'media.mp4.part');
+    final part = await taskFile(task, '${task.selection.output.fileName}.part');
     final length = await part.length();
     if (length <= 0) {
       throw const AppFailure(AppFailureKind.storage, '合并文件为空');
@@ -288,15 +288,21 @@ final class DownloadFileStore {
       await handle.close();
     }
     final digest = await _sha256File(part.path);
-    final output = await taskFile(task, 'media.mp4');
+    final output = await taskFile(task, task.selection.output.fileName);
     if (await output.exists()) await output.delete();
     await part.rename(output.path);
-    return DownloadMergedMedia(bytes: length, sha256: digest);
+    return DownloadMergedMedia(
+      bytes: length,
+      sha256: digest,
+      output: task.selection.output,
+    );
   }
 
   Future<bool> verifyMerged(DownloadTask task, {bool verifyHash = true}) async {
     final media = task.mergedMedia;
     if (media == null ||
+        !task.selection.output.isMerged ||
+        media.output != task.selection.output ||
         media.bytes <= 0 ||
         !RegExp(r'^[0-9a-f]{64}$').hasMatch(media.sha256)) {
       return false;
@@ -313,7 +319,7 @@ final class DownloadFileStore {
     DownloadTask task, {
     bool verifyHashes = true,
   }) async {
-    if (task.selection.output != DownloadOutput.mp4) return;
+    if (!task.selection.output.isMerged) return;
     final sources = [
       await taskFile(task, 'video.m4s'),
       await taskFile(task, 'audio.m4s'),
@@ -351,6 +357,8 @@ final class DownloadFileStore {
       'manifest.json',
       'media.mp4',
       'media.mp4.part',
+      'media.mkv',
+      'media.mkv.part',
     ]) {
       final file = await taskFile(task, name);
       if (await file.exists()) await file.delete();

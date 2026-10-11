@@ -332,11 +332,7 @@ final class _DownloadTaskCard extends StatelessWidget {
                     ),
                     Text(downloadQualityText(task.selection.quality)),
                     Text(downloadCodecText(task.selection.codec)),
-                    Text(
-                      task.selection.output == DownloadOutput.mp4
-                          ? '合并 MP4'
-                          : '音视频分轨',
-                    ),
+                    Text(task.selection.output.label),
                     Text(bytes),
                     if (task.status == DownloadStatus.downloading &&
                         task.bytesPerSecond > 0)

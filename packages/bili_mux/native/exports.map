@@ -1,4 +1,4 @@
-BILI_MUX_1 {
+BILI_MUX_2 {
   global: bili_mux_*;
   local: *;
 };

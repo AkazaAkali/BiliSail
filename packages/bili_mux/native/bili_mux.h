@@ -15,11 +15,13 @@ extern "C" {
 
 typedef struct bili_mux_job bili_mux_job;
 
-// ABI 1: opaque jobs, UTF-8 local file paths. No FFmpeg types cross this ABI.
+// ABI 2: opaque jobs, UTF-8 local file paths. No FFmpeg types cross this ABI.
 BILI_MUX_EXPORT int32_t bili_mux_abi(void);
 BILI_MUX_EXPORT bili_mux_job* bili_mux_create(const char* video,
                                              const char* audio,
-                                             const char* output);
+                                             const char* output,
+                                             int32_t container);
+// Container: 0 MP4, 1 Matroska. Explicit even for temporary .part paths.
 // Run exactly once on a worker. 0 success, 1 cancelled, 2 input/codec,
 // 3 output I/O, 4 output verification, 5 internal failure, 6 deadline.
 BILI_MUX_EXPORT int32_t bili_mux_run(bili_mux_job* job);

@@ -21,7 +21,7 @@ if ($Target -eq 'android-arm64') {
   $ndkProperties = Join-Path $AndroidNdk 'source.properties'
   if (!(Test-Path -LiteralPath $ndkProperties) -or
       !(Select-String -LiteralPath $ndkProperties -Pattern '^Pkg.Revision\s*=\s*28\.2\.13676358\s*$' -Quiet)) {
-    throw 'The MP4 component uses fixed Android NDK 28.2.13676358.'
+    throw 'The Download mux component uses fixed Android NDK 28.2.13676358.'
   }
   $env:ANDROID_NDK_HOME = [System.IO.Path]::GetFullPath($AndroidNdk)
 }
@@ -42,9 +42,9 @@ if ($LASTEXITCODE -ne 0) {
   foreach ($relativeLog in @('configure.log', 'ffbuild/config.log', 'build.log', 'link.log')) {
     $logPath = Join-Path $buildDirectory $relativeLog
     if (Test-Path -LiteralPath $logPath) {
-      Write-Host "MP4 build diagnostics: $relativeLog"
+      Write-Host "Download mux build diagnostics: $relativeLog"
       Get-Content -LiteralPath $logPath -Tail 80 | Write-Host
     }
   }
-  throw "MP4 component build failed. Inspect build/download_mux/$Target/*.log."
+  throw "Download mux component build failed. Inspect build/download_mux/$Target/*.log."
 }

@@ -5,6 +5,8 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
+enum MuxContainer { mp4, mkv }
+
 enum MuxFailure {
   unavailable,
   cancelled,
@@ -51,7 +53,7 @@ final class NativeMuxer {
       if (path != null) {
         try {
           final bindings = _Bindings(path);
-          if (bindings.abi() == 1) _bindings = bindings;
+          if (bindings.abi() == 2) _bindings = bindings;
         } on ArgumentError {
           // An absent/incompatible asset is a capability failure. Existing
           // separate-track downloads and playback remain usable.
@@ -65,6 +67,7 @@ final class NativeMuxer {
     required String videoPath,
     required String audioPath,
     required String outputPath,
+    MuxContainer container = MuxContainer.mp4,
     required MuxCancellation cancellation,
     void Function(double)? onProgress,
   }) async {
@@ -91,6 +94,7 @@ final class NativeMuxer {
         videoPath.toNativeUtf8(allocator: arena),
         audioPath.toNativeUtf8(allocator: arena),
         outputPath.toNativeUtf8(allocator: arena),
+        container.index,
       );
     } finally {
       arena.releaseAll();
@@ -158,8 +162,13 @@ final class _Bindings {
   );
   late final create = _library
       .lookupFunction<
-        Pointer<Void> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>),
-        Pointer<Void> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>)
+        Pointer<Void> Function(
+          Pointer<Utf8>,
+          Pointer<Utf8>,
+          Pointer<Utf8>,
+          Int32,
+        ),
+        Pointer<Void> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>, int)
       >('bili_mux_create');
   late final run = _library
       .lookupFunction<

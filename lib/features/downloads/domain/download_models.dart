@@ -18,7 +18,23 @@ enum DownloadStatus {
 
 enum DownloadTrackKind { video, audio }
 
-enum DownloadOutput { separate, mp4 }
+enum DownloadOutput {
+  separate,
+  mp4,
+  mkv;
+
+  bool get isMerged => this != separate;
+  String get fileName => switch (this) {
+    separate => throw StateError('Separate tracks have no merged file'),
+    mp4 => 'media.mp4',
+    mkv => 'media.mkv',
+  };
+  String get label => switch (this) {
+    separate => '音视频分轨',
+    mp4 => '合并 MP4',
+    mkv => '合并 MKV',
+  };
+}
 
 /// Permanent content identity. Signed URLs and credentials are never stored.
 final class DownloadItem {
@@ -91,10 +107,15 @@ final class DownloadSelection {
 
 /// Verified local output; source track identities remain in the task index.
 final class DownloadMergedMedia {
-  const DownloadMergedMedia({required this.bytes, required this.sha256});
+  const DownloadMergedMedia({
+    required this.bytes,
+    required this.sha256,
+    this.output = DownloadOutput.mp4,
+  });
   final int bytes;
   final String sha256;
-  String get fileName => 'media.mp4';
+  final DownloadOutput output;
+  String get fileName => output.fileName;
 }
 
 final class DownloadPreferences {

@@ -22,6 +22,7 @@ struct bili_mux_job {
   std::string video;
   std::string audio;
   std::string output;
+  int32_t container{0};
   std::atomic<bool> cancelled{false};
   std::atomic<bool> started{false};
   std::atomic<int32_t> progress{0};
@@ -63,7 +64,8 @@ struct input_deleter {
 };
 using input_ptr = std::unique_ptr<AVFormatContext, input_deleter>;
 
-input_ptr open_input(const std::string& path, bili_mux_job& job) {
+input_ptr open_input(const std::string& path, bili_mux_job& job,
+                     bool require_av1_header = false) {
   AVFormatContext* context = avformat_alloc_context();
   if (!context) throw mux_error{result::internal};
   context->interrupt_callback = AVIOInterruptCB{interrupt, &job};
@@ -73,8 +75,28 @@ input_ptr open_input(const std::string& path, bili_mux_job& job) {
     check_cancel(job);
     throw mux_error{result::input};
   }
-  // MP4 headers contain codec parameters. Do not probe with a decoder.
-  return input_ptr{context};
+  input_ptr input{context};
+  // Some fragmented AV1 inputs carry the sequence header only in packets.
+  // Matroska needs it before writing CodecPrivate. The library has no decoders:
+  // bounded local probing uses the existing parser/extradata filter only.
+  if (require_av1_header) {
+    for (unsigned int i = 0; i < context->nb_streams; ++i) {
+      const auto* parameters = context->streams[i]->codecpar;
+      if (parameters->codec_id == AV_CODEC_ID_AV1 &&
+          parameters->extradata_size == 0) {
+        context->probesize = 8 * 1024 * 1024;
+        context->max_analyze_duration = 5 * AV_TIME_BASE;
+        context->max_probe_packets = 256;
+        if (avformat_find_stream_info(context, nullptr) < 0 ||
+            parameters->extradata_size == 0) {
+          check_cancel(job);
+          throw mux_error{result::input};
+        }
+        break;
+      }
+    }
+  }
+  return input;
 }
 
 struct output_context {
@@ -174,7 +196,7 @@ void copy_stream(const AVStream& input, AVFormatContext& output) {
 
 void merge(bili_mux_job& job) {
   check_cancel(job);
-  auto video = open_input(job.video, job);
+  auto video = open_input(job.video, job, job.container == 1);
   auto audio = open_input(job.audio, job);
   const int vi = stream_index(*video, AVMEDIA_TYPE_VIDEO);
   const int ai = stream_index(*audio, AVMEDIA_TYPE_AUDIO);
@@ -184,7 +206,8 @@ void merge(bili_mux_job& job) {
     throw mux_error{result::input};
   }
   output_context output;
-  if (avformat_alloc_output_context2(&output.value, nullptr, "mp4",
+  const char* format = job.container == 0 ? "mp4" : "matroska";
+  if (avformat_alloc_output_context2(&output.value, nullptr, format,
                                       job.output.c_str()) < 0 || !output.value) {
     throw mux_error{result::output};
   }
@@ -200,9 +223,11 @@ void merge(bili_mux_job& job) {
     throw mux_error{result::output};
   }
   AVDictionary* options{nullptr};
-  av_dict_set(&options, "movflags", "+faststart", 0);
-  av_dict_set(&options, "use_editlist", "1", 0);
-  av_dict_set(&options, "movie_timescale", "1000000", 0);
+  if (job.container == 0) {
+    av_dict_set(&options, "movflags", "+faststart", 0);
+    av_dict_set(&options, "use_editlist", "1", 0);
+    av_dict_set(&options, "movie_timescale", "1000000", 0);
+  }
   const int header_status = avformat_write_header(output.value, &options);
   av_dict_free(&options);
   if (header_status < 0) throw mux_error{result::output};
@@ -288,12 +313,13 @@ void merge(bili_mux_job& job) {
 }
 }  // namespace
 
-int32_t bili_mux_abi() { return 1; }
+int32_t bili_mux_abi() { return 2; }
 
 bili_mux_job* bili_mux_create(const char* video, const char* audio,
-                             const char* output) {
+                             const char* output, int32_t container) {
   if (!video || !audio || !output || !*video || !*audio || !*output ||
-      std::strcmp(video, output) == 0 || std::strcmp(audio, output) == 0) return nullptr;
+      std::strcmp(video, output) == 0 || std::strcmp(audio, output) == 0 ||
+      (container != 0 && container != 1)) return nullptr;
   try {
     static std::once_flag log_setup;
     // FFmpeg symbols are private to this component. Suppress its native logs
@@ -303,6 +329,7 @@ bili_mux_job* bili_mux_create(const char* video, const char* audio,
     job->video = video;
     job->audio = audio;
     job->output = output;
+    job->container = container;
     return job.release();  // Ownership crosses the C ABI; destroy releases it.
   } catch (...) {
     return nullptr;

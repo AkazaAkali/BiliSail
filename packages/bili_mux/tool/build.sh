@@ -105,7 +105,7 @@ cd "$cache/$target"
   --disable-programs --disable-doc --disable-debug --disable-x86asm \
   --disable-avdevice --disable-avfilter --disable-swresample --disable-swscale \
   --enable-static --disable-shared --enable-pic --enable-small \
-  --enable-demuxer=mov --enable-muxer=mp4 --enable-protocol=file \
+  --enable-demuxer=mov,matroska --enable-muxer=mp4,matroska --enable-protocol=file \
   --enable-parser=aac,h264,hevc,av1 \
   --enable-bsf=aac_adtstoasc,extract_extradata \
   --extra-cflags='-Os -fvisibility=hidden -ffunction-sections -fdata-sections' \

@@ -8,6 +8,7 @@ import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/domain/video.dart';
 import 'package:bilisail/features/downloads/application/download_controller.dart';
 import 'package:bilisail/features/downloads/data/sqlite_download_repository.dart';
+import 'package:bilisail/features/downloads/data/native_download_muxer.dart';
 import 'package:bilisail/features/downloads/domain/download_repository.dart';
 import 'package:bilisail/features/downloads/presentation/offline_screen.dart';
 import 'package:bilisail/features/playback/application/playback_session.dart';
@@ -27,186 +28,202 @@ import 'package:path/path.dart' as path;
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized().framePolicy =
       LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
-  testWidgets(
-    'Windows download survives restart and opens local DASH, subtitles and danmaku with no API calls',
-    (tester) async {
-      initializePlayerBackend();
-      final directory = await Directory.systemTemp.createTemp(
-        'bilisail_offline_native_',
-      );
-      final fixture = File(
-        path.join(
-          Directory.current.path,
-          'test',
-          'fixtures',
-          'media',
-          'video.mp4',
-        ),
-      );
-      final audioFixture = File(
-        path.join(
-          Directory.current.path,
-          'test',
-          'fixtures',
-          'media',
-          'audio.m4a',
-        ),
-      );
-      expect(await fixture.exists(), isTrue);
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      var transfers = 0;
-      final serving = server.listen((request) async {
-        transfers++;
-        final file = request.uri.path == '/video' ? fixture : audioFixture;
-        request.response.headers.contentLength = await file.length();
-        request.response.headers.set(
-          HttpHeaders.etagHeader,
-          '"fixture-${request.uri.path}"',
+  for (final output in DownloadOutput.values) {
+    testWidgets(
+      'Windows ${output.name} download survives restart and plays both streams, subtitles and danmaku offline',
+      (tester) async {
+        initializePlayerBackend();
+        final directory = await Directory.systemTemp.createTemp(
+          'bilisail_offline_native_',
         );
-        await request.response.addStream(file.openRead());
-        await request.response.close();
-      });
-      final sources = _FixtureSources(server.port);
-      final dbFile = File(path.join(directory.path, 'client.sqlite'));
-      var database = AppDatabase(NativeDatabase(dbFile));
-      var downloads = SqliteDownloadRepository(
-        database,
-        sources,
-        defaultDirectory: () async => path.join(directory.path, 'offline'),
-      );
-      PlaybackSession? session;
-      try {
-        await downloads.initialize();
-        await downloads.enqueue([_item], const DownloadSelection());
-        await _until(
-          tester,
-          () => downloads.current.tasks.any(
-            (task) =>
-                task.status == DownloadStatus.completed ||
-                task.status == DownloadStatus.failed,
+        final fixture = File(
+          path.join(
+            Directory.current.path,
+            'test',
+            'fixtures',
+            'media',
+            'video.mp4',
           ),
         );
-        final task = downloads.current.tasks.single;
-        expect(task.failure, isNull);
-        expect(task.status, DownloadStatus.completed);
-        expect(task.tracks.every((track) => track.complete), isTrue);
-        expect(transfers, 2);
-        await downloads.close();
-        await database.close();
-        // There is no network service when the restored task is opened.
-        await serving.cancel();
-        await server.close(force: true);
-        database = AppDatabase(NativeDatabase(dbFile));
-        downloads = SqliteDownloadRepository(
+        final audioFixture = File(
+          path.join(
+            Directory.current.path,
+            'test',
+            'fixtures',
+            'media',
+            'audio.m4a',
+          ),
+        );
+        expect(await fixture.exists(), isTrue);
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        var transfers = 0;
+        final serving = server.listen((request) async {
+          transfers++;
+          final file = request.uri.path == '/video' ? fixture : audioFixture;
+          request.response.headers.contentLength = await file.length();
+          request.response.headers.set(
+            HttpHeaders.etagHeader,
+            '"fixture-${request.uri.path}"',
+          );
+          await request.response.addStream(file.openRead());
+          await request.response.close();
+        });
+        final sources = _FixtureSources(server.port);
+        final dbFile = File(path.join(directory.path, 'client.sqlite'));
+        var database = AppDatabase(NativeDatabase(dbFile));
+        var downloads = SqliteDownloadRepository(
           database,
           sources,
+          muxer: NativeDownloadMuxer(),
           defaultDirectory: () async => path.join(directory.path, 'offline'),
         );
-        await downloads.initialize();
-        expect(downloads.current.tasks.single.status, DownloadStatus.completed);
-        final offline = OfflinePlaybackRepository(
-          downloads: downloads,
-          network: _RejectNetwork(),
-          networkMetadata: _RejectNetwork(),
-          networkContent: _RejectContent(),
-        );
-        final history = _ProbeHistory();
-        final engine = MediaKitEngine();
-        final player = PlaybackSession(
-          engine: engine,
-          repository: offline,
-          metadataRepository: offline,
-          contentRepository: offline.content,
-          historyRepository: history,
-          progress: _NoProgress(),
-          accountScope: () => 'guest',
-        );
-        session = player;
-        final window = WindowService();
-        final settings = AppSettings(autoPlay: false, defaultVolume: 0);
-        await tester.pumpWidget(
-          ProviderScope(
-            overrides: [
-              downloadRepositoryProvider.overrideWithValue(downloads),
-              downloadSourceRepositoryProvider.overrideWithValue(sources),
-              playbackSessionProvider.overrideWithValue(player),
-            ],
-            child: MaterialApp(
-              theme: BiliTheme.light(),
-              home: Scaffold(
-                body: OfflineScreen(
-                  taskId: task.id,
-                  playerBuilder: (context, verified) => PlaybackPanel(
-                    detail: VideoDetail(
-                      summary: verified.item.video,
-                      description: '',
-                      parts: [verified.item.part],
+        PlaybackSession? session;
+        try {
+          await downloads.initialize();
+          await downloads.enqueue([_item], DownloadSelection(output: output));
+          await _until(
+            tester,
+            () => downloads.current.tasks.any(
+              (task) =>
+                  task.status == DownloadStatus.completed ||
+                  task.status == DownloadStatus.failed,
+            ),
+          );
+          final task = downloads.current.tasks.single;
+          expect(task.failure, isNull);
+          expect(task.status, DownloadStatus.completed);
+          expect(task.tracks.every((track) => track.complete), isTrue);
+          expect(transfers, 2);
+          await downloads.close();
+          await database.close();
+          // There is no network service when the restored task is opened.
+          await serving.cancel();
+          await server.close(force: true);
+          database = AppDatabase(NativeDatabase(dbFile));
+          downloads = SqliteDownloadRepository(
+            database,
+            sources,
+            muxer: NativeDownloadMuxer(),
+            defaultDirectory: () async => path.join(directory.path, 'offline'),
+          );
+          await downloads.initialize();
+          expect(
+            downloads.current.tasks.single.status,
+            DownloadStatus.completed,
+          );
+          final offline = OfflinePlaybackRepository(
+            downloads: downloads,
+            network: _RejectNetwork(),
+            networkMetadata: _RejectNetwork(),
+            networkContent: _RejectContent(),
+          );
+          final history = _ProbeHistory();
+          final engine = MediaKitEngine();
+          final player = PlaybackSession(
+            engine: engine,
+            repository: offline,
+            metadataRepository: offline,
+            contentRepository: offline.content,
+            historyRepository: history,
+            progress: _NoProgress(),
+            accountScope: () => 'guest',
+          );
+          session = player;
+          final window = WindowService();
+          final settings = AppSettings(autoPlay: false, defaultVolume: 0);
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                downloadRepositoryProvider.overrideWithValue(downloads),
+                downloadSourceRepositoryProvider.overrideWithValue(sources),
+                playbackSessionProvider.overrideWithValue(player),
+              ],
+              child: MaterialApp(
+                theme: BiliTheme.light(),
+                home: Scaffold(
+                  body: OfflineScreen(
+                    taskId: task.id,
+                    playerBuilder: (context, verified) => PlaybackPanel(
+                      detail: VideoDetail(
+                        summary: verified.item.video,
+                        description: '',
+                        parts: [verified.item.part],
+                      ),
+                      part: verified.item.part,
+                      target: OfflinePlaybackTarget(verified.id),
+                      settings: settings,
+                      window: window,
+                      onToggleComments: () {},
                     ),
-                    part: verified.item.part,
-                    target: OfflinePlaybackTarget(verified.id),
-                    settings: settings,
-                    window: window,
-                    onToggleComments: () {},
                   ),
                 ),
               ),
             ),
-          ),
-        );
-        await _until(
-          tester,
-          () => player.media != null || player.error != null,
-        );
-        expect(player.error, isNull);
-        expect(player.media?.video.urls.single.scheme, 'file');
-        expect(player.media?.audio?.urls.single.scheme, 'file');
-        expect(
-          player.engine.currentSnapshot.duration,
-          greaterThan(Duration.zero),
-        );
-        await _until(tester, () => player.subtitleTracks.isNotEmpty);
-        await player.selectSubtitle(0);
-        expect(player.subtitleCues.single.text, '本地字幕');
-        final comments = await offline.comments(
-          _item.part.cid,
-          1,
-          cancellation: RequestCancellation(),
-        );
-        expect(comments.single.text, '本地弹幕');
-        await player.seek(const Duration(seconds: 3));
-        await player.togglePlaying();
-        await _until(
-          tester,
-          () =>
-              player.snapshots.value.position >
-                  const Duration(milliseconds: 3300) &&
-              engine.inspectDiagnostics().hasDecodedVideo &&
-              engine.inspectDiagnostics().hasDecodedAudio,
-        );
-        expect(engine.inspectDiagnostics().audioChannels, greaterThan(0));
-        await player.pause();
-        expect(history.calls, 0);
-        expect(
-          sources.resolutions,
-          1,
-          reason:
-              'Restored offline playback must not re-resolve the remote URL',
-        );
-        expect(tester.takeException(), isNull);
-        await tester.pumpWidget(const SizedBox.shrink());
-        await player.close();
-        session = null;
-      } finally {
-        await tester.pumpWidget(const SizedBox.shrink());
-        await session?.close();
-        await downloads.close();
-        await database.close();
-        await serving.cancel();
-        await server.close(force: true);
-        await directory.delete(recursive: true);
-      }
-    },
-  );
+          );
+          await _until(
+            tester,
+            () => player.media != null || player.error != null,
+          );
+          expect(player.error, isNull);
+          expect(player.media?.video.urls.single.scheme, 'file');
+          if (output.isMerged) {
+            expect(player.media?.kind, PlaybackMediaKind.progressive);
+            expect(player.media?.audio, isNull);
+            expect(
+              await File(path.join(task.directory, 'video.m4s')).exists(),
+              isFalse,
+            );
+          } else {
+            expect(player.media?.audio?.urls.single.scheme, 'file');
+          }
+          expect(
+            player.engine.currentSnapshot.duration,
+            greaterThan(Duration.zero),
+          );
+          await _until(tester, () => player.subtitleTracks.isNotEmpty);
+          await player.selectSubtitle(0);
+          expect(player.subtitleCues.single.text, '本地字幕');
+          final comments = await offline.comments(
+            _item.part.cid,
+            1,
+            cancellation: RequestCancellation(),
+          );
+          expect(comments.single.text, '本地弹幕');
+          await player.seek(const Duration(seconds: 3));
+          await player.togglePlaying();
+          await _until(
+            tester,
+            () =>
+                player.snapshots.value.position >
+                    const Duration(milliseconds: 3300) &&
+                engine.inspectDiagnostics().hasDecodedVideo &&
+                engine.inspectDiagnostics().hasDecodedAudio,
+          );
+          expect(engine.inspectDiagnostics().audioChannels, greaterThan(0));
+          await player.pause();
+          expect(history.calls, 0);
+          expect(
+            sources.resolutions,
+            1,
+            reason:
+                'Restored offline playback must not re-resolve the remote URL',
+          );
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+          await player.close();
+          session = null;
+        } finally {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await session?.close();
+          await downloads.close();
+          await database.close();
+          await serving.cancel();
+          await server.close(force: true);
+          await directory.delete(recursive: true);
+        }
+      },
+    );
+  }
 }
 
 Future<void> _until(WidgetTester tester, bool Function() ready) async {

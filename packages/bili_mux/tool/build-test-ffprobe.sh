@@ -22,7 +22,7 @@ cd "$build_dir"
   --disable-ffmpeg --disable-ffplay --enable-ffprobe \
   --disable-avdevice --disable-avfilter --disable-swresample --disable-swscale \
   --enable-static --disable-shared \
-  --enable-demuxer=mov --enable-protocol=file \
+  --enable-demuxer=mov,matroska --enable-protocol=file \
   --enable-parser=aac,h264,hevc,av1 > configure.log 2>&1
 expected_version="$(cut -d ' ' -f 1 "$source_record")"
 # An extracted source tree inside this checkout otherwise inherits the app's

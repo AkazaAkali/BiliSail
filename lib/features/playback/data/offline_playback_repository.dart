@@ -129,20 +129,22 @@ final class OfflinePlaybackRepository
     }
 
     final merged = task.mergedMedia;
-    if (task.selection.output == DownloadOutput.mp4 && merged == null) {
+    if (task.selection.output.isMerged &&
+        (merged == null || merged.output != task.selection.output)) {
       throw const AppFailure(AppFailureKind.storage, '离线合并文件索引无效');
     }
     final media = PlaybackMedia(
-      video: task.selection.output == DownloadOutput.mp4 && merged != null
+      kind: task.selection.output.isMerged
+          ? PlaybackMediaKind.progressive
+          : PlaybackMediaKind.dash,
+      video: task.selection.output.isMerged && merged != null
           ? PlaybackTrack(
               urls: [File(path.join(task.directory, merged.fileName)).uri],
               codec: video.codec,
               bandwidth: video.bandwidth + audio.bandwidth,
             )
           : localTrack(video),
-      audio: task.selection.output == DownloadOutput.mp4
-          ? null
-          : localTrack(audio),
+      audio: task.selection.output.isMerged ? null : localTrack(audio),
       quality: task.selection.quality,
       qualities: [task.selection.quality],
       duration: task.duration ?? task.item.part.duration,

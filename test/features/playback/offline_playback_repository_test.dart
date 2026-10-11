@@ -122,20 +122,26 @@ void main() {
     },
   );
 
-  test(
-    'merged offline media opens one source with no external audio or network',
-    () async {
-      downloads.task = _task(directory.path, output: DownloadOutput.mp4);
-      final media = await repository.content.resolve(
-        const OfflinePlaybackTarget('task-1'),
-        quality: 80,
-        cancellation: RequestCancellation(),
-      );
-      expect(media.video.urls.single, File('${directory.path}/media.mp4').uri);
-      expect(media.audio, isNull);
-      expect(network.calls, isEmpty);
-    },
-  );
+  for (final output in [DownloadOutput.mp4, DownloadOutput.mkv]) {
+    test(
+      'merged ${output.name} resolves as progressive with no external audio or network',
+      () async {
+        downloads.task = _task(directory.path, output: output);
+        final media = await repository.content.resolve(
+          const OfflinePlaybackTarget('task-1'),
+          quality: 80,
+          cancellation: RequestCancellation(),
+        );
+        expect(
+          media.video.urls.single,
+          File('${directory.path}/${output.fileName}').uri,
+        );
+        expect(media.kind, PlaybackMediaKind.progressive);
+        expect(media.audio, isNull);
+        expect(network.calls, isEmpty);
+      },
+    );
+  }
 
   test('two adapters keep offline and online content isolated', () async {
     await _writeExtras(directory, {
@@ -322,8 +328,8 @@ DownloadTask _task(
       ),
     ),
     selection: DownloadSelection(quality: 80, output: output),
-    mergedMedia: output == DownloadOutput.mp4
-        ? const DownloadMergedMedia(bytes: 8, sha256: 'digest')
+    mergedMedia: output.isMerged
+        ? DownloadMergedMedia(bytes: 8, sha256: 'digest', output: output)
         : null,
     status: DownloadStatus.completed,
     createdAt: now,

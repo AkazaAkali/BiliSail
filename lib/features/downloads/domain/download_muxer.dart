@@ -1,4 +1,5 @@
 import '../../../domain/request_cancellation.dart';
+import 'download_models.dart';
 
 /// Only consumes verified, application-owned local files. No network/player.
 abstract interface class DownloadMuxer {
@@ -7,6 +8,7 @@ abstract interface class DownloadMuxer {
     required String videoPath,
     required String audioPath,
     required String outputPath,
+    required DownloadOutput output,
     required RequestCancellation cancellation,
     required void Function(double progress) onProgress,
   });

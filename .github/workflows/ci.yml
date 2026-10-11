@@ -203,7 +203,7 @@ jobs:
           compression-level: 0
 
   native-mux:
-    name: MP4 native regression
+    name: MP4 and MKV native regression
     needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 20

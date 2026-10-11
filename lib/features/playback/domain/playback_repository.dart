@@ -19,7 +19,7 @@ final class PlaybackTrack {
   final int bandwidth;
 }
 
-enum PlaybackMediaKind { dash, liveHls, liveFlv }
+enum PlaybackMediaKind { dash, progressive, liveHls, liveFlv }
 
 String liveLineLabel(int line) => line == 0 ? '主线' : '备线$line';
 

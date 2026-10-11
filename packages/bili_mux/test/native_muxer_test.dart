@@ -45,31 +45,31 @@ void main() {
 
   final library = Platform.environment['BILI_MUX_LIBRARY'];
   final ffprobe = Platform.environment['BILI_MUX_FFPROBE'];
-  group(
-    'actual native library',
-    () {
-      late Directory temp;
-      late NativeMuxer muxer;
-      final fixtures = Directory('test/fixtures').absolute;
-      setUp(() async {
-        temp = await Directory.systemTemp.createTemp('bili_mux_中文_');
-        muxer = NativeMuxer(libraryPath: library);
-        expect(muxer.available, isTrue);
-      });
-      tearDown(() async => temp.delete(recursive: true));
+  group('actual native library', () {
+    late Directory temp;
+    late NativeMuxer muxer;
+    final fixtures = Directory('test/fixtures').absolute;
+    setUp(() async {
+      temp = await Directory.systemTemp.createTemp('bili_mux_中文_');
+      muxer = NativeMuxer(libraryPath: library);
+      expect(muxer.available, isTrue);
+    });
+    tearDown(() async => temp.delete(recursive: true));
 
+    for (final container in MuxContainer.values) {
       for (final codec in ['h264', 'hevc', 'av1']) {
         test(
-          '$codec + AAC preserves both streams and their shared timeline',
+          '${container.name}: $codec + AAC preserves packets and shared timeline',
           () async {
             final video = '${fixtures.path}/$codec.m4s';
             final audio = '${fixtures.path}/audio.m4a';
-            final output = '${temp.path}/合并.mp4';
+            final output = '${temp.path}/合并.${container.name}.part';
             var progress = 0.0;
             await muxer.merge(
               videoPath: video,
               audioPath: audio,
               outputPath: output,
+              container: container,
               cancellation: MuxCancellation(),
               onProgress: (value) => progress = value,
             );
@@ -80,103 +80,105 @@ void main() {
               final beforeAudio = await _packets(ffprobe, audio, 'a:0');
               final afterVideo = await _packets(ffprobe, output, 'v:0');
               final afterAudio = await _packets(ffprobe, output, 'a:0');
-              _compare(beforeVideo, afterVideo);
-              _compare(beforeAudio, afterAudio);
+              _compare(beforeVideo, afterVideo, container: container);
+              _compare(beforeAudio, afterAudio, container: container);
               final originalOffset =
                   _time(beforeAudio.first, 'pts_time') -
                   _time(beforeVideo.first, 'pts_time');
               final mergedOffset =
                   _time(afterAudio.first, 'pts_time') -
                   _time(afterVideo.first, 'pts_time');
-              expect(mergedOffset, closeTo(originalOffset, 0.0001));
+              expect(
+                mergedOffset,
+                closeTo(
+                  originalOffset,
+                  container == MuxContainer.mkv ? 0.0011 : 0.0001,
+                ),
+              );
             }
           },
         );
       }
-      test('cancellation waits for native file handles to close', () async {
-        final token = MuxCancellation();
-        final output = File('${temp.path}/cancel.mp4');
-        final future = muxer.merge(
+    }
+    test('cancellation waits for native file handles to close', () async {
+      final token = MuxCancellation();
+      final output = File('${temp.path}/cancel.mp4');
+      final future = muxer.merge(
+        videoPath: '${fixtures.path}/h264.m4s',
+        audioPath: '${fixtures.path}/audio.m4a',
+        outputPath: output.path,
+        cancellation: token,
+      );
+      token.cancel();
+      await expectLater(
+        future,
+        throwsA(
+          isA<MuxException>().having(
+            (e) => e.failure,
+            'failure',
+            MuxFailure.cancelled,
+          ),
+        ),
+      );
+      if (await output.exists()) await output.delete();
+      expect(await output.exists(), isFalse);
+    });
+    test(
+      'ordinary MP4 inputs can be remuxed without losing either track',
+      () async {
+        final first = '${temp.path}/first.mp4';
+        final second = '${temp.path}/second.mp4';
+        await muxer.merge(
           videoPath: '${fixtures.path}/h264.m4s',
           audioPath: '${fixtures.path}/audio.m4a',
-          outputPath: output.path,
-          cancellation: token,
+          outputPath: first,
+          cancellation: MuxCancellation(),
         );
-        token.cancel();
+        await muxer.merge(
+          videoPath: first,
+          audioPath: first,
+          outputPath: second,
+          cancellation: MuxCancellation(),
+        );
+        if (ffprobe != null) {
+          for (final track in ['v:0', 'a:0']) {
+            _compare(
+              await _packets(ffprobe, first, track),
+              await _packets(ffprobe, second, track),
+            );
+          }
+        }
+      },
+    );
+    test('invalid input fails and never overwrites an input', () async {
+      final bad = File('${temp.path}/bad.m4s');
+      await bad.writeAsBytes([1, 2, 3]);
+      for (final output in [bad.path, '${temp.path}/output.mp4']) {
         await expectLater(
-          future,
-          throwsA(
-            isA<MuxException>().having(
-              (e) => e.failure,
-              'failure',
-              MuxFailure.cancelled,
-            ),
+          muxer.merge(
+            videoPath: bad.path,
+            audioPath: '${fixtures.path}/audio.m4a',
+            outputPath: output,
+            cancellation: MuxCancellation(),
           ),
+          throwsA(isA<MuxException>()),
         );
-        if (await output.exists()) await output.delete();
-        expect(await output.exists(), isFalse);
-      });
-      test(
-        'ordinary MP4 inputs can be remuxed without losing either track',
-        () async {
-          final first = '${temp.path}/first.mp4';
-          final second = '${temp.path}/second.mp4';
-          await muxer.merge(
+        expect(await bad.readAsBytes(), [1, 2, 3]);
+      }
+    });
+    test('concurrent merges own separate contexts and cancellation', () async {
+      await Future.wait([
+        for (var i = 0; i < 3; i++)
+          muxer.merge(
             videoPath: '${fixtures.path}/h264.m4s',
             audioPath: '${fixtures.path}/audio.m4a',
-            outputPath: first,
+            outputPath: '${temp.path}/$i.mp4',
             cancellation: MuxCancellation(),
-          );
-          await muxer.merge(
-            videoPath: first,
-            audioPath: first,
-            outputPath: second,
-            cancellation: MuxCancellation(),
-          );
-          if (ffprobe != null) {
-            for (final track in ['v:0', 'a:0']) {
-              _compare(
-                await _packets(ffprobe, first, track),
-                await _packets(ffprobe, second, track),
-              );
-            }
-          }
-        },
-      );
-      test('invalid input fails and never overwrites an input', () async {
-        final bad = File('${temp.path}/bad.m4s');
-        await bad.writeAsBytes([1, 2, 3]);
-        for (final output in [bad.path, '${temp.path}/output.mp4']) {
-          await expectLater(
-            muxer.merge(
-              videoPath: bad.path,
-              audioPath: '${fixtures.path}/audio.m4a',
-              outputPath: output,
-              cancellation: MuxCancellation(),
-            ),
-            throwsA(isA<MuxException>()),
-          );
-          expect(await bad.readAsBytes(), [1, 2, 3]);
-        }
-      });
-      test(
-        'concurrent merges own separate contexts and cancellation',
-        () async {
-          await Future.wait([
-            for (var i = 0; i < 3; i++)
-              muxer.merge(
-                videoPath: '${fixtures.path}/h264.m4s',
-                audioPath: '${fixtures.path}/audio.m4a',
-                outputPath: '${temp.path}/$i.mp4',
-                cancellation: MuxCancellation(),
-              ),
-          ]);
-          expect(await temp.list().length, 3);
-        },
-      );
-    },
-    skip: library == null ? 'Set BILI_MUX_LIBRARY to run native tests' : false,
-  );
+          ),
+      ]);
+      expect(await temp.list().length, 3);
+    });
+  }, skip: library == null ? 'Set BILI_MUX_LIBRARY to run native tests' : false);
 }
 
 Future<List<Map<String, Object?>>> _packets(
@@ -217,13 +219,26 @@ double _time(Map<String, Object?> packet, String key) {
 
 void _compare(
   List<Map<String, Object?>> before,
-  List<Map<String, Object?>> after,
-) {
+  List<Map<String, Object?>> after, {
+  MuxContainer container = MuxContainer.mp4,
+}) {
   expect(after.length, before.length);
   expect(after.map((e) => e['data_hash']), before.map((e) => e['data_hash']));
   for (var i = 0; i < before.length; i++) {
-    for (final key in ['pts_time', 'dts_time', 'duration_time']) {
-      expect(_time(after[i], key), closeTo(_time(before[i], key), 0.0001));
+    // Matroska stores presentation timestamps at millisecond precision and
+    // does not store B-frame decode timestamps; packet data/order stay exact.
+    for (final key in [
+      'pts_time',
+      if (container == MuxContainer.mp4) 'dts_time',
+      'duration_time',
+    ]) {
+      expect(
+        _time(after[i], key),
+        closeTo(
+          _time(before[i], key),
+          container == MuxContainer.mkv ? 0.0011 : 0.0001,
+        ),
+      );
     }
   }
 }

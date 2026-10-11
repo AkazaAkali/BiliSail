@@ -1,15 +1,15 @@
 # bili_mux
 
-下载完成后的本地 MP4 流复制组件，与 `bili_player` 的 libmpv/FFmpeg 隔离。
+下载完成后的本地 MP4 / MKV 流复制组件，与 `bili_player` 的 libmpv/FFmpeg 隔离。
 首批打包 Windows x64、Android arm64、macOS arm64；Linux x64 仅用于 CI 原生回归。
 
 ## 原生来源与构建
 
 - FFmpeg 固定 tag [`n9.0.2`](https://github.com/FFmpeg/FFmpeg/tree/n9.0.2)。
 - [源码归档](https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/refs/tags/n9.0.2) SHA-256：`6e374ed621e48faa40639307dff48ba6fe574a509977956d2cce9669b7cc27e9`。
-- [构建脚本](tool/build.sh)只启用 MOV/MP4 读取、MP4 写入、本地文件协议和必要的码流解析；无编码器、解码器、网络、滤镜或外部编解码库。自动依赖以 `configure.log` 为准。
+- [构建脚本](tool/build.sh)只启用 MOV/MP4 / Matroska 读取、MP4 / Matroska 写入、本地文件协议和必要的码流解析；无编码器、解码器、网络、滤镜或外部编解码库。自动依赖以 `configure.log` 为准。
 - 构建报告 LGPL 2.1 or later，原文见 [LICENSE-FFmpeg.txt](LICENSE-FFmpeg.txt)。原生包装代码为本项目独立实现，没有复制上游 `remuxing.c`；封装 API 的职责参考[官方示例](https://ffmpeg.org/doxygen/trunk/remuxing_8c-example.html)。
-- 手写 ABI 1 绑定对应 [bili_mux.h](native/bili_mux.h)，不使用生成器，也不对外暴露 FFmpeg 结构体。仅导出 `bili_mux_*`，其他符号隐藏，Android/Linux 额外采用本库内部符号绑定。
+- 手写 ABI 2 绑定对应 [bili_mux.h](native/bili_mux.h)，不使用生成器，也不对外暴露 FFmpeg 结构体。仅导出 `bili_mux_*`，其他符号隐藏，Android/Linux 额外采用本库内部符号绑定。
 
 在仓库根目录执行，下列命令仅构建组件；首次下载约 17 MB 的源码归档，缓存于 `build/download_mux`。生成的 `native/prebuilt` 不提交 Git。修改包装代码后也需重新执行。
 
@@ -34,8 +34,9 @@ macOS 也可直接执行 `bash packages/bili_mux/tool/build.sh macos-arm64`。
 
 ## 行为与回归
 
-两个已校验输入 → MP4 临时输出 → 重新读取输出核对两轨逐包内容/数量 → 成功返回。
-不对音视频分别归零；保留压缩数据、编码参数、共享时间轴和 B 帧 PTS/DTS。
+两个已校验输入 → 显式指定 MP4 / MKV 临时输出 → 重新读取输出核对两轨逐包内容/数量 → 成功返回。
+不对音视频分别归零；保留压缩数据、编码参数和共享时间轴。MP4 保留 B 帧 PTS/DTS；MKV 采用容器的毫秒时间基，不存独立 DTS，逐包内容/顺序和音画相对偏移继续校验。
+AV1 分片若仅在数据包中携带序列头，MKV 写头前通过已有 parser/extradata filter 做本地探测（`probesize` 8 MiB、`max_probe_packets` 256、`max_analyze_duration` 5 秒）；未编入解码器。ABI 2 将容器参数独立于临时文件后缀，旧 ABI 1 资产不可用于新绑定，需重新构建组件。
 内存只持有两条待交错写入的数据包，原生任务有 3 小时 deadline。
 调用方在 worker isolate 执行同步封装，只在调用 isolate 读取原子进度与发送取消；销毁前等待 worker 返回，所有文件句柄已关闭。
 取消后的临时输出清理、文件 SHA-256、原子发布、manifest/SQLite 提交和源文件清理由下载仓储负责。
@@ -49,5 +50,5 @@ cd packages/bili_mux
 flutter test
 ```
 
-`ffprobe` 只用作测试 oracle，不进入应用资产；手动回归使用与组件一致的 FFmpeg `9.0.2`，旧版本可能遗漏 AV1 分片输入的 `duration_time`。CI 在组件构建后运行 [build-test-ffprobe.sh](tool/build-test-ffprobe.sh)，从同一份已校验源码构建仅供测试的 ffprobe，不使用系统包中的版本。提交的[合成样片](test/fixtures/README.md)覆盖 H.264/HEVC/AV1 + AAC、B 帧、250 ms 音频偏移和 UTF-8 文件路径；检查数据包 SHA-256、数量、PTS/DTS、时长与相对起始偏移，以及取消、输入错误和并发。
+`ffprobe` 只用作测试 oracle，不进入应用资产；手动回归使用与组件一致的 FFmpeg `9.0.2`，旧版本可能遗漏 AV1 分片输入的 `duration_time`。CI 在组件构建后运行 [build-test-ffprobe.sh](tool/build-test-ffprobe.sh)，从同一份已校验源码构建仅供测试的 ffprobe，不使用系统包中的版本。提交的[合成样片](test/fixtures/README.md)覆盖 H.264/HEVC/AV1 + AAC、B 帧、250 ms 音频偏移和 UTF-8 文件路径；检查数据包 SHA-256、数量、PTS、时长与相对起始偏移；MP4 额外检查 DTS，MKV 的时间比较允许 1.1 ms 容器量化误差，以及取消、输入错误和并发。
 Windows 测试与 Android ELF 构建不替代 Android/macOS 实机或真实 DASH 长视频验收。

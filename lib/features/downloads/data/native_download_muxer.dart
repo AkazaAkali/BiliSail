@@ -3,6 +3,7 @@ import 'package:bili_mux/bili_mux.dart';
 import '../../../domain/app_failure.dart';
 import '../../../domain/request_cancellation.dart';
 import '../domain/download_muxer.dart';
+import '../domain/download_models.dart';
 
 final class NativeDownloadMuxer implements DownloadMuxer {
   NativeDownloadMuxer({NativeMuxer? native})
@@ -15,6 +16,7 @@ final class NativeDownloadMuxer implements DownloadMuxer {
     required String videoPath,
     required String audioPath,
     required String outputPath,
+    required DownloadOutput output,
     required RequestCancellation cancellation,
     required void Function(double) onProgress,
   }) async {
@@ -30,6 +32,14 @@ final class NativeDownloadMuxer implements DownloadMuxer {
         videoPath: videoPath,
         audioPath: audioPath,
         outputPath: outputPath,
+        container: switch (output) {
+          DownloadOutput.mp4 => MuxContainer.mp4,
+          DownloadOutput.mkv => MuxContainer.mkv,
+          DownloadOutput.separate => throw ArgumentError.value(
+            output,
+            'output',
+          ),
+        },
         cancellation: token,
         onProgress: onProgress,
       );

@@ -163,8 +163,7 @@ final class SqliteDownloadRepository implements DownloadRepository {
     bool verifyHashes = false,
   }) async {
     try {
-      if (task.selection.output == DownloadOutput.mp4 &&
-          task.mergedMedia != null) {
+      if (task.selection.output.isMerged && task.mergedMedia != null) {
         if (await _files.verifyMerged(task, verifyHash: verifyHashes)) {
           if (await _files.verifyCompleted(task, verifyHashes: verifyHashes)) {
             return task.copyWith(
@@ -255,7 +254,7 @@ final class SqliteDownloadRepository implements DownloadRepository {
     if (selection.quality <= 0) {
       throw ArgumentError.value(selection.quality, 'quality');
     }
-    if (selection.output == DownloadOutput.mp4 && !_muxer.available) {
+    if (selection.output.isMerged && !_muxer.available) {
       throw const AppFailure(AppFailureKind.storage, '当前无法合并音视频，请选择分轨保存');
     }
     final unique = <String, DownloadItem>{};
@@ -364,7 +363,7 @@ final class SqliteDownloadRepository implements DownloadRepository {
   Future<void> _runTask(String id, _Run run) async {
     try {
       var task = _tasks[id]!;
-      if (task.selection.output == DownloadOutput.mp4 &&
+      if (task.selection.output.isMerged &&
           (await _files.verifyMerged(task) ||
               task.tracks.length == 2 && await _verifiedTracks(task))) {
         if (!_valid(id, run)) return;
@@ -511,8 +510,7 @@ final class SqliteDownloadRepository implements DownloadRepository {
     task = await _stage(task, DownloadStatus.verifying);
     if (!_valid(id, run)) return;
     final reusedOutput =
-        task.selection.output == DownloadOutput.mp4 &&
-        await _files.verifyMerged(task);
+        task.selection.output.isMerged && await _files.verifyMerged(task);
     if (!reusedOutput && !await _verifiedTracks(task)) {
       throw const AppFailure(AppFailureKind.storage, '媒体文件校验失败');
     }
@@ -539,16 +537,20 @@ final class SqliteDownloadRepository implements DownloadRepository {
     }
     if (!_valid(id, run)) return;
     task = _tasks[id]!.copyWith(warnings: warnings, updatedAt: _clock());
-    if (task.selection.output == DownloadOutput.mp4 && !reusedOutput) {
+    if (task.selection.output.isMerged && !reusedOutput) {
       task = await _stage(task, DownloadStatus.muxing);
       if (!_valid(id, run)) return;
-      final output = await _files.taskFile(task, 'media.mp4.part');
+      final output = await _files.taskFile(
+        task,
+        '${task.selection.output.fileName}.part',
+      );
       try {
         if (await output.exists()) await output.delete();
         await _muxer.merge(
           videoPath: (await _files.taskFile(task, 'video.m4s')).path,
           audioPath: (await _files.taskFile(task, 'audio.m4s')).path,
           outputPath: output.path,
+          output: task.selection.output,
           cancellation: run.cancel,
           onProgress: (progress) {
             if (!_valid(id, run)) return;
@@ -1092,6 +1094,9 @@ DownloadTask _decodeTask(String text) {
     final selection = value['selection'] as Map<String, dynamic>;
     final tracks = value['tracks'] as List<dynamic>;
     final merged = value['mergedMedia'] as Map<String, dynamic>?;
+    final output = selection['output'] == null
+        ? DownloadOutput.separate
+        : DownloadOutput.values.byName(selection['output'] as String);
     final kind = AppFailureKind.values
         .where((x) => x.name == value['failureKind'])
         .firstOrNull;
@@ -1129,13 +1134,12 @@ DownloadTask _decodeTask(String text) {
         codec: VideoCodecPreference.values.byName(selection['codec'] as String),
         includeDanmaku: selection['includeDanmaku'] as bool,
         includeSubtitles: selection['includeSubtitles'] as bool,
-        output: selection['output'] == null
-            ? DownloadOutput.separate
-            : DownloadOutput.values.byName(selection['output'] as String),
+        output: output,
       ),
       mergedMedia: merged == null
           ? null
           : DownloadMergedMedia(
+              output: output,
               bytes: merged['bytes'] as int,
               sha256: merged['sha256'] as String,
             ),
@@ -1175,6 +1179,7 @@ final class _UnavailableDownloadMuxer implements DownloadMuxer {
     required String videoPath,
     required String audioPath,
     required String outputPath,
+    required DownloadOutput output,
     required RequestCancellation cancellation,
     required void Function(double) onProgress,
   }) async {

@@ -757,7 +757,8 @@ class PlaybackSession extends ChangeNotifier {
                       MediaTrack(uri: videoUri, requestPolicy: policy),
                       isLive: true,
                     )
-                  : resolved.kind == PlaybackMediaKind.liveFlv
+                  : resolved.kind == PlaybackMediaKind.liveFlv ||
+                        resolved.kind == PlaybackMediaKind.progressive
                   ? ProgressiveSource(
                       MediaTrack(uri: videoUri, requestPolicy: policy),
                     )

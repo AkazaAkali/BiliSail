@@ -56,3 +56,27 @@ flutter build windows --release
 Windows 需要 MSYS2 UCRT64 GCC/G++、make 等工具；当前主机已有且已验证。Android 使用同一脚本的 `android-arm64` 目标和固定 NDK；macOS 在 Apple Silicon/Xcode 主机运行 `macos-arm64`。原生产物位于忽略目录，修改原生源码或新 checkout 后需重新准备。`tool/build-release.ps1` 已自动执行准备。
 
 待用户实测：实际 Bilibili DASH 各编码/清晰度与 HDR、长视频/大文件、播放器 seek 和音画同步、合并阶段中断/磁盘满/休眠恢复、账号切换和删除、三端打包与安装。macOS 原生组件在本 Windows 主机未构建或运行；后台系统下载服务仍不在此功能范围内。
+
+
+## MP4 离线播放修复与 MKV（2026-10-11）
+
+合并后的本地文件原先省略 `PlaybackMedia.kind`，沿用 DASH 默认值，而 `audio = null`。`PlaybackSession` 在原生打开前拒绝缺少独立音轨的 DASH，因此显示“未取得点播音频轨道”。合并 MP4 / MKV 现在明确为 `PlaybackMediaKind.progressive`，映射到现有 `ProgressiveSource`；网络 DASH 仍要求独立音轨。修复对已有 MP4 索引生效，无需重新下载。
+
+下载窗口提供分轨／MP4／MKV 三种保存格式，默认保留分轨。任务输出方式贯穿去重、原生容器参数、临时文件名、哈希／manifest／SQLite 提交、恢复、清理和离线播放。旧分轨与 MP4 JSON/manifest 仍可读取，SQLite schema 保持 3；MKV 同样沿用合并 manifest v2，按 `media.mkv` 校验身份。
+
+原生 [bili_mux](../../packages/bili_mux/README.md) 加入 Matroska 读写；来源、许可与本地流复制职责不变，格式选项参考 [FFmpeg Matroska 文档](https://ffmpeg.org/ffmpeg-formats.html#matroska)。ABI 增至 2，显式容器参数确保 `.part` 临时文件也使用正确封装。AV1 分片缺少头部 extradata 时做有界 parser 探测；不加入解码器或转码。写入后重新核对两轨包数、顺序及哈希；MKV 不存独立 DTS，PTS/时长/音画起始偏移允许 1.1 ms 量化误差。
+
+本轮验证：
+
+| 检查 | 结果与边界 |
+| --- | --- |
+| 工作区 `tool/check.ps1 -SkipPub` | 根应用／四个包格式、分析通过；根应用 1,921、bili_api 426、bili_player 51、bili_danmaku 86、bili_mux 2 项，共 2,486 项测试通过；10 项需原生资产的用例另行启用 |
+| 提交范围 `tool/check.ps1 -EnforceLockfile` | 将暂存树提取到隔离目录，仅包含本次 MP4/MKV 修改和已提交基线；使用锁文件指定的 pub.dev 源，全项目格式、分析通过，根应用 1,895、bili_api 405、bili_player 51、bili_danmaku 86、bili_mux 2 项，共 2,439 项测试通过，五份锁文件保持不变；10 项原生用例另行启用见下项 |
+| 下载与播放会话专项 | 245 项通过；MP4/MKV 均覆盖恢复、损坏校验、失败后免重新下载重试、取消、账号切换、输出／manifest／SQLite 提交窗口，以及显式选择和单文件媒体类型；缺音轨网络 DASH 仍拒绝打开 |
+| Windows x64 原生封装 | 12 项通过；MP4/MKV 各覆盖 H.264/HEVC/AV1 + AAC、B 帧／共享时间轴、250 ms 偏移、逐包哈希／数量／时长、中文 `.part` 路径，另覆盖取消、输入错误、普通 MP4 重封装和并发；测试 oracle 为 ffprobe 9.0.2 |
+| Windows 原生离线播放 | `flutter test --no-pub integration_test/windows_downloads_test.dart -d windows` 三项通过；实际 HTTP 下载合成文件、重开 SQLite、关闭 HTTP 服务后分别播放分轨／MP4／MKV，确认音视频解码、字幕、弹幕、播放／暂停／seek，无远端重新解析或云进度调用 |
+| Android arm64 | 固定 NDK 28.2.13676358 / API 24 重建 ABI 2 原生库；AArch64、16 KiB LOAD 对齐、仅 6 个本组件导出核对通过。Debug APK 构建通过，包内 `libbili_mux.so` 与本轮重建资产 SHA-256 相同；未安装设备 |
+| Windows Release | 常规 Flutter Release 输出因运行中的程序锁住 `WebView2Loader.dll` 而失败；使用独立 CMake 目录与显式安装前缀完成 Release 构建，产物位于 `build/windows_download_mux_validation/Release/bilisail.exe`。核对程序／AOT／运行库及封装 DLL 哈希通过；未关闭或替换用户运行的版本 |
+| 文档和构建脚本 | 12 条本地链接、Bash／PowerShell 语法、`git diff --check` 通过；CI 测试用 ffprobe 配置也加入 Matroska 读取，尚未运行远端 CI |
+
+本轮 Windows 精简 DLL 为 1,499,635 字节（约 1.43 MiB），这是组件大小，不是安装包增量。Windows 实测使用合成媒体；真实 Bilibili 长视频、HDR／磁盘满／休眠恢复、Android/macOS 实机仍需单独验收。macOS 组件与应用未在本 Windows 主机构建或运行。
