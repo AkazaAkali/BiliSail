@@ -627,24 +627,25 @@ class _CommentTile extends StatelessWidget {
                 Row(
                   children: [
                     IconButton(
-                      tooltip: c.liked ? '取消点赞评论' : '点赞评论',
                       visualDensity: VisualDensity.compact,
                       onPressed: busy ? null : onLike,
                       iconSize: 16,
                       color: c.liked
                           ? theme.colorScheme.primary
                           : theme.colorScheme.outline,
-                      icon: const Icon(BiliIcons.like),
+                      icon: Icon(
+                        BiliIcons.like,
+                        semanticLabel: c.liked ? '取消点赞评论' : '点赞评论',
+                      ),
                     ),
                     Text('${c.likeCount}', style: styles.action),
                     const SizedBox(width: 12),
                     IconButton(
-                      tooltip: '回复评论',
                       visualDensity: VisualDensity.compact,
                       onPressed: busy ? null : onReply,
                       iconSize: 17,
                       color: theme.colorScheme.outline,
-                      icon: const Icon(BiliIcons.reply),
+                      icon: const Icon(BiliIcons.reply, semanticLabel: '回复评论'),
                     ),
                   ],
                 ),

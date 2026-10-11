@@ -123,10 +123,10 @@ void main() {
       expect(comments.reads, ['11']);
       expect(find.text('测试评论'), findsOneWidget);
       expect(find.textContaining('楼中楼回复'), findsOneWidget);
-      await tester.tap(find.byTooltip('点赞评论'));
+      await tester.tap(find.bySemanticsLabel('点赞评论'));
       await tester.pumpAndSettle();
       expect(comments.likes, [('11', '50', true)]);
-      await tester.tap(find.byTooltip('回复评论'));
+      await tester.tap(find.bySemanticsLabel('回复评论'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), '回复内容');
       await tester.tap(find.text('发布'));

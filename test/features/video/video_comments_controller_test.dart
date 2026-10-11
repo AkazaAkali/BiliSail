@@ -8,6 +8,7 @@ import 'package:bilisail/features/playback/application/playback_session.dart';
 import 'package:bilisail/features/playback/domain/playback_repository.dart';
 import 'package:bilisail/features/video/presentation/comment_rich_content.dart';
 import 'package:bilisail/shared/ui/app_notice.dart';
+import 'package:bilisail/shared/ui/bili_icons.dart';
 import 'package:bili_player/bili_player.dart';
 
 import '../../support/video_card_fake_engine.dart';
@@ -712,7 +713,7 @@ void main() {
     expect(find.text('回复'), findsOneWidget);
     expect(find.text('IP属地：广东'), findsOneWidget);
     expect(find.text('IP属地：上海'), findsOneWidget);
-    await tester.tap(find.byTooltip('回复评论').last);
+    await tester.tap(find.widgetWithIcon(IconButton, BiliIcons.reply).last);
     await tester.pumpAndSettle();
     expect(find.text('回复 @乙'), findsOneWidget);
     await tester.enterText(find.byType(TextField), '保留这条回复');

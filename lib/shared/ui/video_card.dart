@@ -337,7 +337,7 @@ final class _VideoCardState extends State<VideoCard> {
           ignoring: !visible,
           child: PopupMenuButton<VideoCardMenuAction>(
             key: const ValueKey('video-card-title-menu'),
-            tooltip: busy ? '操作中' : '更多操作',
+            tooltip: '',
             enabled: !busy,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 156, maxWidth: 240),
@@ -369,9 +369,12 @@ final class _VideoCardState extends State<VideoCard> {
                 ? const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      semanticsLabel: '操作中',
+                    ),
                   )
-                : const Icon(Icons.more_vert, size: 20),
+                : const Icon(Icons.more_vert, size: 20, semanticLabel: '更多操作'),
             iconSize: 20,
             style: IconButton.styleFrom(
               minimumSize: const Size(28, 28),
