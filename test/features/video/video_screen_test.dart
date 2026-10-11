@@ -27,6 +27,7 @@ import 'package:bilisail/features/video/domain/video_author_repository.dart';
 import 'package:bilisail/features/video/presentation/video_author_header.dart';
 import 'package:bilisail/features/video/domain/video_repository.dart';
 import 'package:bilisail/features/video/presentation/video_screen.dart';
+import 'package:bilisail/domain/user.dart';
 import 'package:bilisail/features/video/presentation/video_collection_panel.dart';
 import 'package:bilisail/features/video/domain/watch_later_queue.dart';
 import 'package:bilisail/features/video/presentation/watch_later_queue_panel.dart';
@@ -1151,6 +1152,154 @@ void main() {
       },
     );
   }
+  for (final width in [480.0, 1100.0]) {
+    testWidgets(
+      'related author opens space and highlights only its name at $width',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = Size(width, 800);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final operations = _RelatedCardOperations();
+        addTearDown(() => unawaited(operations.previews.close()));
+        var opened = 0;
+        var created = 0;
+        final openedUsers = <UserId>[];
+        await tester.pumpWidget(
+          _relatedCardApp(
+            operations,
+            extras: _ExtrasRepository(
+              related: const [
+                VideoSummary(
+                  id: VideoId('BV1xyz123456'),
+                  title: '相关推荐视频',
+                  coverUrl: '',
+                  author: '推荐UP',
+                  authorId: UserId('123'),
+                  duration: Duration(minutes: 2),
+                ),
+              ],
+            ),
+            onOpen: () => opened++,
+            onOpenUser: openedUsers.add,
+            playerBuilder: (_, _, _) =>
+                _TrackedPlayer(onCreate: () => created++, onDispose: () {}),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final author = find.text('推荐UP');
+        await tester.ensureVisible(author);
+        await tester.pumpAndSettle();
+        final theme = Theme.of(tester.element(author));
+        final originalColor = tester.widget<Text>(author).style?.color;
+        final authorLink = find
+            .ancestor(of: author, matching: find.byType(InkWell))
+            .first;
+        expect(tester.getRect(authorLink), tester.getRect(author));
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: const Offset(0, 0));
+        addTearDown(mouse.removePointer);
+        await mouse.moveTo(tester.getCenter(author));
+        await tester.pump();
+        expect(
+          tester.widget<Text>(author).style?.color,
+          theme.colorScheme.primary,
+        );
+        expect(
+          tester.widget<Text>(find.text('相关推荐视频')).style?.color,
+          theme.textTheme.titleSmall?.color,
+        );
+        expect(
+          tester.widget<InkWell>(authorLink).hoverColor,
+          Colors.transparent,
+        );
+        await tester.tap(author);
+        expect(openedUsers, [const UserId('123')]);
+        expect(opened, 0);
+
+        final badge = find
+            .ancestor(of: author, matching: find.byType(Row))
+            .first;
+        final icon = find
+            .descendant(of: badge, matching: find.byType(Icon))
+            .first;
+        await mouse.moveTo(tester.getCenter(icon));
+        await tester.pump();
+        expect(tester.widget<Text>(author).style?.color, originalColor);
+        await tester.tap(icon);
+        expect(opened, 1);
+        expect(openedUsers, [const UserId('123')]);
+
+        await mouse.moveTo(const Offset(0, 0));
+        Focus.of(tester.element(author)).requestFocus();
+        await tester.pump();
+        expect(
+          tester.widget<Text>(author).style?.color,
+          theme.colorScheme.primary,
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(openedUsers, [const UserId('123'), const UserId('123')]);
+        expect(opened, 1);
+        await tester.tap(find.text('相关推荐视频'));
+        expect(opened, 2);
+        expect(created, 1);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  for (final (authorId, provideNavigation) in [
+    (null, true),
+    (const UserId('0'), true),
+    (const UserId('invalid'), true),
+    (const UserId('123'), false),
+  ]) {
+    testWidgets(
+      'related author without a usable space link ($authorId, $provideNavigation)',
+      (tester) async {
+        final operations = _RelatedCardOperations();
+        addTearDown(() => unawaited(operations.previews.close()));
+        var opened = 0;
+        final openedUsers = <UserId>[];
+        await tester.pumpWidget(
+          _relatedCardApp(
+            operations,
+            extras: _ExtrasRepository(
+              related: [
+                VideoSummary(
+                  id: const VideoId('BV1xyz123456'),
+                  title: '相关推荐视频',
+                  coverUrl: '',
+                  author: '推荐UP',
+                  authorId: authorId,
+                  duration: const Duration(minutes: 2),
+                ),
+              ],
+            ),
+            onOpen: () => opened++,
+            onOpenUser: provideNavigation ? openedUsers.add : null,
+          ),
+        );
+        await tester.pumpAndSettle();
+        final author = find.text('推荐UP');
+        await tester.ensureVisible(author);
+        await tester.pumpAndSettle();
+        final originalColor = tester.widget<Text>(author).style?.color;
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: const Offset(0, 0));
+        addTearDown(mouse.removePointer);
+        await mouse.moveTo(tester.getCenter(author));
+        await tester.pump();
+        expect(tester.widget<Text>(author).style?.color, originalColor);
+        await tester.tap(author);
+        expect(openedUsers, isEmpty);
+        expect(opened, 1);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('related title tooltip only shows truncated names on hover', (
     tester,
   ) async {
@@ -1599,6 +1748,7 @@ final class _QueueAuthors extends Fake implements VideoAuthorRepository {
 Widget _relatedCardApp(
   _RelatedCardOperations operations, {
   required VoidCallback onOpen,
+  ValueChanged<UserId>? onOpenUser,
   ValueChanged<String>? onNotice,
   VideoPlayerBuilder? playerBuilder,
   VideoExtrasRepository? extras,
@@ -1626,6 +1776,7 @@ Widget _relatedCardApp(
           child: VideoScreen(
             id: const VideoId('BV1abc123456'),
             onOpenVideo: (_) => onOpen(),
+            onOpenUser: onOpenUser,
             playerBuilder: playerBuilder ?? (_, _, _) => const SizedBox(),
           ),
         ),

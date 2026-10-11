@@ -416,6 +416,7 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                                         sliver: _RelatedVideosSliver(
                                           id: widget.id,
                                           onOpenVideo: widget.onOpenVideo,
+                                          onOpenUser: widget.onOpenUser,
                                         ),
                                       ),
                                     ],
@@ -724,9 +725,14 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
 }
 
 final class _RelatedVideosSliver extends ConsumerStatefulWidget {
-  const _RelatedVideosSliver({required this.id, this.onOpenVideo});
+  const _RelatedVideosSliver({
+    required this.id,
+    this.onOpenVideo,
+    this.onOpenUser,
+  });
   final VideoId id;
   final ValueChanged<VideoSummary>? onOpenVideo;
+  final ValueChanged<UserId>? onOpenUser;
 
   @override
   ConsumerState<_RelatedVideosSliver> createState() =>
@@ -738,6 +744,7 @@ final class _RelatedVideosSliverState
   ({
     List<VideoSummary> videos,
     ValueChanged<VideoSummary>? onOpen,
+    ValueChanged<UserId>? onOpenUser,
     SliverList sliver,
   })?
   _cached;
@@ -764,9 +771,11 @@ final class _RelatedVideosSliverState
           }
           final cached = _cached;
           final onOpen = widget.onOpenVideo;
+          final onOpenUser = widget.onOpenUser;
           if (cached != null &&
               identical(cached.videos, videos) &&
-              cached.onOpen == onOpen) {
+              cached.onOpen == onOpen &&
+              cached.onOpenUser == onOpenUser) {
             return cached.sliver;
           }
           final indexes = {
@@ -784,23 +793,30 @@ final class _RelatedVideosSliverState
                 child: _RelatedVideoCard(
                   video: video,
                   onTap: onOpen == null ? null : () => onOpen(video),
+                  onOpenUser: onOpenUser,
                 ),
               );
             },
           );
           // Keep the delegate and per-row repaint boundaries through intro
           // toggles. Scrolling only creates rows in the viewport/cache extent.
-          _cached = (videos: videos, onOpen: onOpen, sliver: sliver);
+          _cached = (
+            videos: videos,
+            onOpen: onOpen,
+            onOpenUser: onOpenUser,
+            sliver: sliver,
+          );
           return sliver;
         },
       );
 }
 
 final class _RelatedVideoCard extends StatefulWidget {
-  const _RelatedVideoCard({required this.video, this.onTap});
+  const _RelatedVideoCard({required this.video, this.onTap, this.onOpenUser});
 
   final VideoSummary video;
   final VoidCallback? onTap;
+  final ValueChanged<UserId>? onOpenUser;
 
   @override
   State<_RelatedVideoCard> createState() => _RelatedVideoCardState();
@@ -809,14 +825,22 @@ final class _RelatedVideoCard extends StatefulWidget {
 final class _RelatedVideoCardState extends State<_RelatedVideoCard> {
   bool _hovered = false;
   bool _focused = false;
+  bool _authorHovered = false;
+  bool _authorFocused = false;
 
   @override
   Widget build(BuildContext context) {
     final video = widget.video;
+    final theme = Theme.of(context);
+    final authorId = video.authorId;
+    final onOpenUser = widget.onOpenUser;
+    final canOpenAuthor =
+        authorId != null && authorId.isValid && onOpenUser != null;
     return InkWell(
       onTap: widget.onTap,
       onHover: (hovered) => setState(() => _hovered = hovered),
       onFocusChange: (focused) => setState(() => _focused = focused),
+      hoverColor: Colors.transparent,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -899,12 +923,28 @@ final class _RelatedVideoCardState extends State<_RelatedVideoCard> {
                                   .onSurfaceVariant,
                             ),
                             const SizedBox(width: 3),
-                            Expanded(
-                              child: Text(
-                                video.author,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodySmall,
+                            Flexible(
+                              child: InkWell(
+                                onTap: canOpenAuthor
+                                    ? () => onOpenUser(authorId)
+                                    : null,
+                                onHover: (hovered) =>
+                                    setState(() => _authorHovered = hovered),
+                                onFocusChange: (focused) =>
+                                    setState(() => _authorFocused = focused),
+                                hoverColor: Colors.transparent,
+                                child: Text(
+                                  video.author,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color:
+                                        canOpenAuthor &&
+                                            (_authorHovered || _authorFocused)
+                                        ? theme.colorScheme.primary
+                                        : null,
+                                  ),
+                                ),
                               ),
                             ),
                           ],
