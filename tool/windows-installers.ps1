@@ -3,7 +3,7 @@ $script:WindowsWixVersion = '6.0.2'
 $script:WindowsPackagingRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../windows/packaging'))
 
 function Get-WindowsMsiVersion([string]$Version) {
-  if ($Version -cnotmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\+[1-9]\d*$') {
+  if ($Version -cnotmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\+(0|[1-9]\d*)$') {
     throw 'Version must be x.y.z+N.'
   }
   $major, $minor, $patch, $number = @($Version -split '[.+]' | ForEach-Object { [long]$_ })

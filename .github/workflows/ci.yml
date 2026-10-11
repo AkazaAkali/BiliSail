@@ -88,7 +88,7 @@ jobs:
             if (!$match.Success) { throw 'pubspec.yaml has no version.' }
             $version = $match.Groups[1].Value
           }
-          if ($version -cnotmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\+[1-9]\d*$') {
+          if ($version -cnotmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\+(0|[1-9]\d*)$') {
             throw 'Version must be x.y.z+N, for example 0.1.0+1.'
           }
           if ($env:ENABLE_ANDROID -eq 'true') {

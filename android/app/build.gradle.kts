@@ -12,10 +12,12 @@ fun compactAndroidVersionCode(versionName: String, build: Int): Int {
     val parts = versionName.split(".").map { it.toLongOrNull() }
     require(parts.all { it != null }) { "Android version component is too large." }
     val (major, minor, patch) = parts.map { requireNotNull(it) }
-    require(major <= 209999 && minor <= 9 && patch <= 9 && build in 1..99) {
-        "Android compact version requires major <= 209999, minor/patch <= 9 and build in 1..99."
+    require(major <= 209999 && minor <= 9 && patch <= 9 && build in 0..99) {
+        "Android compact version requires major <= 209999, minor/patch <= 9 and build in 0..99."
     }
-    return (major * 10000 + minor * 1000 + patch * 100 + build).toInt()
+    val code = (major * 10000 + minor * 1000 + patch * 100 + build).toInt()
+    require(code > 0) { "Android versionCode must be positive; use a nonzero version component." }
+    return code
 }
 
 require(project.findProperty("force-version-code-ignoring-abi").toString() == "true") {

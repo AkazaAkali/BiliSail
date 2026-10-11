@@ -31,7 +31,7 @@ Dart 3.13.5 内置的 [Pub 源码](https://github.com/dart-lang/pub/blob/ec276d1
 
 ## 版本与产物
 
-手动输入版本使用 Flutter 的 `x.y.z+N`，例如 `0.1.0+1`；留空取根 `pubspec.yaml`。脚本通过 `--build-name` 和 `--build-number` 传入，不改源码版本或锁文件。Windows MSIX 与 EXE Bundle 映射为 `x.y.z.N`；MSI 使用三段 `x.y.(z*1000+N)`，例如 `0.3.0+1` → `0.3.1`、`0.3.0+2` → `0.3.2`、`0.3.1+1` → `0.3.1001`。选择 Windows 时要求 `x/y <= 255`、`1 <= N <= 999`、`z*1000+N <= 65535`，版本解析阶段即拒绝超限值。MSI 只比较前三段，不能直接采用 MSIX 的第四段构建号；依据 [Microsoft ProductVersion](https://learn.microsoft.com/en-us/windows/win32/msi/productversion)。Android 保留 arm64 split APK，但在 `android/gradle.properties` 设置 `force-version-code-ignoring-abi=true`，关闭 Flutter 的 ABI 偏移。Gradle 从 `--build-name x.y.z` 与原始 `--build-number N` 计算 `versionCode = x*10000 + y*1000 + z*100 + N`，例如 `0.5.5+2` → `5502`，不再额外加 2000，也不要将已编码值传给 `--build-number`。CI 与打包脚本共用 [Android 版本校验](../../tool/android-version.ps1)，要求 `0 <= x <= 209999`、`0 <= y,z <= 9`、`1 <= N <= 99`，禁止前导零；Gradle 独立校验相同范围，直接 Flutter 构建也不能绕过数值限制。构建号满 99 后提升补丁号并重置构建号；补丁/次版本满 9 后相应提升上一段，避免进位碰撞。最大编码为 2099999999，低于 Android 上限 2100000000。打包后使用 SDK `aapt dump badging` 校验实际 APK 的 applicationId、versionName 和 versionCode；仅校验成功才将编码写入 metadata 并生成校验文件。MSIX 升级要求递增包版本并保持 identity/publisher。已有同名 tag 时拒绝附加新构建，重跑草稿遇到冲突时也需使用新版本或显式处理旧草稿。
+手动输入版本使用 Flutter 的 `x.y.z+N`，例如 `0.1.0+1`；留空取根 `pubspec.yaml`。脚本通过 `--build-name` 和 `--build-number` 传入，不改源码版本或锁文件。Windows MSIX 与 EXE Bundle 映射为 `x.y.z.N`；MSI 使用三段 `x.y.(z*1000+N)`，例如 `0.3.0+1` → `0.3.1`、`0.3.0+2` → `0.3.2`、`0.3.1+1` → `0.3.1001`。选择 Windows 时要求 `x/y <= 255`、`0 <= N <= 999`、`z*1000+N <= 65535`，版本解析阶段即拒绝超限值。MSI 只比较前三段，不能直接采用 MSIX 的第四段构建号；依据 [Microsoft ProductVersion](https://learn.microsoft.com/en-us/windows/win32/msi/productversion)。Android 保留 arm64 split APK，但在 `android/gradle.properties` 设置 `force-version-code-ignoring-abi=true`，关闭 Flutter 的 ABI 偏移。Gradle 从 `--build-name x.y.z` 与原始 `--build-number N` 计算 `versionCode = x*10000 + y*1000 + z*100 + N`，例如 `0.5.5+2` → `5502`，不再额外加 2000，也不要将已编码值传给 `--build-number`。CI 与打包脚本共用 [Android 版本校验](../../tool/android-version.ps1)，要求 `0 <= x <= 209999`、`0 <= y,z <= 9`、`0 <= N <= 99`，禁止前导零及最终编码为零（`0.0.0+0`）；Gradle 独立校验相同范围，直接 Flutter 构建也不能绕过数值限制。构建号满 99 后提升补丁号并重置构建号；补丁/次版本满 9 后相应提升上一段，避免进位碰撞。最大编码为 2099999999，低于 Android 上限 2100000000。打包后使用 SDK `aapt dump badging` 校验实际 APK 的 applicationId、versionName 和 versionCode；仅校验成功才将编码写入 metadata 并生成校验文件。MSIX 升级要求递增包版本并保持 identity/publisher。已有同名 tag 时拒绝附加新构建，重跑草稿遇到冲突时也需使用新版本或显式处理旧草稿。
 
 每个平台的 `artifacts/<target>/release/` 中包含：
 
@@ -67,7 +67,7 @@ PR 不接收长期签名 Secrets，仅通过 `-AndroidPreviewSigning` 显式启�
 
 本机打包可用 `ANDROID_KEYSTORE_PATH` 替代 Base64，但二者只能选一个，并设置同一组密码、别名、证书 SHA-256 以及 `ANDROID_HOME` 或 `ANDROID_SDK_ROOT`。私钥及密码不进入源码、产物、日志或普通配置文件；离线备份须保留 keystore 与受保护的密码。
 
-包名保持 `dev.bilisail.bilisail`。后续发布必须保持同一密钥并单调递增 `x.y.z+N` 中的 `N`，arm64 split APK 的内部版本号仍为 `N+2000`；只增加 `x.y.z` 不会增加 Android 内部版本号。旧临时 debug 签名包不能直接覆盖为不同密钥的新包，原私钥未保存时首次切换需卸载重装，卸载会影响应用私有数据。参考 [Android 签名与升级](https://developer.android.com/studio/publish/app-signing#considerations)、[Android 版本号](https://developer.android.com/studio/publish/versioning#appversioning)、[apksigner](https://developer.android.com/tools/apksigner)。
+包名保持 `dev.bilisail.bilisail`。后续发布必须保持同一密钥并递增编码后的 Android versionCode；当前使用上文的紧凑编码且禁用 ABI 偏移，不再使用旧版 `N+2000`。旧临时 debug 签名包不能直接覆盖为不同密钥的新包，原私钥未保存时首次切换需卸载重装，卸载会影响应用私有数据。参考 [Android 签名与升级](https://developer.android.com/studio/publish/app-signing#considerations)、[Android 版本号](https://developer.android.com/studio/publish/versioning#appversioning)、[apksigner](https://developer.android.com/tools/apksigner)。
 
 [签名边界检查](../../tool/test-android-signing.ps1) 已加入 `tool/check.ps1`，覆盖缺失配置、错误 Base64、预览密钥隔离、临时文件清理、调用方 keystore 保留和错误 APK 证书拒绝。实机安装与覆盖升级仍需单独验收。
 
@@ -294,3 +294,9 @@ Android 构建输出 CupertinoIcons 字体声明警告，Windows 构建输出 `f
 修复只调整测试：使用仓储已有的可注入时钟，测试服务器关闭输出缓冲，并等待客户端发布当前块的进度后才允许发送下一块。断言通过 `changes` 订阅检查首次采样为零、250 毫秒时仍为零、500 毫秒时速度为 2048 字节/秒，以及双轨完整下载后速度清零。每次状态等待有 5 秒超时，失败清理释放发送门闩；下载实现、500 毫秒采样规则和 CI 工作流保持原值。
 
 Windows x64、Flutter 3.47.6：修复后的定向用例和全部 53 项下载回归通过。完整 `tool/check.ps1 -EnforceLockfile` 通过格式、静态分析和 2360 项测试（根应用 1841、API 390、播放器 41、弹幕 86、MP4 2）；未设置 `BILI_MUX_LIBRARY` 的 7 项原生测试按既有规则跳过。五份锁文件没有变化，本节相对链接和 `git diff --check` 通过。本机没有应用构建、安装或实机下载验收；远端 CI 与三端构建以修复提交对应的工作流结果为准。
+
+## 2026-10-11：允许构建号零
+
+版本解析、Android Gradle 与 Windows MSI 校验均接受非负构建号，保留禁止前导零及平台上界。`1.0.2+0` 直接映射为 MSIX／EXE `1.0.2.0`、MSI `1.0.2000`，Android versionName 为 `1.0.2`、versionCode 为 `10200`；不附加 ABI 偏移。macOS 继续传入 build name `1.0.2` 和 build number `0`。Android 编码高于上一版 `0.5.7+5` 的 `5705`，签名配置不变。MSIX 的四段映射不变；本版本首段非零、末段为零，不代表已提交或通过 Microsoft Store 验证。
+
+边界回归覆盖 `+0`、负数、前导零及既有上界拒绝。各平台打包时核验实际包／bundle 版本，并写入 build-info；CI 构建成功与 GitHub Release 创建／发布分别核验，不能相互替代。

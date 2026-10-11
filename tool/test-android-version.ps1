@@ -14,6 +14,8 @@ function Assert-Rejected([scriptblock]$Action) {
 }
 
 Assert-Code '0.0.0+1' 1
+Assert-Code '0.5.5+0' 5500
+Assert-Code '1.0.2+0' 10200
 Assert-Code '0.5.3+7' 5307
 Assert-Code '0.5.5+2' 5502
 Assert-Code '0.5.5+99' 5599
@@ -24,12 +26,19 @@ Assert-Code '0.9.9+99' 9999
 Assert-Code '1.0.0+1' 10001
 Assert-Code '209999.9.9+99' 2099999999
 foreach ($invalid in @(
-  '0.10.0+1', '0.0.10+1', '0.5.5+100', '0.5.5+0',
+  '0.0.0+0',
+  '0.10.0+1', '0.0.10+1', '0.5.5+100', '0.5.5+00',
   '210000.0.0+1', '999999999999999999999999999999999999.0.0+1',
   '-1.0.0+1', '0.5.5+-1', '00.5.5+1', '0.05.5+1', '0.5.05+1',
   '0.5.5+01', '0.5.5', '0.5.5-rc+1', '0.5.5+2 ', ''
 )) { Assert-Rejected { Get-AndroidVersionCode $invalid } }
 if ((Get-AndroidVersionCode '0.5.5+2') -le 2007) { throw 'Cannot upgrade the historical arm64 APK.' }
+$checks++
+
+if ((Get-AndroidVersionCode '1.0.2+0') -le (Get-AndroidVersionCode '0.5.7+5')) { throw 'Cannot upgrade the previous release.' }
+$checks++
+$zeroBuild = "package: name='dev.bilisail.bilisail' versionCode='10200' versionName='1.0.2'"
+if ((ConvertFrom-AndroidApkBadging $zeroBuild '1.0.2+0') -ne 10200) { throw 'Zero-build APK rejected.' }
 $checks++
 
 $valid = "package: name='dev.bilisail.bilisail' versionCode='5502' versionName='0.5.5' platformBuildVersionName='16'"

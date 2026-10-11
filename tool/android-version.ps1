@@ -1,11 +1,13 @@
 # Shared by CI preparation, packaging and offline version-boundary checks.
 function Get-AndroidVersionCode([string]$Version) {
-  if ($Version -cnotmatch '^(0|[1-9][0-9]*)\.([0-9])\.([0-9])\+([1-9][0-9]?)$') {
-    throw 'Android version must be major.minor.patch+build: minor/patch 0..9, build 1..99.'
+  if ($Version -cnotmatch '^(0|[1-9][0-9]*)\.([0-9])\.([0-9])\+(0|[1-9][0-9]?)$') {
+    throw 'Android version must be major.minor.patch+build: minor/patch 0..9, build 0..99.'
   }
   $major = [System.Numerics.BigInteger]::Parse($Matches[1])
   if ($major -gt 209999) { throw 'Android compact versionCode must not exceed 2100000000.' }
-  return [int]($major * 10000 + [int]$Matches[2] * 1000 + [int]$Matches[3] * 100 + [int]$Matches[4])
+  $code = [int]($major * 10000 + [int]$Matches[2] * 1000 + [int]$Matches[3] * 100 + [int]$Matches[4])
+  if ($code -eq 0) { throw 'Android versionCode must be positive; use a nonzero version component.' }
+  return $code
 }
 
 function ConvertFrom-AndroidApkBadging([string]$Report, [string]$Version) {

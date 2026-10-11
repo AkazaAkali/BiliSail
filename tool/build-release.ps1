@@ -71,6 +71,15 @@ function New-SignedWindowsPackages([string]$Staging, [string]$Destination, [stri
     Invoke-BuildCommand $makePri @('new', '/pr', $Staging, '/cf', (Join-Path $repoRoot 'windows/packaging/priconfig.xml'), '/mn', (Join-Path $Staging 'AppxManifest.xml'), '/of', (Join-Path $Staging 'resources.pri'), '/o') | Out-Host
   } finally { Remove-Item -LiteralPath $resourceList }
   Invoke-BuildCommand $sdkTool.FullName @('pack', '/d', $Staging, '/p', $Destination, '/o') | Out-Host
+  $archive = [System.IO.Compression.ZipFile]::OpenRead($Destination)
+  try {
+    $reader = [System.IO.StreamReader]::new($archive.GetEntry('AppxManifest.xml').Open())
+    try { [xml]$packedManifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    if ($packedManifest.Package.Identity.Version -cne $Version.Replace('+', '.')) {
+      throw 'Packaged MSIX version does not match the requested version.'
+    }
+    Write-Output "Verified MSIX manifest version: $($packedManifest.Package.Identity.Version)" | Out-Host
+  } finally { $archive.Dispose() }
 
   $certificate = $null
   $certificateFile = $null
@@ -115,7 +124,7 @@ function New-SignedWindowsPackages([string]$Staging, [string]$Destination, [stri
   }
 }
 
-if ($Version -cnotmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\+[1-9]\d*$') {
+if ($Version -cnotmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\+(0|[1-9]\d*)$') {
   throw 'Version must be x.y.z+N, for example 0.1.0+1.'
 }
 $buildName, $buildNumber = $Version.Split('+')
@@ -197,6 +206,7 @@ try {
         if ($abis.Count -ne 1 -or $abis[0] -ne 'arm64-v8a') { throw 'APK contains unexpected native ABIs.' }
       } finally { $apk.Dispose() }
       $androidVersionCode = Confirm-AndroidApkVersion $package $Version
+      Write-Output "Verified APK manifest: versionName=$buildName, versionCode=$androidVersionCode"
       $androidCertificateSha256 = Confirm-AndroidApkSigning $package $androidSigning
       $signing = $androidSigning.Signing
     }
@@ -237,6 +247,12 @@ try {
       $staging = Join-Path $outputRoot $name
       New-Item -ItemType Directory -Path $staging -Force | Out-Null
       Invoke-BuildCommand ditto @('build/macos/Build/Products/Release/BiliSail.app', (Join-Path $staging 'BiliSail.app'))
+      $infoPlist = Join-Path $staging 'BiliSail.app/Contents/Info.plist'
+      $macosVersionName = & plutil -extract CFBundleShortVersionString raw -o - $infoPlist
+      if ($LASTEXITCODE -ne 0 -or $macosVersionName -cne $buildName) { throw 'macOS bundle version name does not match.' }
+      $macosBuildNumber = & plutil -extract CFBundleVersion raw -o - $infoPlist
+      if ($LASTEXITCODE -ne 0 -or $macosBuildNumber -cne $buildNumber) { throw 'macOS bundle build number does not match.' }
+      Write-Output "Verified macOS bundle: versionName=$macosVersionName, buildNumber=$macosBuildNumber"
       $macosValidation = Test-MacOSReleaseApp (Join-Path $staging 'BiliSail.app') (Join-Path $outputRoot 'validation')
       Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md' -Destination $staging
       # A root-level Applications link gives Finder a drag-to-install destination.
@@ -266,6 +282,9 @@ try {
     signing = $signing
     macosValidation = $macosValidation
     windowsMsiVersion = if ($Target -eq 'windows-x64') { $msiVersion } else { $null }
+    windowsMsixVersion = if ($Target -eq 'windows-x64') { $Version.Replace('+', '.') } else { $null }
+    macosVersionName = if ($Target -eq 'macos-arm64') { $macosVersionName } else { $null }
+    macosBuildNumber = if ($Target -eq 'macos-arm64') { $macosBuildNumber } else { $null }
     windowsInstallerToolVersion = if ($Target -eq 'windows-x64') { $script:WindowsWixVersion } else { $null }
     runnerImage = $env:ImageVersion
     pubspecLockSha256 = $lockHash.ToLowerInvariant()
