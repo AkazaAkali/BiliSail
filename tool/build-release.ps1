@@ -9,6 +9,7 @@ $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 . (Join-Path $PSScriptRoot 'android-signing.ps1')
 . (Join-Path $PSScriptRoot 'android-version.ps1')
 . (Join-Path $PSScriptRoot 'windows-installers.ps1')
+. (Join-Path $PSScriptRoot 'windows-msix-identity.ps1')
 . (Join-Path $PSScriptRoot 'macos-release-validation.ps1')
 
 function Invoke-BuildCommand([string]$Executable, [string[]]$Parameters) {
@@ -27,9 +28,9 @@ function New-SignedWindowsPackages([string]$Staging, [string]$Destination, [stri
   $makePri = Join-Path $sdkTool.DirectoryName 'makepri.exe'
   if (!(Test-Path -LiteralPath $makePri)) { throw 'Windows SDK MakePri.exe was not found.' }
   [xml]$manifest = Get-Content 'windows/packaging/AppxManifest.xml' -Raw
-  $publisher = if ($env:MSIX_PUBLISHER) { $env:MSIX_PUBLISHER } else { $manifest.Package.Identity.Publisher }
   $manifest.Package.Identity.Version = $Version.Replace('+', '.')
-  $manifest.Package.Identity.Publisher = $publisher
+  Confirm-WindowsMsixIdentity $manifest $Version | Out-Null
+  $publisher = [string]$manifest.Package.Identity.Publisher
   $manifest.Save((Join-Path $Staging 'AppxManifest.xml'))
 
   # MSIX taskbar icons use manifest resources rather than the EXE's ICO.
@@ -75,10 +76,11 @@ function New-SignedWindowsPackages([string]$Staging, [string]$Destination, [stri
   try {
     $reader = [System.IO.StreamReader]::new($archive.GetEntry('AppxManifest.xml').Open())
     try { [xml]$packedManifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
-    if ($packedManifest.Package.Identity.Version -cne $Version.Replace('+', '.')) {
-      throw 'Packaged MSIX version does not match the requested version.'
-    }
-    Write-Output "Verified MSIX manifest version: $($packedManifest.Package.Identity.Version)" | Out-Host
+    $script:windowsMsixIdentity = Confirm-WindowsMsixIdentity $packedManifest $Version
+    $familyName = Get-WindowsMsixFamilyName $script:windowsMsixIdentity.name $script:windowsMsixIdentity.publisher
+    if ($familyName -cne 'JerryHsu.BiliSail_e5wcspfxwa6kj') { throw "Unexpected MSIX package family: $familyName" }
+    $script:windowsMsixIdentity['packageFamilyName'] = $familyName
+    Write-Output "Verified MSIX identity: $($script:windowsMsixIdentity | ConvertTo-Json -Compress)" | Out-Host
   } finally { $archive.Dispose() }
 
   $certificate = $null
@@ -95,7 +97,7 @@ function New-SignedWindowsPackages([string]$Staging, [string]$Destination, [stri
       $imported = @(Import-PfxCertificate -FilePath $certificateFile -Password $password -CertStoreLocation Cert:\CurrentUser\My)
       $createdCertificates = @($imported | Where-Object { $_.Thumbprint -notin $existingThumbprints })
       $certificate = $imported | Where-Object { $_.HasPrivateKey -and $_.Subject -ceq $publisher } | Select-Object -First 1
-      if (!$certificate) { throw 'The signing PFX must contain a private key matching MSIX_PUBLISHER.' }
+      if (!$certificate) { throw "The signing PFX Subject must match the fixed Store Publisher: $publisher. Update the signing certificate; do not change the package identity." }
       $signing = 'configured-certificate'
     } else {
       if ($env:MSIX_CERTIFICATE_PASSWORD) { throw 'MSIX signing secrets are incomplete.' }
@@ -105,6 +107,7 @@ function New-SignedWindowsPackages([string]$Staging, [string]$Destination, [stri
     }
     if ($certificate.NotAfter -le (Get-Date)) { throw 'The MSIX signing certificate has expired.' }
     Invoke-BuildCommand $signTool @('sign', '/fd', 'SHA256', '/sha1', $certificate.Thumbprint, '/s', 'My', $Destination) | Out-Host
+    Confirm-WindowsMsixSignature $Destination $certificate.Thumbprint
     Invoke-BuildCommand $signTool @('sign', '/fd', 'SHA256', '/sha1', $certificate.Thumbprint, '/s', 'My', $msi) | Out-Host
     $unsignedBundle = Join-Path $WorkingDirectory 'unsigned-setup.exe'
     New-WindowsBundle $Wix $msi $unsignedBundle $Version
@@ -283,6 +286,7 @@ try {
     macosValidation = $macosValidation
     windowsMsiVersion = if ($Target -eq 'windows-x64') { $msiVersion } else { $null }
     windowsMsixVersion = if ($Target -eq 'windows-x64') { $Version.Replace('+', '.') } else { $null }
+    windowsMsixIdentity = if ($Target -eq 'windows-x64') { $script:windowsMsixIdentity } else { $null }
     macosVersionName = if ($Target -eq 'macos-arm64') { $macosVersionName } else { $null }
     macosBuildNumber = if ($Target -eq 'macos-arm64') { $macosBuildNumber } else { $null }
     windowsInstallerToolVersion = if ($Target -eq 'windows-x64') { $script:WindowsWixVersion } else { $null }

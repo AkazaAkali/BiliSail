@@ -101,7 +101,7 @@ macOS 产物为 `BiliSail-<version>-macos-arm64.dmg`。脚本先使用 `ditto` �
 
 Windows 打包在签名之后运行 [实际产物检查](../../tool/test-windows-installer-packages.ps1)，反编译 MSI 并提取 EXE 的 BA 与 Burn manifest，验证目录页、浏览事件、双向向导跳转、路径持久化、x64 注册表读取及 EXE → MSI 参数传递；失败时 CI 不上传安装包。此检查只读取安装包，不在 CI 主机安装应用。配置依据 [WiX 对话库](https://docs.firegiant.com/wix/tools/wixext/wixui/)、[Burn 标准界面属性](https://docs.firegiant.com/wix/schema/bal/wixstandardbootstrapperapplication/) 与 [Windows Installer 对话事件顺序](https://learn.microsoft.com/en-us/windows/win32/msi/controlevent-table)。
 
-三种安装包共用既有 `MSIX_CERTIFICATE_BASE64` / `MSIX_CERTIFICATE_PASSWORD` 与 `MSIX_PUBLISHER`，也共用无 Secrets 时的临时测试证书。先签 MSIX 和 MSI，再构建 EXE，按 WiX 的 detach → 签 engine → reattach → 签 Bundle 顺序完成 EXE 签名；公钥仍通过包旁 `.cer` 导出，私钥只在既有临时签名作用域存在。每个安装包均附独立 SHA-256；任一步失败均不进入上传步骤。自签名证书不代表受系统默认信任的 Authenticode 发行身份。参见 [WiX Bundle 签名](https://docs.firegiant.com/wix/tools/signing/)。
+三种安装包共用既有 `MSIX_CERTIFICATE_BASE64` / `MSIX_CERTIFICATE_PASSWORD`，证书 Subject 必须匹配固定的商店 Publisher；无 Secrets 时共用该 Subject 的临时测试证书。先签 MSIX 和 MSI，再构建 EXE，按 WiX 的 detach → 签 engine → reattach → 签 Bundle 顺序完成 EXE 签名；公钥仍通过包旁 `.cer` 导出，私钥只在既有临时签名作用域存在。每个安装包均附独立 SHA-256；任一步失败均不进入上传步骤。自签名证书不代表受系统默认信任的 Authenticode 发行身份。参见 [WiX Bundle 签名](https://docs.firegiant.com/wix/tools/signing/)。
 
 WiX 源码采用 MS-RL，固定版本来源和内嵌 Burn 的许可见 [第三方说明](../../THIRD_PARTY_NOTICES.md)。WiX v6 的二进制发布同时适用 [Open Source Maintenance Fee 条款](https://docs.firegiant.com/wix/osmf/)；本工程不引入 FireGiant 商业扩展。`tool/check.ps1` 增加 [Windows 版本检查](../../tool/test-windows-installers.ps1)，在 Ubuntu 和 Windows 均验证补丁／构建号顺序与超限拒绝。
 
@@ -118,7 +118,7 @@ WiX 源码采用 MS-RL，固定版本来源和内嵌 Burn 的许可见 [第三�
 | `MSIX_CERTIFICATE_BASE64` | 带私钥的代码签名 PFX 的 Base64 |
 | `MSIX_CERTIFICATE_PASSWORD` | 该 PFX 的密码；无密码 PFX 可留空 |
 
-仓库 Actions Variable `MSIX_PUBLISHER` 可指定证书的完整 Subject；未设置时，CI 与发布脚本直接使用源 manifest 的 Publisher（当前为 `CN=D34F8E82-088B-4DC8-9296-620B8683A539`）。若设置该变量，打包时会覆盖 manifest Publisher；使用上述包身份时需将变量与签名证书 Subject 同步为相同值。PR 构建始终使用临时测试证书，避免向 PR 提供正式私钥。已配置 PFX 无效、密码错误、证书过期或 publisher 不匹配时失败，不降级成测试签名。当前未接入可信时间戳；正式发行还需完善时间戳、证书续期与升级验证。参见 [Microsoft MSIX 证书](https://learn.microsoft.com/en-us/windows/msix/package/create-certificate-package-signing)、[SignTool 签名](https://learn.microsoft.com/en-us/windows/msix/package/sign-app-package-using-signtool)。
+商店身份固定为源 manifest 中的 Name、Publisher 和 PublisherDisplayName，并在打包前后与确认的 Partner Center 身份比对。旧 Actions Variable `MSIX_PUBLISHER` 不再注入或覆盖包身份，可以移除。已配置 PFX 的 Subject 必须为 `CN=D34F8E82-088B-4DC8-9296-620B8683A539`；旧 `CN=BiliSail` 证书需要更新，否则签名阶段明确失败。PR 构建始终使用临时测试证书，避免向 PR 提供正式私钥。已配置 PFX 无效、密码错误、证书过期或 publisher 不匹配时失败，不降级成测试签名。当前未接入可信时间戳；正式发行还需完善时间戳、证书续期与升级验证。参见 [Microsoft MSIX 证书](https://learn.microsoft.com/en-us/windows/msix/package/create-certificate-package-signing)、[SignTool 签名](https://learn.microsoft.com/en-us/windows/msix/package/sign-app-package-using-signtool)。
 
 macOS ad-hoc 签名不能替代 Developer ID / notarization。资源许可范围沿用 [第三方说明](../../THIRD_PARTY_NOTICES.md)，公开发布前仍需完成其待核实项。
 
@@ -302,3 +302,11 @@ Windows x64、Flutter 3.47.6：修复后的定向用例和全部 53 项下载回
 边界回归覆盖 `+0`、负数、前导零及既有上界拒绝。各平台打包时核验实际包／bundle 版本，并写入 build-info；CI 构建成功与 GitHub Release 创建／发布分别核验，不能相互替代。
 
 Flutter 3.47.6 会将 Android 的 `--build-number 0` 归一化为 `1`（[固定 SDK 实现](https://github.com/flutter/flutter/blob/5fc346839b/packages/flutter_tools/lib/src/build_info.dart)）。因此 Gradle 优先从打包脚本已有的 `--dart-define=BILISAIL_RELEASE_VERSION=x.y.z+N` 读取原始构建号，校验名称一致后按同一公式编码；没有该 define 时保持 Flutter 默认来源。自行执行 Flutter 构建 `+0` 时也必须传入这个完整版本 define。首次 `1.0.2+0` CI 的 APK 校验已拦截该归一化造成的错误，新增 `10201` 拒绝回归，禁止将偏一的包上传。
+
+## 2026-10-12：固定 Microsoft Store 包身份
+
+用户确认的商店字段为 Name `JerryHsu.BiliSail`、Publisher `CN=D34F8E82-088B-4DC8-9296-620B8683A539`、PublisherDisplayName `Jerry Hsu`，目标 PFN 为 `JerryHsu.BiliSail_e5wcspfxwa6kj`。原模板已包含正确值，但 Actions 变量 `MSIX_PUBLISHER=CN=BiliSail` 在打包时覆盖 Publisher，导致 Store 同时报 Publisher 与 PFN 错误。
+
+现在 CI 不再传入该变量，打包脚本不再接受覆盖，并通过 [身份校验](../../tool/windows-msix-identity.ps1) 检查源模板与实际 MSIX manifest 的三个身份字段及版本；实际读取的字段写入 `build-info.json` 的 `windowsMsixIdentity`。Windows 打包时通过系统 `PackageFamilyNameFromId` 从实际 Name 与 Publisher 派生 PFN，并与目标值比对，记录到 metadata；不向 manifest 添加虚构 PFN 字段。签名后校验包内 PKCS#7/CMS 的数学签名及签名证书与所选证书一致；该校验不声明系统信任链通过，也不修改证书信任区。回归覆盖旧变量隔离、错误 Publisher／Name／显示名／版本拒绝，并接入 `tool/check.ps1`。
+
+已配置签名证书仍须匹配固定 Publisher，不自动替换密钥、不降级签名；需要维护者在 Actions Secrets 安全更新 PFX 及对应密码。身份变化后的 MSIX 不应视为原错误 PFN 侧载包的直接升级。版本号、runFullTrust 与依赖不变；本修改不自动提交 Store，也不替换已有 Release 资产。
