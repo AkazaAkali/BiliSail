@@ -102,10 +102,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      if (width < 700) {
-        await tester.tap(find.byTooltip('展开影视信息'));
-        await tester.pumpAndSettle();
-      }
+      expect(find.byTooltip('收起影视信息'), findsOneWidget);
       final tiles = find.byWidgetPredicate(
         (widget) =>
             widget is InkWell &&
@@ -249,10 +246,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        if (width < 700) {
-          await tester.tap(find.byTooltip('展开影视信息'));
-          await tester.pumpAndSettle();
-        }
+        expect(find.byTooltip('收起影视信息'), findsOneWidget);
         final player = tester.state(find.byType(_TrackedPlayer));
         final intro = tester
             .widget<CustomScrollView>(find.byKey(const ValueKey('pgc-intro')))
@@ -319,11 +313,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        final expand = find.byTooltip('展开影视信息');
-        if (expand.evaluate().isNotEmpty) {
-          await tester.tap(expand);
-          await tester.pumpAndSettle();
-        }
+        expect(find.byTooltip('收起影视信息'), findsOneWidget);
         await tester.tap(find.byKey(const Key('keyboard-editor')));
         await tester.pumpAndSettle();
         final focus = FocusManager.instance.primaryFocus;
@@ -392,10 +382,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      if (width < 700) {
-        await tester.tap(find.byTooltip('展开影视信息'));
-        await tester.pumpAndSettle();
-      }
+      expect(find.byTooltip('收起影视信息'), findsOneWidget);
       expect(commentBuilds, 0);
       final pager = find.byKey(const ValueKey('pgc-info-swipe'));
       final player = tester.state(find.byType(_TrackedPlayer));
@@ -898,11 +885,9 @@ void main() {
     await tester.pumpAndSettle();
     tester.view.physicalSize = const Size(480, 800);
     await tester.pumpAndSettle();
-    expect(find.byTooltip('展开影视信息'), findsOneWidget);
+    expect(find.byTooltip('收起影视信息'), findsOneWidget);
     expect(created, 1);
     expect(disposed, 0);
-    await tester.tap(find.byTooltip('展开影视信息'));
-    await tester.pumpAndSettle();
     expect(find.text('评论区已接入'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('pgc-tab-简介')));
     await tester.pumpAndSettle();

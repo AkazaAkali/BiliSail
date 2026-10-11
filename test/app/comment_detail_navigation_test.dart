@@ -299,10 +299,6 @@ Future<({GoRouter router, _Comments repo})> _mount(
   await tester.pumpAndSettle();
   router.go(pgc ? '/pgc/1' : '/video/BV1ab411c7mD');
   await tester.pumpAndSettle();
-  if (pgc && platform == TargetPlatform.android) {
-    await tester.tap(find.byTooltip('展开影视信息'));
-    await tester.pumpAndSettle();
-  }
   await tester.tap(find.text('评论'));
   await tester.pumpAndSettle();
   return (router: router, repo: repo);

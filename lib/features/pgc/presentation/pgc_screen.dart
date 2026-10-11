@@ -65,7 +65,7 @@ final class PgcScreen extends ConsumerStatefulWidget {
 final class _PgcScreenState extends ConsumerState<PgcScreen> {
   late PgcLocator _locator;
   int _tab = 0;
-  bool? _infoVisible;
+  bool _infoVisible = true;
   final ScrollController _introScroll = ScrollController();
   PgcSeason? _playerSeason;
   PgcEpisode? _playerEpisode;
@@ -197,16 +197,12 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
       hasNext:
           selected != null && adjacentPgcEpisode(season, selected, 1) != null,
       onCompleted: () => _stepEpisode(season, selected, 1, completed: true),
-      toggleInfo: () => setState(
-        () => _infoVisible =
-            !(_infoVisible ?? MediaQuery.sizeOf(context).width >= 700),
-      ),
+      toggleInfo: () => setState(() => _infoVisible = !_infoVisible),
       child: WidthLayoutBuilder(
         builder: (context, width) {
           final wide = width >= 1000;
-          final showInfo = _infoVisible ?? width >= 700;
-          void toggleInfo() =>
-              setState(() => _infoVisible = !(_infoVisible ?? width >= 700));
+          final showInfo = _infoVisible;
+          void toggleInfo() => setState(() => _infoVisible = !_infoVisible);
           final info = Material(
             color: Theme.of(context).colorScheme.surface,
             child: Column(
