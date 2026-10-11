@@ -179,9 +179,13 @@ class _CommentRichContentState extends State<CommentRichContent> {
             ],
           ),
         SelectionArea(
-          child: Text.rich(
-            TextSpan(children: spans),
-            style: widget.compact ? styles.previewBody : styles.body,
+          // 回复预览外层的 InkWell 会让正文继承按钮光标。
+          child: DefaultSelectionStyle.merge(
+            mouseCursor: SystemMouseCursors.text,
+            child: Text.rich(
+              TextSpan(children: spans),
+              style: widget.compact ? styles.previewBody : styles.body,
+            ),
           ),
         ),
         if (comment.pictures.isNotEmpty)

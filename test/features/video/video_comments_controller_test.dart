@@ -12,6 +12,7 @@ import 'package:bilisail/shared/ui/bili_icons.dart';
 import 'package:bili_player/bili_player.dart';
 
 import '../../support/video_card_fake_engine.dart';
+import '../../support/text_selection.dart';
 
 import 'dart:async';
 
@@ -23,6 +24,8 @@ import 'package:bilisail/features/video/application/video_comments_controller.da
 import 'package:bilisail/features/video/domain/video_comments_repository.dart';
 import 'package:bilisail/features/video/presentation/video_comments_panel.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -409,55 +412,102 @@ void main() {
     await tester.tap(find.text('乙').first);
     expect(opened.last, const UserId('101'));
   });
-  testWidgets('mentions open profiles in main, preview and detailed replies', (
-    tester,
-  ) async {
-    final opened = <UserId>[];
-    const mentionedReply = CommentEntry(
-      id: '11',
-      author: '乙',
-      authorId: UserId('101'),
-      message: '回复 @小迷糊陈 :看了',
-      mentionedUsers: {'小迷糊陈': UserId('102')},
-      rootId: '10',
-      parentId: '10',
-    );
-    repo.items = [
-      const CommentEntry(
-        id: '10',
-        author: '甲',
-        message: '@主评论用户',
-        mentionedUsers: {'主评论用户': UserId('103')},
-        replyCount: 3,
-        replies: [mentionedReply],
-      ),
-    ];
-    repo.replyItems = [mentionedReply];
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          authRepositoryProvider.overrideWithValue(auth),
-          videoCommentsRepositoryProvider.overrideWithValue(repo),
-        ],
-        child: MaterialApp(
-          home: Scaffold(
-            body: VideoCommentsPanel(detail: _detail, onOpenUser: opened.add),
+  testWidgets(
+    'reply preview preserves text cursor, copying and profile links',
+    (tester) async {
+      final opened = <UserId>[];
+      const mentionedReply = CommentEntry(
+        id: '11',
+        author: '乙',
+        authorId: UserId('101'),
+        message: '回复 @小迷糊陈 :看了',
+        mentionedUsers: {'小迷糊陈': UserId('102')},
+        rootId: '10',
+        parentId: '10',
+      );
+      repo.items = [
+        const CommentEntry(
+          id: '10',
+          author: '甲',
+          message: '@主评论用户',
+          mentionedUsers: {'主评论用户': UserId('103')},
+          replyCount: 3,
+          replies: [mentionedReply],
+        ),
+      ];
+      repo.replyItems = [mentionedReply];
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            authRepositoryProvider.overrideWithValue(auth),
+            videoCommentsRepositoryProvider.overrideWithValue(repo),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: VideoCommentsPanel(detail: _detail, onOpenUser: opened.add),
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tapOnText(find.textRange.ofSubstring('@主评论用户'));
-    await tester.tapOnText(find.textRange.ofSubstring('@小迷糊陈'));
-    await tester.pumpAndSettle();
-    expect(opened, [const UserId('103'), const UserId('102')]);
-    expect(find.text('评论详情'), findsNothing);
-    await tester.tap(find.text('共 3 条回复 ›'));
-    await tester.pumpAndSettle();
-    await tester.tapOnText(find.textRange.ofSubstring('@小迷糊陈'));
-    expect(opened.last, const UserId('102'));
-    expect(repo.writes, 0);
-  });
+      );
+      await tester.pumpAndSettle();
+      final mouse = await tester.createGesture(
+        kind: PointerDeviceKind.mouse,
+        pointer: 1,
+      );
+      await mouse.addPointer(location: Offset.zero);
+      Future<void> expectCursor(String substring, MouseCursor cursor) async {
+        final match = find.textRange
+            .ofSubstring(
+              substring,
+              descendentOf: find.byType(CommentRichContent).at(1),
+            )
+            .evaluate()
+            .single;
+        final box = match.renderObject
+            .getBoxesForSelection(
+              TextSelection(
+                baseOffset: match.textRange.start,
+                extentOffset: match.textRange.end,
+              ),
+            )
+            .first;
+        await mouse.moveTo(
+          match.renderObject.localToGlobal(box.toRect().center),
+        );
+        await tester.pump();
+        expect(
+          RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1),
+          cursor,
+        );
+      }
+
+      await expectCursor('回复 ', SystemMouseCursors.text);
+      await expectCursor('@小迷糊陈', SystemMouseCursors.click);
+      await mouse.moveTo(tester.getCenter(find.text('共 3 条回复 ›')));
+      await tester.pump();
+      expect(
+        RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1),
+        SystemMouseCursors.basic,
+      );
+      await mouse.removePointer();
+      expect(
+        await selectAndCopyText(tester, find.text(mentionedReply.message)),
+        mentionedReply.message,
+      );
+      expect(find.text('评论详情'), findsNothing);
+      await tester.tapOnText(find.textRange.ofSubstring('@主评论用户'));
+      await tester.tapOnText(find.textRange.ofSubstring('@小迷糊陈'));
+      await tester.pumpAndSettle();
+      expect(opened, [const UserId('103'), const UserId('102')]);
+      expect(find.text('评论详情'), findsNothing);
+      await tester.tap(find.text('共 3 条回复 ›'));
+      await tester.pumpAndSettle();
+      await tester.tapOnText(find.textRange.ofSubstring('@小迷糊陈'));
+      expect(opened.last, const UserId('102'));
+      expect(repo.writes, 0);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
   test('emote loading discards response from previous session epoch', () async {
     repo.emotePending = Completer();
     final loading = controller.loadEmotes();
