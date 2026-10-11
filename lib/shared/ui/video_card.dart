@@ -51,6 +51,28 @@ final class VideoCardMenu {
   final bool busy;
 }
 
+enum _VideoCardWidthTier {
+  compact(10, 20, 14),
+  medium(11, 24, 17),
+  regular(12, 28, 20);
+
+  const _VideoCardWidthTier(
+    this.coverFontSize,
+    this.menuButtonSize,
+    this.menuIconSize,
+  );
+
+  final double coverFontSize;
+  final double menuButtonSize;
+  final double menuIconSize;
+
+  static _VideoCardWidthTier fromWidth(double cardWidth) => switch (cardWidth) {
+    < 180 => compact,
+    < 240 => medium,
+    _ => regular,
+  };
+}
+
 final class VideoCard extends StatefulWidget {
   const VideoCard({
     super.key,
@@ -281,7 +303,8 @@ final class _VideoCardState extends State<VideoCard> {
                             ),
                           ),
                           if (widget.feedback == null)
-                            if (widget.menu case final menu?) _menuButton(menu),
+                            if (widget.menu case final menu?)
+                              _menuButton(menu, cardWidth),
                         ],
                       ),
                     ),
@@ -311,7 +334,10 @@ final class _VideoCardState extends State<VideoCard> {
     );
   }
 
-  Widget _menuButton(VideoCardMenu menu) {
+  Widget _menuButton(VideoCardMenu menu, double cardWidth) {
+    final tier = _VideoCardWidthTier.fromWidth(cardWidth);
+    final buttonSize = Size.square(tier.menuButtonSize);
+    final progressSize = tier.menuIconSize * .8;
     final touchPlatform = switch (Theme.of(context).platform) {
       TargetPlatform.android || TargetPlatform.iOS => true,
       _ => false,
@@ -357,20 +383,26 @@ final class _VideoCardState extends State<VideoCard> {
               }
             },
             icon: busy
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
+                ? SizedBox.square(
+                    dimension: progressSize,
+                    child: const CircularProgressIndicator(
                       strokeWidth: 2,
                       semanticsLabel: '操作中',
                     ),
                   )
-                : const Icon(Icons.more_vert, size: 20, semanticLabel: '更多操作'),
-            iconSize: 20,
+                : Icon(
+                    Icons.more_vert,
+                    size: tier.menuIconSize,
+                    semanticLabel: '更多操作',
+                  ),
+            iconSize: tier.menuIconSize,
             style: IconButton.styleFrom(
-              minimumSize: const Size(28, 28),
-              maximumSize: const Size(28, 28),
+              minimumSize: buttonSize,
+              maximumSize: buttonSize,
               padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.standard,
+              // Padded tap targets would still reserve 48px beside the title.
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             itemBuilder: (_) => [
               for (final action in menu.actions)
@@ -531,11 +563,8 @@ final class _CoverMetadataState extends State<_CoverMetadata> {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       // Use the whole card width so padding does not shift typography tiers.
-      final fontSize = switch (widget.cardWidth) {
-        < 180 => 10.0,
-        < 240 => 11.0,
-        _ => _regularFontSize,
-      };
+      final fontSize = _VideoCardWidthTier.fromWidth(widget.cardWidth)
+          .coverFontSize;
       final sizeFactor = fontSize / _regularFontSize;
       final style = _style.copyWith(fontSize: fontSize);
       final iconSize = _iconSize * sizeFactor;
