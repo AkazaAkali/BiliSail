@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -28,7 +30,7 @@ require(project.findProperty("force-version-code-ignoring-abi").toString() == "t
 // the original version for the app's update checker; preserve that same value.
 val releaseVersion = (project.findProperty("dart-defines") as? String)
     ?.split(",")
-    ?.map { String(java.util.Base64.getDecoder().decode(it), Charsets.UTF_8) }
+    ?.map { String(Base64.getDecoder().decode(it), Charsets.UTF_8) }
     ?.singleOrNull { it.startsWith("BILISAIL_RELEASE_VERSION=") }
     ?.substringAfter("=")
 val originalBuildNumber = releaseVersion?.let {
