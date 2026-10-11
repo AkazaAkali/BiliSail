@@ -1929,7 +1929,7 @@ void main() {
     expect(metadata.storyboardPending['one'], same(firstRequest));
   });
 
-  for (final kind in [AppFailureKind.network, AppFailureKind.timeout]) {
+  for (final kind in [null, AppFailureKind.network, AppFailureKind.timeout]) {
     test('storyboard $kind recovers on hover after cooldown', () async {
       var now = Duration.zero;
       final engine = _FakeEngine();
@@ -1945,11 +1945,15 @@ void main() {
       addTearDown(session.close);
       await session.open(_detail('one'), _part('one'));
       final first = session.ensureStoryboard();
-      metadata.storyboardPending['one']?.completeError(
-        AppFailure(kind, 'preview unavailable'),
-      );
+      if (kind == null) {
+        metadata.storyboardPending['one']?.complete(null);
+      } else {
+        metadata.storyboardPending['one']?.completeError(
+          AppFailure(kind, 'preview unavailable'),
+        );
+      }
       await first;
-      expect(session.storyboardMessage, '缩略图暂时不可用');
+      expect(session.storyboardMessage, kind == null ? null : '缩略图暂时不可用');
       expect(session.media, isNotNull);
       expect(session.error, isNull);
 
@@ -1992,9 +1996,13 @@ void main() {
       for (var attempt = 0; attempt < 3; attempt++) {
         final pending = session.ensureStoryboard();
         expect(metadata.storyboardCalls, hasLength(attempt + 1));
-        metadata.storyboardPending['one']?.completeError(
-          const AppFailure(AppFailureKind.timeout, 'preview unavailable'),
-        );
+        if (attempt == 1) {
+          metadata.storyboardPending['one']?.completeError(
+            const AppFailure(AppFailureKind.timeout, 'preview unavailable'),
+          );
+        } else {
+          metadata.storyboardPending['one']?.complete(null);
+        }
         await pending;
         now +=
             Duration(seconds: 5 * (attempt + 1)) -
@@ -2012,14 +2020,13 @@ void main() {
   );
 
   for (final kind in [
-    null,
     AppFailureKind.authentication,
     AppFailureKind.permission,
     AppFailureKind.rateLimited,
     AppFailureKind.notFound,
     AppFailureKind.protocol,
   ]) {
-    test('storyboard empty result or $kind does not retry on hover', () async {
+    test('storyboard $kind does not retry on hover', () async {
       var now = Duration.zero;
       final metadata = _FakeMetadataRepository();
       final session = PlaybackSession(
@@ -2033,13 +2040,9 @@ void main() {
       addTearDown(session.close);
       await session.open(_detail('one'), _part('one'));
       final pending = session.ensureStoryboard();
-      if (kind == null) {
-        metadata.storyboardPending['one']?.complete(null);
-      } else {
-        metadata.storyboardPending['one']?.completeError(
-          AppFailure(kind, 'preview unavailable'),
-        );
-      }
+      metadata.storyboardPending['one']?.completeError(
+        AppFailure(kind, 'preview unavailable'),
+      );
       await pending;
       now = const Duration(hours: 1);
       await session.ensureStoryboard();
@@ -2049,6 +2052,75 @@ void main() {
       expect(session.error, isNull);
     });
   }
+
+  test('empty storyboard retry budget resets on source replacement', () async {
+    var now = Duration.zero;
+    final engine = _FakeEngine();
+    final metadata = _FakeMetadataRepository();
+    final session = PlaybackSession(
+      engine: engine,
+      repository: _FakeRepository(autoResolve: true),
+      metadataRepository: metadata,
+      progress: _FakeProgress(),
+      accountScope: () => 'guest',
+      storyboardNow: () => now,
+    );
+    addTearDown(session.close);
+    await session.open(_detail('one'), _part('one'));
+    final generation = session.sourceGeneration;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final pending = session.ensureStoryboard();
+      metadata.storyboardPending['one']?.complete(null);
+      await pending;
+      expect(session.storyboardLoading, isFalse);
+      expect(session.storyboardMessage, isNull);
+      now += const Duration(minutes: 1);
+      await _flush();
+      expect(metadata.storyboardCalls, hasLength(attempt + 1));
+    }
+    now += const Duration(hours: 1);
+    await session.ensureStoryboard();
+    expect(metadata.storyboardCalls, ['one', 'one', 'one']);
+    expect(session.sourceGeneration, generation);
+    expect(engine.seekTargets, isEmpty);
+    expect(session.error, isNull);
+
+    await session.open(_detail('two'), _part('two'));
+    final replacement = session.ensureStoryboard();
+    metadata.storyboardPending['two']?.complete(_storyboard);
+    await replacement;
+    expect(metadata.storyboardCalls, ['one', 'one', 'one', 'two']);
+    expect(session.storyboard, same(_storyboard));
+  });
+
+  test('late empty storyboard cannot reset a replacement source', () async {
+    var now = Duration.zero;
+    final metadata = _FakeMetadataRepository();
+    final session = PlaybackSession(
+      engine: _FakeEngine(),
+      repository: _FakeRepository(autoResolve: true),
+      metadataRepository: metadata,
+      progress: _FakeProgress(),
+      accountScope: () => 'guest',
+      storyboardNow: () => now,
+    );
+    addTearDown(session.close);
+    await session.open(_detail('one'), _part('one'));
+    final oldRead = session.ensureStoryboard();
+    await session.open(_detail('two'), _part('two'));
+    expect(metadata.storyboardTokens['one']?.isCancelled, isTrue);
+    final newRead = session.ensureStoryboard();
+    metadata.storyboardPending['two']?.complete(_storyboard);
+    await newRead;
+    metadata.storyboardPending['one']?.complete(null);
+    await oldRead;
+    now = const Duration(hours: 1);
+    await session.ensureStoryboard();
+    expect(metadata.storyboardCalls, ['one', 'two']);
+    expect(session.storyboard, same(_storyboard));
+    expect(session.storyboardLoading, isFalse);
+    expect(session.storyboardMessage, isNull);
+  });
 
   test(
     'source changes reset storyboard retries and reject late retry failures',

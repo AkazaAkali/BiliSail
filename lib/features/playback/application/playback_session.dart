@@ -1569,20 +1569,20 @@ class PlaybackSession extends ChangeNotifier {
       );
       if (!_acceptMetadata(generation, token)) return;
       storyboard = result;
+      if (result == null) {
+        // An empty response can be temporary. Keep the time-only preview, but
+        // let a later interaction retry within the same bounded read budget.
+        _scheduleStoryboardRetry();
+      }
     } on AppFailure catch (failure) {
       if (!_acceptMetadata(generation, token) ||
           failure.kind == AppFailureKind.cancelled) {
         return;
       }
       storyboardMessage = '缩略图暂时不可用';
-      if (_storyboardAttempts < _maxStoryboardAttempts &&
-          (failure.kind == AppFailureKind.network ||
-              failure.kind == AppFailureKind.timeout)) {
-        // Retry only on a later preview interaction, with 5s/10s cooldowns.
-        // Empty data and non-transient failures remain terminal for this source.
-        _storyboardRetryAt =
-            _storyboardNow() + Duration(seconds: 5 * _storyboardAttempts);
-        _storyboardRequested = false;
+      if (failure.kind == AppFailureKind.network ||
+          failure.kind == AppFailureKind.timeout) {
+        _scheduleStoryboardRetry();
       }
     } finally {
       if (_acceptMetadata(generation, token)) {
@@ -1591,6 +1591,14 @@ class PlaybackSession extends ChangeNotifier {
         _notify();
       }
     }
+  }
+
+  void _scheduleStoryboardRetry() {
+    if (_storyboardAttempts >= _maxStoryboardAttempts) return;
+    // No timer: only a later preview interaction can start the next read.
+    _storyboardRetryAt =
+        _storyboardNow() + Duration(seconds: 5 * _storyboardAttempts);
+    _storyboardRequested = false;
   }
 
   Future<void> selectSubtitle(int index) async {
