@@ -84,6 +84,7 @@ final class RetainedTabView<T extends Object> extends StatefulWidget {
     this.viewKey,
     this.progress,
     this.preloadPages = false,
+    this.swipeEnabled = true,
   });
 
   final List<T> tabs;
@@ -92,6 +93,7 @@ final class RetainedTabView<T extends Object> extends StatefulWidget {
   final TabPagingProgress? progress;
   // Ready local data can appear on the first drag without a loading placeholder.
   final bool preloadPages;
+  final bool swipeEnabled;
   final ValueChanged<T> onChanged;
   final RetainedTabPageBuilder<T> pageBuilder;
 
@@ -169,6 +171,9 @@ final class _RetainedTabViewState<T extends Object>
   @override
   void didUpdateWidget(RetainedTabView<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.swipeEnabled && !widget.swipeEnabled) {
+      _replaceController();
+    }
     if (_connectProgress()) {
       _progress?._attach(this, _tabs?.animation?.value ?? 0);
     }
@@ -214,6 +219,7 @@ final class _RetainedTabViewState<T extends Object>
       // user selection, and let cancellation or an external route supersede it.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted &&
+            widget.swipeEnabled &&
             generation == _generation &&
             WorkspaceActivity.isActive(context) &&
             index != null &&
@@ -249,7 +255,7 @@ final class _RetainedTabViewState<T extends Object>
         child: TabBarView(
           key: widget.viewKey,
           controller: _tabs,
-          physics: _active
+          physics: _active && widget.swipeEnabled
               ? TabPagingMotion.physics
               : const NeverScrollableScrollPhysics(),
           dragStartBehavior: DragStartBehavior.down,

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/platform/external_links.dart';
 import '../../core/presentation/workspace_activity.dart';
+import '../../core/presentation/page_back_scope.dart';
 import '../../domain/app_failure.dart';
 import '../../domain/request_cancellation.dart';
 import '../../domain/user.dart';
@@ -41,9 +42,7 @@ class CommentsPanel extends ConsumerStatefulWidget {
 
 class _CommentsPanelState extends ConsumerState<CommentsPanel> {
   NotifierProvider<CommentsController, CommentsState> get _provider =>
-      widget.target.type == CommentTargetType.video
-      ? videoCommentsControllerProvider(widget.target.oid)
-      : commentsControllerProvider(widget.target);
+      commentsProviderFor(widget.target);
   final _text = TextEditingController();
   final _focus = FocusNode();
   final _topScroll = ScrollController();
@@ -221,269 +220,298 @@ class _CommentsPanelState extends ConsumerState<CommentsPanel> {
     final comments = root == null ? state.items : state.replyItems;
     final loading = root == null ? state.loading : state.replyLoading;
     final more = root == null ? state.hasMore : state.replyHasMore;
-    return CustomMultiChildLayout(
-      delegate: _CommentsLayoutDelegate(),
-      children: [
-        LayoutId(
-          id: _CommentsSlot.header,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (root == null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 4, 8, 2),
-                  child: Row(
-                    children: [
-                      TextButton(
-                        onPressed: state.busy
-                            ? null
-                            : () => controller.load(sort: CommentSort.hot),
-                        child: Text(
-                          '最热',
-                          style: styles.sort.copyWith(
-                            color: state.sort == CommentSort.hot
-                                ? styles.sort.color
-                                : styles.metadata.color,
-                          ),
-                        ),
-                      ),
-                      Text('|', style: theme.textTheme.bodySmall),
-                      TextButton(
-                        onPressed: state.busy
-                            ? null
-                            : () => controller.load(sort: CommentSort.latest),
-                        child: Text(
-                          '最新',
-                          style: styles.sort.copyWith(
-                            color: state.sort == CommentSort.latest
-                                ? styles.sort.color
-                                : styles.metadata.color,
-                          ),
-                        ),
-                      ),
-                      const Spacer(),
-                      if (state.totalCount != null)
-                        Text('${state.totalCount} 条', style: styles.metadata),
-                      IconButton(
-                        tooltip: '刷新评论',
-                        onPressed: state.busy
-                            ? null
-                            : () => controller.load(refresh: true),
-                        icon: const Icon(Icons.refresh, size: 18),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Row(
-                  children: [
-                    IconButton(
-                      tooltip: '返回评论',
-                      onPressed: state.busy ? null : controller.closeReplies,
-                      icon: const Icon(Icons.chevron_left),
-                    ),
-                    Text('详情', style: theme.textTheme.titleSmall),
-                  ],
-                ),
-              if (state.message != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(state.message!, style: theme.textTheme.bodySmall),
-                ),
-            ],
-          ),
-        ),
-        LayoutId(
-          id: _CommentsSlot.list,
-          child: ListView(
-            controller: root == null ? _topScroll : _replyScroll,
-            key: PageStorageKey(
-              'comments:${widget.target.type.name}:$oid:${root?.id ?? state.sort.name}',
-            ),
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            children: [
-              if (root != null) ...[
-                entry(root, preview: false),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text(
-                    '全部回复 ${root.replyCount}',
-                    style: theme.textTheme.titleSmall,
-                  ),
-                ),
-              ],
-              if (comments.isEmpty && !loading)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  child: Center(
-                    child: Text(
-                      state.message != null
-                          ? '暂时无法加载评论'
-                          : (root?.replyCount ?? state.totalCount ?? 0) > 0 ||
-                                (root == null && (widget.replyCount ?? 0) > 0)
-                          ? '当前会话未返回可展示的评论'
-                          : '还没有评论，来聊聊吧',
-                    ),
-                  ),
-                ),
-              ...comments.map((c) => entry(c, preview: root == null)),
-              if (loading)
-                const Padding(
-                  padding: EdgeInsets.all(20),
-                  child: Center(
-                    child: SizedBox.square(
-                      dimension: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
-                )
-              else if (more)
-                Center(
-                  child: TextButton(
-                    onPressed: state.busy
-                        ? null
-                        : () => root == null
-                              ? controller.load()
-                              : controller.loadReplies(),
-                    child: Text(state.message == null ? '加载更多' : '重试加载'),
-                  ),
-                )
-              else if (comments.isNotEmpty)
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Text(
-                      comments.length >= 500 ? '已显示 500 条评论' : '没有更多了',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        LayoutId(
-          id: _CommentsSlot.composer,
-          child: SingleChildScrollView(
+    bool closeDetail() {
+      if (ref.read(_provider).openRoot == null) return false;
+      controller.closeReplies();
+      return true;
+    }
+
+    return PageBackHandler(
+      enabled: root != null,
+      onBack: closeDetail,
+      child: CustomMultiChildLayout(
+        delegate: _CommentsLayoutDelegate(),
+        children: [
+          LayoutId(
+            id: _CommentsSlot.header,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (state.uncertain.contains('send'))
+                if (root == null)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: TextButton(
-                      onPressed: controller.acknowledgeSend,
-                      child: const Text('我已核对结果，允许再次发送'),
+                    padding: const EdgeInsets.fromLTRB(14, 4, 8, 2),
+                    child: Row(
+                      children: [
+                        TextButton(
+                          onPressed: state.busy
+                              ? null
+                              : () => controller.load(sort: CommentSort.hot),
+                          child: Text(
+                            '最热',
+                            style: styles.sort.copyWith(
+                              color: state.sort == CommentSort.hot
+                                  ? styles.sort.color
+                                  : styles.metadata.color,
+                            ),
+                          ),
+                        ),
+                        Text('|', style: theme.textTheme.bodySmall),
+                        TextButton(
+                          onPressed: state.busy
+                              ? null
+                              : () => controller.load(sort: CommentSort.latest),
+                          child: Text(
+                            '最新',
+                            style: styles.sort.copyWith(
+                              color: state.sort == CommentSort.latest
+                                  ? styles.sort.color
+                                  : styles.metadata.color,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        if (state.totalCount != null)
+                          Text('${state.totalCount} 条', style: styles.metadata),
+                        IconButton(
+                          tooltip: '刷新评论',
+                          onPressed: state.busy
+                              ? null
+                              : () => controller.load(refresh: true),
+                          icon: const Icon(Icons.refresh, size: 18),
+                        ),
+                      ],
                     ),
-                  ),
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border(
-                      top: BorderSide(
-                        color: theme.dividerColor.withValues(alpha: .3),
-                      ),
-                    ),
-                  ),
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
+                  )
+                else
+                  Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (state.replyTarget != null)
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                '回复 @${state.replyTarget!.author}',
-                                style: theme.textTheme.bodySmall,
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: '取消回复',
-                              onPressed: state.busy
-                                  ? null
-                                  : controller.cancelTarget,
-                              icon: const Icon(Icons.close, size: 16),
-                            ),
-                          ],
-                        ),
-                      TextField(
-                        controller: _text,
-                        focusNode: _focus,
-                        readOnly: !state.signedIn,
-                        onTap: state.signedIn ? null : _login,
-                        minLines: 1,
-                        maxLines: 4,
-                        maxLength: 1000,
-                        decoration: InputDecoration(
-                          hintText: state.signedIn
-                              ? root == null
-                                    ? '发一条友善的评论'
-                                    : '发一条友善的回复'
-                              : '登录后参与评论',
-                          counterText: '',
-                          isDense: true,
-                          filled: true,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(6),
-                            borderSide: BorderSide.none,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           IconButton(
-                            tooltip: '选择表情',
-                            onPressed: state.busy ? null : () => _emotes(oid),
-                            icon: const Icon(BiliIcons.emoji),
+                            tooltip: '返回评论',
+                            onPressed: closeDetail,
+                            icon: const Icon(Icons.arrow_back),
                           ),
-                          const Spacer(),
-                          FilledButton(
-                            onPressed:
-                                state.busy ||
-                                    state.loading ||
-                                    state.replyLoading ||
-                                    state.uncertain.contains('send')
-                                ? null
-                                : () async {
-                                    if (!state.signedIn) {
-                                      _login();
-                                      return;
-                                    }
-                                    final submitted = _text.text;
-                                    final submittedTarget = widget.target;
-                                    final submittedRoot = state.openRoot?.id;
-                                    if (await controller.send(submitted) &&
-                                        mounted &&
-                                        widget.target == submittedTarget &&
-                                        _text.text == submitted) {
-                                      final current = ref.read(_provider);
-                                      if (current.openRoot?.id ==
-                                              submittedRoot &&
-                                          current.replyTarget == null) {
-                                        _text.clear();
-                                      }
-                                    }
-                                  },
-                            child: state.busy
-                                ? const SizedBox.square(
-                                    dimension: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Text('发布'),
+                          Expanded(
+                            child: Text(
+                              '评论详情',
+                              style: theme.textTheme.titleSmall,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: '关闭评论详情',
+                            onPressed: closeDetail,
+                            icon: const Icon(Icons.close),
                           ),
                         ],
                       ),
+                      const Divider(height: 1),
                     ],
                   ),
-                ),
+                if (state.message != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      state.message!,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
               ],
             ),
           ),
-        ),
-      ],
+          LayoutId(
+            id: _CommentsSlot.list,
+            child: ListView(
+              controller: root == null ? _topScroll : _replyScroll,
+              key: PageStorageKey(
+                'comments:${widget.target.type.name}:$oid:${root?.id ?? state.sort.name}',
+              ),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              children: [
+                if (root != null) ...[
+                  entry(root, preview: false),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Text(
+                      '全部回复 ${root.replyCount}',
+                      style: theme.textTheme.titleSmall,
+                    ),
+                  ),
+                ],
+                if (comments.isEmpty && !loading)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: Center(
+                      child: Text(
+                        state.message != null
+                            ? '暂时无法加载评论'
+                            : (root?.replyCount ?? state.totalCount ?? 0) > 0 ||
+                                  (root == null && (widget.replyCount ?? 0) > 0)
+                            ? '当前会话未返回可展示的评论'
+                            : '还没有评论，来聊聊吧',
+                      ),
+                    ),
+                  ),
+                ...comments.map((c) => entry(c, preview: root == null)),
+                if (loading)
+                  const Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Center(
+                      child: SizedBox.square(
+                        dimension: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  )
+                else if (more)
+                  Center(
+                    child: TextButton(
+                      onPressed: state.busy
+                          ? null
+                          : () => root == null
+                                ? controller.load()
+                                : controller.loadReplies(),
+                      child: Text(state.message == null ? '加载更多' : '重试加载'),
+                    ),
+                  )
+                else if (comments.isNotEmpty)
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text(
+                        comments.length >= 500 ? '已显示 500 条评论' : '没有更多了',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          LayoutId(
+            id: _CommentsSlot.composer,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (state.uncertain.contains('send'))
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: TextButton(
+                        onPressed: controller.acknowledgeSend,
+                        child: const Text('我已核对结果，允许再次发送'),
+                      ),
+                    ),
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(
+                          color: theme.dividerColor.withValues(alpha: .3),
+                        ),
+                      ),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (state.replyTarget != null)
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '回复 @${state.replyTarget!.author}',
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: '取消回复',
+                                onPressed: state.busy
+                                    ? null
+                                    : controller.cancelTarget,
+                                icon: const Icon(Icons.close, size: 16),
+                              ),
+                            ],
+                          ),
+                        TextField(
+                          controller: _text,
+                          focusNode: _focus,
+                          readOnly: !state.signedIn,
+                          onTap: state.signedIn ? null : _login,
+                          minLines: 1,
+                          maxLines: 4,
+                          maxLength: 1000,
+                          decoration: InputDecoration(
+                            hintText: state.signedIn
+                                ? root == null
+                                      ? '发一条友善的评论'
+                                      : '发一条友善的回复'
+                                : '登录后参与评论',
+                            counterText: '',
+                            isDense: true,
+                            filled: true,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            IconButton(
+                              tooltip: '选择表情',
+                              onPressed: state.busy ? null : () => _emotes(oid),
+                              icon: const Icon(BiliIcons.emoji),
+                            ),
+                            const Spacer(),
+                            FilledButton(
+                              onPressed:
+                                  state.busy ||
+                                      state.loading ||
+                                      state.replyLoading ||
+                                      state.uncertain.contains('send')
+                                  ? null
+                                  : () async {
+                                      if (!state.signedIn) {
+                                        _login();
+                                        return;
+                                      }
+                                      final submitted = _text.text;
+                                      final submittedTarget = widget.target;
+                                      final submittedRoot = state.openRoot?.id;
+                                      if (await controller.send(submitted) &&
+                                          mounted &&
+                                          widget.target == submittedTarget &&
+                                          _text.text == submitted) {
+                                        final current = ref.read(_provider);
+                                        if (current.openRoot?.id ==
+                                                submittedRoot &&
+                                            current.replyTarget == null) {
+                                          _text.clear();
+                                        }
+                                      }
+                                    },
+                              child: state.busy
+                                  ? const SizedBox.square(
+                                      dimension: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('发布'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

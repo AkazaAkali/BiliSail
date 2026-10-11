@@ -16,6 +16,7 @@ final class PlaybackInfoTabs extends StatefulWidget {
     this.trailing,
     this.compact = false,
     this.preloadPages = false,
+    this.showNavigation = true,
   });
 
   final List<Widget> labels;
@@ -27,6 +28,7 @@ final class PlaybackInfoTabs extends StatefulWidget {
   final Widget? trailing;
   final bool compact;
   final bool preloadPages;
+  final bool showNavigation;
 
   @override
   State<PlaybackInfoTabs> createState() => _PlaybackInfoTabsState();
@@ -41,43 +43,45 @@ final class _PlaybackInfoTabsState extends State<PlaybackInfoTabs> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: PagingTabStrip<int>(
-                  tabs: tabs,
-                  value: widget.value,
-                  onSelected: widget.onChanged,
-                  progress: _progress,
-                  itemKey: widget.itemKey,
-                  labelBuilder: (_, tab) => widget.labels[tab],
-                  spacing: 0,
-                  fullWidthIndicator: true,
-                  indicatorHeight: widget.compact ? 2 : 3,
-                  unselectedColor: Theme.of(context)
-                      .colorScheme
-                      .onSurfaceVariant,
-                  buttonStyle: TextButton.styleFrom(
-                    padding: widget.compact
-                        ? const EdgeInsets.fromLTRB(16, 11, 16, 9)
-                        : const EdgeInsets.fromLTRB(17, 15, 17, 12),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: const RoundedRectangleBorder(),
-                    textStyle: widget.compact
-                        ? Theme.of(context).textTheme.labelLarge
-                        : Theme.of(context).textTheme.titleMedium,
+        if (widget.showNavigation)
+          Row(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: PagingTabStrip<int>(
+                    tabs: tabs,
+                    value: widget.value,
+                    onSelected: widget.onChanged,
+                    progress: _progress,
+                    itemKey: widget.itemKey,
+                    labelBuilder: (_, tab) => widget.labels[tab],
+                    spacing: 0,
+                    fullWidthIndicator: true,
+                    indicatorHeight: widget.compact ? 2 : 3,
+                    unselectedColor: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant,
+                    buttonStyle: TextButton.styleFrom(
+                      padding: widget.compact
+                          ? const EdgeInsets.fromLTRB(16, 11, 16, 9)
+                          : const EdgeInsets.fromLTRB(17, 15, 17, 12),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      shape: const RoundedRectangleBorder(),
+                      textStyle: widget.compact
+                          ? Theme.of(context).textTheme.labelLarge
+                          : Theme.of(context).textTheme.titleMedium,
+                    ),
                   ),
                 ),
               ),
-            ),
-            ?widget.trailing,
-          ],
-        ),
-        const Divider(height: 1),
+              ?widget.trailing,
+            ],
+          ),
+        if (widget.showNavigation) const Divider(height: 1),
         Expanded(
+          key: const ValueKey('playback-info-pages'),
           child: RetainedTabView<int>(
             tabs: tabs,
             value: widget.value,
@@ -86,6 +90,7 @@ final class _PlaybackInfoTabsState extends State<PlaybackInfoTabs> {
             viewKey: widget.viewKey,
             pageBuilder: widget.pageBuilder,
             preloadPages: widget.preloadPages,
+            swipeEnabled: widget.showNavigation,
           ),
         ),
       ],

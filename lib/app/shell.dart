@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../features/feed/domain/home_channel.dart';
 import '../features/search/presentation/search_category_bar.dart';
 import '../core/presentation/workspace_activity.dart';
+import '../core/presentation/page_back_scope.dart';
 import 'workspace_tabs.dart';
 import 'platform_defaults.dart';
 import '../core/input/input_stroke.dart';
@@ -102,7 +103,23 @@ final class _BiliAppShellState extends State<BiliAppShell> {
   final _tabKeys = <String, GlobalKey>{};
   final _searchDrafts = <String, String>{};
   final _pageStorage = <String, PageStorageBucket>{};
+  final _pageBack = <String, PageBackController>{};
   final _pagingProgress = <(String, bool), TabPagingProgress>{};
+
+  PageBackController _backFor(String id) => _pageBack.putIfAbsent(
+    id,
+    () => PageBackController()..addListener(_pageBackChanged),
+  );
+
+  void _pageBackChanged() {
+    if (mounted) setState(() {});
+  }
+
+  bool get _canGoBack =>
+      (_pageBack[_workspace.activeId]?.canGoBack ?? false) ||
+      _workspace.canGoBack;
+
+  bool _goBackWithinPage() => _pageBack[_workspace.activeId]?.goBack() ?? false;
 
   TabPagingProgress _pagingFor(WorkspaceTab tab) {
     final settings = tab.location.path == '/settings';
@@ -167,6 +184,11 @@ final class _BiliAppShellState extends State<BiliAppShell> {
     _tabKeys.removeWhere((id, _) => !liveIds.contains(id));
     _searchDrafts.removeWhere((id, _) => !liveIds.contains(id));
     _pageStorage.removeWhere((id, _) => !liveIds.contains(id));
+    _pageBack.removeWhere((id, controller) {
+      if (liveIds.contains(id)) return false;
+      controller.dispose();
+      return true;
+    });
     _pagingProgress.removeWhere((key, progress) {
       if (liveIds.contains(key.$1)) return false;
       progress.dispose();
@@ -186,6 +208,9 @@ final class _BiliAppShellState extends State<BiliAppShell> {
   @override
   void dispose() {
     _searchController.dispose();
+    for (final controller in _pageBack.values) {
+      controller.dispose();
+    }
     for (final progress in _pagingProgress.values) {
       progress.dispose();
     }
@@ -241,6 +266,7 @@ final class _BiliAppShellState extends State<BiliAppShell> {
   }
 
   void _goBack() {
+    if (_goBackWithinPage()) return;
     if (!_workspace.goBack(closeCurrent: _singlePage)) return;
     _prunePages();
     setState(() {});
@@ -280,7 +306,7 @@ final class _BiliAppShellState extends State<BiliAppShell> {
       case ShortcutAction.closeTab:
         if (_singlePage) {
           _goBack();
-        } else {
+        } else if (!_goBackWithinPage()) {
           _closeTab(_workspace.activeId);
         }
       case ReservedShortcut.nextTab:
@@ -311,7 +337,7 @@ final class _BiliAppShellState extends State<BiliAppShell> {
           command: (stroke) => _workspaceCommand(command, stroke),
       },
       child: PopScope<Object?>(
-        canPop: !_workspace.canGoBack,
+        canPop: !_canGoBack,
         onPopInvokedWithResult: (didPop, _) {
           if (!didPop) _goBack();
         },
@@ -349,7 +375,12 @@ final class _BiliAppShellState extends State<BiliAppShell> {
 
   Widget _pages(BuildContext context) {
     final builder = widget.pageBuilder;
-    if (builder == null) return widget.child;
+    if (builder == null) {
+      return PageBackScope(
+        controller: _backFor(_workspace.activeId),
+        child: widget.child,
+      );
+    }
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -379,7 +410,10 @@ final class _BiliAppShellState extends State<BiliAppShell> {
                           _updatePageLocation(tab.id, location),
                       child: TabPagingScope(
                         progress: _pagingFor(tab),
-                        child: builder(context, tab),
+                        child: PageBackScope(
+                          controller: _backFor(tab.id),
+                          child: builder(context, tab),
+                        ),
                       ),
                     ),
                   ),
@@ -454,7 +488,7 @@ final class _BiliAppShellState extends State<BiliAppShell> {
   Widget _backButton() => IconButton(
     key: const ValueKey('workspace-back'),
     tooltip: '返回上一页',
-    onPressed: _workspace.canGoBack ? _goBack : null,
+    onPressed: _canGoBack ? _goBack : null,
     icon: const Icon(Icons.arrow_back, size: 20),
   );
 

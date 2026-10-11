@@ -16,6 +16,8 @@ import '../../../shared/ui/app_cover_image.dart';
 import '../../../shared/ui/highlighted_text.dart';
 import '../../../shared/ui/playback_sidebar_toggle.dart';
 import '../../../shared/ui/playback_info_tabs.dart';
+import '../../../shared/ui/comment_detail_builder.dart';
+import '../../../domain/comment_target.dart';
 import '../../../core/presentation/workspace_activity.dart';
 import '../../../shared/ui/video_card.dart';
 import '../../../shared/ui/video_card_cover.dart';
@@ -383,68 +385,79 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                                 active:
                                     showInfo &&
                                     WorkspaceActivity.isActive(context),
-                                child: PlaybackInfoTabs(
-                                  value: _tab,
-                                  onChanged: (tab) =>
-                                      setState(() => _tab = tab),
-                                  viewKey: const ValueKey('video-info-swipe'),
-                                  labels: [
-                                    const Text('简介'),
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Text('评论'),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          compactCount(video.replyCount),
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .labelSmall,
-                                        ),
-                                      ],
+                                child: CommentDetailBuilder(
+                                  target: switch (video.aid) {
+                                    final String aid => CommentTarget(
+                                      aid,
+                                      CommentTargetType.video,
                                     ),
-                                  ],
-                                  trailing: widget.menuBuilder?.call(
-                                    context,
-                                    video,
-                                    selected,
-                                  ),
-                                  pageBuilder: (context, tab, active) =>
-                                      TickerMode(
-                                        enabled: showInfo && active,
-                                        child: tab == 0
-                                            ? CustomScrollView(
-                                                key: const ValueKey(
-                                                  'video-intro-scroll',
-                                                ),
-                                                controller: _introScroll,
-                                                slivers: [
-                                                  SliverToBoxAdapter(
-                                                    child: content,
-                                                  ),
-                                                  SliverPadding(
-                                                    padding:
-                                                        const EdgeInsets.fromLTRB(
-                                                          12,
-                                                          0,
-                                                          12,
-                                                          12,
-                                                        ),
-                                                    sliver:
-                                                        _RelatedVideosSliver(
-                                                          id: widget.id,
-                                                          onOpenVideo: widget
-                                                              .onOpenVideo,
-                                                        ),
-                                                  ),
-                                                ],
-                                              )
-                                            : VideoCommentsPanel(
-                                                detail: video,
-                                                onLogin: widget.onLogin,
-                                                onOpenUser: widget.onOpenUser,
-                                              ),
+                                    null => null,
+                                  },
+                                  enabled: _tab == 1,
+                                  builder: (context, detailOpen) => PlaybackInfoTabs(
+                                    showNavigation: !detailOpen,
+                                    value: _tab,
+                                    onChanged: (tab) =>
+                                        setState(() => _tab = tab),
+                                    viewKey: const ValueKey('video-info-swipe'),
+                                    labels: [
+                                      const Text('简介'),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Text('评论'),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            compactCount(video.replyCount),
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelSmall,
+                                          ),
+                                        ],
                                       ),
+                                    ],
+                                    trailing: widget.menuBuilder?.call(
+                                      context,
+                                      video,
+                                      selected,
+                                    ),
+                                    pageBuilder: (context, tab, active) =>
+                                        TickerMode(
+                                          enabled: showInfo && active,
+                                          child: tab == 0
+                                              ? CustomScrollView(
+                                                  key: const ValueKey(
+                                                    'video-intro-scroll',
+                                                  ),
+                                                  controller: _introScroll,
+                                                  slivers: [
+                                                    SliverToBoxAdapter(
+                                                      child: content,
+                                                    ),
+                                                    SliverPadding(
+                                                      padding:
+                                                          const EdgeInsets.fromLTRB(
+                                                            12,
+                                                            0,
+                                                            12,
+                                                            12,
+                                                          ),
+                                                      sliver:
+                                                          _RelatedVideosSliver(
+                                                            id: widget.id,
+                                                            onOpenVideo: widget
+                                                                .onOpenVideo,
+                                                          ),
+                                                    ),
+                                                  ],
+                                                )
+                                              : VideoCommentsPanel(
+                                                  detail: video,
+                                                  onLogin: widget.onLogin,
+                                                  onOpenUser: widget.onOpenUser,
+                                                ),
+                                        ),
+                                  ),
                                 ),
                               ),
                             ),

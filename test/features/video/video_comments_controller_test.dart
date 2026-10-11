@@ -142,7 +142,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(engine.currentSnapshot.position, Duration(seconds: seconds));
         expect(engine.currentSnapshot.phase, PlaybackPhase.paused);
-        expect(find.text('详情'), findsNothing);
+        expect(find.text('评论详情'), findsNothing);
       }
       await tester.tap(find.text('共 3 条回复 ›'));
       await tester.pumpAndSettle();
@@ -402,7 +402,7 @@ void main() {
     expect(opened, [const UserId('100')]);
     await tester.tap(find.text('乙：').first);
     expect(opened.last, const UserId('101'));
-    expect(find.text('详情').evaluate(), isEmpty);
+    expect(find.text('评论详情').evaluate(), isEmpty);
     await tester.tap(find.textContaining('共 3 条回复').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('乙').first);
@@ -450,7 +450,7 @@ void main() {
     await tester.tapOnText(find.textRange.ofSubstring('@小迷糊陈'));
     await tester.pumpAndSettle();
     expect(opened, [const UserId('103'), const UserId('102')]);
-    expect(find.text('详情'), findsNothing);
+    expect(find.text('评论详情'), findsNothing);
     await tester.tap(find.text('共 3 条回复 ›'));
     await tester.pumpAndSettle();
     await tester.tapOnText(find.textRange.ofSubstring('@小迷糊陈'));
@@ -708,7 +708,7 @@ void main() {
     expect(find.text('共 3 条回复 ›'), findsOneWidget);
     await tester.tap(find.text('共 3 条回复 ›'));
     await tester.pumpAndSettle();
-    expect(find.text('详情'), findsOneWidget);
+    expect(find.text('评论详情'), findsOneWidget);
     expect(find.text('回复'), findsOneWidget);
     expect(find.text('IP属地：广东'), findsOneWidget);
     expect(find.text('IP属地：上海'), findsOneWidget);
@@ -724,7 +724,7 @@ void main() {
     await tester.tap(find.byTooltip('返回评论'));
     await tester.pumpAndSettle();
     expect(find.text('最热'), findsOneWidget);
-    expect(find.text('详情'), findsNothing);
+    expect(find.text('评论详情'), findsNothing);
   });
   testWidgets('320 pixel panel supports double text scale without overflow', (
     tester,

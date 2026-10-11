@@ -19,6 +19,8 @@ import '../../../shared/ui/app_cover_image.dart';
 import '../../../shared/ui/app_notice.dart';
 import '../../../shared/ui/playback_sidebar_toggle.dart';
 import '../../../shared/ui/playback_info_tabs.dart';
+import '../../../shared/ui/comment_detail_builder.dart';
+import '../../../domain/comment_target.dart';
 import '../../../shared/ui/state_view.dart';
 import '../../../shared/ui/video_card.dart';
 import '../application/pgc_controller.dart';
@@ -225,61 +227,73 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
                 Expanded(
                   child: WorkspaceActivity(
                     active: showInfo && WorkspaceActivity.isActive(context),
-                    child: PlaybackInfoTabs(
-                      key: ValueKey(season.id),
-                      value: _tab.clamp(
-                        0,
-                        widget.commentsBuilder != null && selected != null
-                            ? 1
-                            : 0,
-                      ),
-                      onChanged: (tab) => setState(() => _tab = tab),
-                      viewKey: const ValueKey('pgc-info-swipe'),
-                      labels: [
-                        const Text('简介'),
-                        if (widget.commentsBuilder != null && selected != null)
-                          const Text('评论'),
-                      ],
-                      itemKey: (tab) =>
-                          ValueKey('pgc-tab-${tab == 0 ? '简介' : '评论'}'),
-                      trailing: _menu(context, season, selected, toggleInfo),
-                      pageBuilder: (context, tab, active) => TickerMode(
-                        enabled: showInfo && active,
-                        child: switch ((
-                          tab,
-                          widget.commentsBuilder,
-                          selected,
-                        )) {
-                          (1, final builder?, final episode?) => builder(
-                            context,
-                            season,
-                            episode,
-                          ),
-                          _ => CustomScrollView(
-                            key: const ValueKey('pgc-intro'),
-                            controller: _introScroll,
-                            slivers: [
-                              SliverPadding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  16,
-                                  16,
-                                  0,
+                    child: CommentDetailBuilder(
+                      target: switch (selected?.aid) {
+                        final String aid => CommentTarget(
+                          aid,
+                          CommentTargetType.video,
+                        ),
+                        null => null,
+                      },
+                      enabled: _tab == 1 && widget.commentsBuilder != null,
+                      builder: (context, detailOpen) => PlaybackInfoTabs(
+                        showNavigation: !detailOpen,
+                        key: ValueKey(season.id),
+                        value: _tab.clamp(
+                          0,
+                          widget.commentsBuilder != null && selected != null
+                              ? 1
+                              : 0,
+                        ),
+                        onChanged: (tab) => setState(() => _tab = tab),
+                        viewKey: const ValueKey('pgc-info-swipe'),
+                        labels: [
+                          const Text('简介'),
+                          if (widget.commentsBuilder != null &&
+                              selected != null)
+                            const Text('评论'),
+                        ],
+                        itemKey: (tab) =>
+                            ValueKey('pgc-tab-${tab == 0 ? '简介' : '评论'}'),
+                        trailing: _menu(context, season, selected, toggleInfo),
+                        pageBuilder: (context, tab, active) => TickerMode(
+                          enabled: showInfo && active,
+                          child: switch ((
+                            tab,
+                            widget.commentsBuilder,
+                            selected,
+                          )) {
+                            (1, final builder?, final episode?) => builder(
+                              context,
+                              season,
+                              episode,
+                            ),
+                            _ => CustomScrollView(
+                              key: const ValueKey('pgc-intro'),
+                              controller: _introScroll,
+                              slivers: [
+                                SliverPadding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    16,
+                                    16,
+                                    0,
+                                  ),
+                                  sliver: SliverToBoxAdapter(
+                                    child: _details(context, season, selected),
+                                  ),
                                 ),
-                                sliver: SliverToBoxAdapter(
-                                  child: _details(context, season, selected),
+                                _PgcRelatedSeasons(
+                                  season: season,
+                                  onOpen: widget.onOpenSeason,
                                 ),
-                              ),
-                              _PgcRelatedSeasons(
-                                season: season,
-                                onOpen: widget.onOpenSeason,
-                              ),
-                              const SliverToBoxAdapter(
-                                child: SizedBox(height: 24),
-                              ),
-                            ],
-                          ),
-                        },
+                                const SliverToBoxAdapter(
+                                  child: SizedBox(height: 24),
+                                ),
+                              ],
+                            ),
+                          },
+                        ),
                       ),
                     ),
                   ),

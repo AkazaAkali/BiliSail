@@ -23,6 +23,12 @@ final commentsControllerProvider = NotifierProvider.autoDispose
 final videoCommentsControllerProvider = NotifierProvider.autoDispose
     .family<CommentsController, CommentsState, String>(CommentsController.new);
 
+NotifierProvider<CommentsController, CommentsState> commentsProviderFor(
+  CommentTarget target,
+) => target.type == CommentTargetType.video
+    ? videoCommentsControllerProvider(target.oid)
+    : commentsControllerProvider(target);
+
 final class CommentsState {
   const CommentsState({
     this.emotePackages = const [],
