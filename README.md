@@ -69,13 +69,6 @@ BiliSail（哔帆）以视频、影视和直播观看为核心，提供单／多
 | 下载与离线 | 分 P／剧集多选、画质与编码、队列暂停/继续/重试、断点和重启恢复、文件校验；本地音视频分轨、弹幕与字幕播放 |
 | 个性化 | 明暗主题、内置／系统字体、播放、弹幕、字幕和下载设置；手动及每日首次启动更新检查；可选空降助手，默认关闭 |
 
-上表描述已接入的功能，在线和平台验证范围见[文档索引](docs/README.md)。部分能力仍需进一步验收：
-
-- Windows 官方登录窗口打开及关闭重开、现有登录会话的动态／评论只读请求已有验证；三种登录方式的完整账号闭环、部分私有列表在线分页，以及投币、收藏、评论／私信／动态转发等真实写操作仍需逐项验收。互动写请求只由明确的用户操作触发，不自动重试。详见[登录验证](docs/validation/password-sms-login.md)与[动态互动验证](docs/validation/dynamic-interactions.md)。
-- 云端观看历史列表和云端进度读写仍需真实账号验收；云端进度由用户播放动作及周期观察触发，具体边界见[云端观看历史](docs/validation/cloud-watch-history.md)和[云端进度验证](docs/validation/cloud-playback-progress.md)。
-- Windows 已验证游客公开视频下载与本地分轨离线播放；会员影视下载、长视频断网／休眠恢复和 Android/macOS 设备离线播放待验。Android 退入后台会主动暂停下载，尚未实现系统后台下载服务。详见[下载与离线播放](docs/downloads.md)。
-- 字幕正文与离线字幕显示已通过合成 fixture 验证，在线样本尚未取得可用字幕；Windows 悬停预览已验证首帧与 5 秒向前预读窗口，Android/macOS 原生预览仍待验。详见[悬停预览验证](docs/validation/video-preview-loading.md)。
-- 部分公开视频准备时间较长，排行榜可能受到服务端风控；Windows 辅助功能场景的原生崩溃防护仍需持续回归。详见[首版记录](docs/validation/m0-results.md)和[播放错误排查](docs/validation/native-playback-errors.md)。
 
 应用默认不添加自动遥测。空降助手启用后会查询独立第三方服务，不携带 Bilibili 账号凭据，也不自动上报。
 
