@@ -10,12 +10,14 @@ import '../../../domain/video.dart';
 import '../../downloads/domain/download_repository.dart';
 import '../domain/content_playback.dart';
 import '../domain/playback_repository.dart';
+import '../domain/high_energy_trend.dart';
 
 /// One adapter per PlaybackSession keeps offline reads isolated between tabs.
 final class OfflinePlaybackRepository
     implements
         PlaybackRepository,
         PlaybackMetadataRepository,
+        HighEnergyRepository,
         VoicePlaybackRepository {
   OfflinePlaybackRepository({
     required this.downloads,
@@ -32,6 +34,24 @@ final class OfflinePlaybackRepository
   int _revision = 0;
 
   ContentPlaybackRepository get content => _OfflineContentRepository(this);
+
+  @override
+  Future<HighEnergyTrend?> highEnergy(
+    VideoDetail video,
+    VideoPart part, {
+    required RequestCancellation cancellation,
+  }) {
+    _check(cancellation);
+    final metadata = networkMetadata;
+    if (_offline == null && metadata is HighEnergyRepository) {
+      return (metadata as HighEnergyRepository).highEnergy(
+        video,
+        part,
+        cancellation: cancellation,
+      );
+    }
+    return Future.value();
+  }
 
   void _beginSource() {
     ++_revision;

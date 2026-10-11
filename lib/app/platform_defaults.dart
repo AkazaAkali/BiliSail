@@ -18,3 +18,9 @@ bool workspaceHeaderVisibleForPlatform(TargetPlatform platform) =>
 
 bool get workspaceHeaderVisible =>
     workspaceHeaderVisibleForPlatform(defaultTargetPlatform);
+
+bool highEnergyProgressEnabledForPlatform(TargetPlatform platform) =>
+    platform == TargetPlatform.windows || platform == TargetPlatform.macOS;
+
+bool get defaultHighEnergyProgressEnabled =>
+    highEnergyProgressEnabledForPlatform(defaultTargetPlatform);

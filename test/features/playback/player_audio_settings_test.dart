@@ -54,6 +54,8 @@ void main() {
             .first,
       );
       for (final mode in AudioNormalizationMode.values) {
+        await Scrollable.ensureVisible(tester.element(dropdown), alignment: .5);
+        await tester.pumpAndSettle();
         await tester.tap(dropdown);
         await tester.pumpAndSettle();
         await tester.tap(find.text(mode.label).last);

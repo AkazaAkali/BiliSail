@@ -13,6 +13,7 @@ import '../../../domain/media_cdn.dart';
 import '../../../domain/request_cancellation.dart';
 import '../../../domain/video.dart';
 import '../domain/playback_repository.dart';
+import '../domain/high_energy_trend.dart';
 import '../domain/subtitle_cue_index.dart';
 import '../domain/content_playback.dart';
 import '../domain/comment_window.dart';
@@ -215,6 +216,98 @@ class PlaybackSession extends ChangeNotifier {
   String? storyboardMessage;
   String? chaptersMessage;
   RequestCancellation? _storyboardCancellation;
+  final highEnergy = ValueNotifier<HighEnergyTrend?>(null);
+  final _highEnergySurfaces = <Object>{};
+  RequestCancellation? _highEnergyCancellation;
+  bool _chaptersConfirmedEmpty = false;
+  bool _highEnergyRequested = false;
+
+  Duration get _highEnergyDuration {
+    final resolved = media?.duration ?? Duration.zero;
+    if (resolved > Duration.zero) return resolved;
+    final selected = part?.duration ?? Duration.zero;
+    return selected > Duration.zero ? selected : snapshots.value.duration;
+  }
+
+  void setHighEnergySurfaceVisible(Object owner, bool visible) {
+    if (_disposed || _closing) return;
+    if (visible) {
+      _highEnergySurfaces.add(owner);
+      unawaited(ensureHighEnergy());
+    } else {
+      _highEnergySurfaces.remove(owner);
+      if (_highEnergySurfaces.isEmpty) _cancelHighEnergy();
+    }
+  }
+
+  void _cancelHighEnergy() {
+    if (_highEnergyCancellation != null) {
+      _highEnergyCancellation?.cancel();
+      _highEnergyCancellation = null;
+      _highEnergyRequested = false;
+    }
+  }
+
+  Future<void> ensureHighEnergy() async {
+    final candidate = metadataRepository is HighEnergyRepository
+        ? metadataRepository
+        : repository;
+    final video = detail;
+    final selected = part;
+    if (_disposed ||
+        _closing ||
+        !_ownerVisible ||
+        _highEnergySurfaces.isEmpty ||
+        !_settings.highEnergyProgressEnabled ||
+        !_chaptersConfirmedEmpty ||
+        chapters.isNotEmpty ||
+        media == null ||
+        isLive ||
+        contentTarget is OfflinePlaybackTarget ||
+        candidate is! HighEnergyRepository ||
+        video == null ||
+        selected == null ||
+        selected.cid != danmakuCid ||
+        _scope != accountScope() ||
+        _epoch != sessionEpoch() ||
+        _highEnergyDuration <= Duration.zero ||
+        _highEnergyRequested) {
+      return;
+    }
+    final generation = _generation;
+    final token = RequestCancellation();
+    _highEnergyCancellation = token;
+    _highEnergyRequested = true;
+    try {
+      final result = await candidate.highEnergy(
+        video,
+        selected,
+        cancellation: token,
+      );
+      if (!_acceptMetadata(generation, token) ||
+          !_settings.highEnergyProgressEnabled ||
+          !_chaptersConfirmedEmpty ||
+          chapters.isNotEmpty ||
+          _highEnergySurfaces.isEmpty ||
+          !_ownerVisible) {
+        return;
+      }
+      final duration = _highEnergyDuration;
+      highEnergy.value = result != null && result.matchesDuration(duration)
+          ? result
+          : null;
+    } on AppFailure catch (failure) {
+      if (_acceptMetadata(generation, token) &&
+          failure.kind != AppFailureKind.cancelled) {
+        highEnergy.value = null;
+      }
+    } finally {
+      if (identical(_highEnergyCancellation, token)) {
+        _highEnergyCancellation = null;
+      }
+    }
+  }
+
   int selectedSubtitle = -1;
   bool commentsEnabled = true;
   double commentFontScale = 1;
@@ -320,6 +413,8 @@ class PlaybackSession extends ChangeNotifier {
       _ownerVisible = visible;
       if (!wasVisible && visible) _resumeCommentPresentation();
       if (wasVisible && !visible) _suspendCommentPresentation();
+      if (!visible) _cancelHighEnergy();
+      if (visible) unawaited(ensureHighEnergy());
       return;
     }
     final sameOwner = identical(_activeOwner, owner);
@@ -390,6 +485,7 @@ class PlaybackSession extends ChangeNotifier {
     // active source running while browsing an ordinary workspace tab.
     _captureOwner();
     _ownerVisible = false;
+    _cancelHighEnergy();
     _suspendCommentPresentation();
     final generation = _generation;
     await endTemporaryRate();
@@ -871,6 +967,9 @@ class PlaybackSession extends ChangeNotifier {
         value.phase == PlaybackPhase.ended &&
         snapshots.value.phase != PlaybackPhase.ended;
     snapshots.value = value;
+    if (previous.duration != value.duration && value.duration > Duration.zero) {
+      unawaited(ensureHighEnergy());
+    }
     if (enteredEnded && !_resolving) {
       _desiredPlaying = false;
     }
@@ -1150,6 +1249,13 @@ class PlaybackSession extends ChangeNotifier {
   void configureSettings(AppSettings settings) {
     final previous = _settings;
     _settings = settings.normalized();
+    if (!_settings.highEnergyProgressEnabled) {
+      _cancelHighEnergy();
+      highEnergy.value = null;
+      _highEnergyRequested = false;
+    } else if (!previous.highEnergyProgressEnabled) {
+      unawaited(ensureHighEnergy());
+    }
     if (!_settings.resumePlayback) _cancelCloudResume();
     final presentationChanged =
         !_commentsConfigured ||
@@ -1519,6 +1625,13 @@ class PlaybackSession extends ChangeNotifier {
           media?.duration ?? selected.duration,
         );
         chaptersMessage = metadata.chapterFailure?.message;
+        _chaptersConfirmedEmpty =
+            metadata.chapterFailure == null && metadata.chapters.isEmpty;
+        if (!_chaptersConfirmedEmpty) {
+          _cancelHighEnergy();
+          highEnergy.value = null;
+        }
+        unawaited(ensureHighEnergy());
         tracks = metadata.subtitles;
         subtitleMessage = metadata.subtitleFailure?.message;
       } else {
@@ -1561,6 +1674,10 @@ class PlaybackSession extends ChangeNotifier {
       _epoch == sessionEpoch();
 
   void _clearTimeline() {
+    _cancelHighEnergy();
+    _highEnergyRequested = false;
+    _chaptersConfirmedEmpty = false;
+    highEnergy.value = null;
     _storyboardCancellation?.cancel();
     _storyboardCancellation = null;
     chapters = const [];
@@ -2104,6 +2221,7 @@ class PlaybackSession extends ChangeNotifier {
     if (playbackCommands != null) await attempt(() => playbackCommands);
     await attempt(engine.dispose);
     await attempt(() async => snapshots.dispose());
+    await attempt(() async => highEnergy.dispose());
     await attempt(() async => danmaku.dispose());
     _clock.stop();
     super.dispose();

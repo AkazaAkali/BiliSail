@@ -2,6 +2,8 @@
 
 日期：2026-10-05。首版已使用 `media_kit`，Windows 分轨与请求策略已验证，三端结论仍以完整 M0 为准。本文中的参数为初始预算，不是已测结果；当前证据见 [实测记录](validation/m0-results.md)。
 
+2026-10-11 已接入高能进度条：Windows/macOS 默认开启、移动默认关闭；等待章节确认，无章节才加载，存在章节不请求、不显示。复用唯一会话及已有位置订阅，缓存曲线几何，仅改变已播放裁剪；可选读取不阻塞媒体打开，见 [设计](high-energy-progress-design.md) 与 [实现验证](validation/high-energy-progress.md)。
+
 影视弹幕、直播实时连接/画面弹幕及 SC 状态合并的当前实现和容量限制见 [影视与直播弹幕修复](validation/pgc-live-danmaku.md)；直播使用独立到达时间时钟，继续复用唯一原生播放会话。
 
 2026-10-06 点播已接入云端进度上报；开启记住进度时本地记录优先，仅在本地缺失时读取当前分 P 的云端进度。Web 会话、队列/账号/源隔离及验证边界见 [云端播放进度](validation/cloud-playback-progress.md)。

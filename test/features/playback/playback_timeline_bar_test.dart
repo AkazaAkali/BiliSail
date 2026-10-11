@@ -10,6 +10,8 @@ import 'package:bilisail/core/presentation/app_image_provider.dart';
 import 'package:bilisail/core/storage/image_byte_cache.dart';
 import 'package:bilisail/shared/ui/app_network_image.dart';
 import 'package:bilisail/features/playback/domain/playback_timeline.dart';
+import 'package:bilisail/features/playback/domain/high_energy_trend.dart';
+import 'package:bilisail/features/playback/presentation/high_energy_curve.dart';
 import 'package:bilisail/features/playback/data/api_playback_repository.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/domain/video.dart';
@@ -67,6 +69,92 @@ void main() {
     expect(harness.seeks, [const Duration(seconds: 30)]);
     await mouse.removePointer();
   });
+  testWidgets('1000 position changes reuse one path; resize rebuilds it once', (
+    tester,
+  ) async {
+    final harness = _Harness(width: 700)..chapters = const [];
+    harness.trend.value = HighEnergyTrend(
+      step: const Duration(seconds: 1),
+      span: harness.duration,
+      points: [
+        for (var i = 0; i < 512; i++) HighEnergyPoint(i / 511, (i % 13) / 12),
+      ],
+    );
+    addTearDown(harness.trend.dispose);
+    await tester.pumpWidget(harness.build());
+    final curve = find.byType(HighEnergyCurve);
+    final state = tester.state<HighEnergyCurveState>(curve);
+    expect(state.pathBuildCount, 1);
+    final sliderRect = tester.getRect(
+      find.byKey(const ValueKey('playback-timeline-slider')),
+    );
+    final curveRect = tester.getRect(curve);
+    expect(curveRect.left, sliderRect.left + timelineTrackInset);
+    expect(curveRect.right, sliderRect.right - timelineTrackInset);
+    expect(curveRect.height, 24);
+    for (var i = 0; i < 1000; i++) {
+      harness.position = Duration(milliseconds: i * 50);
+      await tester.pumpWidget(harness.build());
+    }
+    expect(state.pathBuildCount, 1);
+    harness.width = 350;
+    await tester.pumpWidget(harness.build());
+    expect(state.pathBuildCount, 2);
+    expect(tester.getSize(curve).height, 16);
+    harness.rtl = true;
+    await tester.pumpWidget(harness.build());
+    expect(state.pathBuildCount, 2);
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets(
+    'chapters suppress the curve; curve leaves drag seek and fallback intact',
+    (tester) async {
+      final harness = _Harness();
+      final trend = HighEnergyTrend(
+        step: const Duration(seconds: 1),
+        span: harness.duration,
+        points: const [
+          HighEnergyPoint(0, 0),
+          HighEnergyPoint(.5, 1),
+          HighEnergyPoint(1, .1),
+        ],
+      );
+      addTearDown(harness.trend.dispose);
+      harness.trend.value = trend;
+      await tester.pumpWidget(harness.build());
+      expect(find.byType(HighEnergyCurve), findsNothing);
+      expect(
+        find.byKey(const ValueKey('playback-chapters-menu')),
+        findsOneWidget,
+      );
+      harness.chapters = const [];
+      await tester.pumpWidget(harness.build());
+      expect(find.byType(HighEnergyCurve), findsOneWidget);
+      final slider = tester.getRect(
+        find.byKey(const ValueKey('playback-timeline-slider')),
+      );
+      final drag = await tester.startGesture(
+        Offset(slider.left + 8, slider.center.dy),
+      );
+      await drag.moveTo(
+        Offset(slider.left + 8 + (slider.width - 16) * .75, slider.center.dy),
+      );
+      await tester.pump();
+      expect(harness.seeks, isEmpty);
+      await drag.up();
+      await tester.pump();
+      expect(harness.seeks, hasLength(1));
+      expect(harness.seeks.single.inSeconds, closeTo(45, 1));
+      harness.trend.value = null;
+      await tester.pump();
+      expect(find.byType(HighEnergyCurve), findsNothing);
+      expect(
+        find.byKey(const ValueKey('playback-timeline-slider')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets(
     'zero-size sprite metadata resolves every crop and reuses the sheet',
     (tester) async {
@@ -381,37 +469,45 @@ class _Harness {
   int previews = 0, generation = 1;
   double width, textScale;
   Duration duration = const Duration(seconds: 60);
+  Duration position = Duration.zero;
+  List<VideoChapter> chapters = _chapters;
+  bool rtl = false;
+  final trend = ValueNotifier<HighEnergyTrend?>(null);
 
   Widget build() => MaterialApp(
     home: MediaQuery(
       data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
-      child: Scaffold(
-        body: Center(
-          child: SizedBox(
-            key: player,
-            width: width,
-            height: 260,
-            child: ColoredBox(
-              color: Colors.black,
-              child: Stack(
-                children: [
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 40,
-                    child: PlaybackTimelineBar(
-                      key: ValueKey(generation),
-                      position: Duration.zero,
-                      duration: duration,
-                      buffered: const Duration(seconds: 45),
-                      chapters: _chapters,
-                      sourceGeneration: generation,
-                      playerBoundsKey: player,
-                      onSeek: seeks.add,
-                      onPreviewRequest: () => previews++,
+      child: Directionality(
+        textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+        child: Scaffold(
+          body: Center(
+            child: SizedBox(
+              key: player,
+              width: width,
+              height: 260,
+              child: ColoredBox(
+                color: Colors.black,
+                child: Stack(
+                  children: [
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 40,
+                      child: PlaybackTimelineBar(
+                        key: ValueKey(generation),
+                        position: position,
+                        duration: duration,
+                        buffered: const Duration(seconds: 45),
+                        chapters: chapters,
+                        highEnergy: trend,
+                        sourceGeneration: generation,
+                        playerBoundsKey: player,
+                        onSeek: seeks.add,
+                        onPreviewRequest: () => previews++,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

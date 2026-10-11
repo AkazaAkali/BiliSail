@@ -1,10 +1,13 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../../shared/ui/storyboard_thumbnail.dart';
 
 import '../domain/playback_timeline.dart';
+import '../domain/high_energy_trend.dart';
+import 'high_energy_curve.dart';
 
 export '../../../shared/ui/storyboard_thumbnail.dart';
 
@@ -26,6 +29,7 @@ class PlaybackTimelineBar extends StatefulWidget {
     this.storyboardLoading = false,
     this.storyboardMessage,
     this.onMenuChanged,
+    this.highEnergy,
   });
   final Duration position, duration, buffered;
   final List<VideoChapter> chapters;
@@ -37,6 +41,7 @@ class PlaybackTimelineBar extends StatefulWidget {
   final bool storyboardLoading;
   final String? storyboardMessage;
   final ValueChanged<bool>? onMenuChanged;
+  final ValueListenable<HighEnergyTrend?>? highEnergy;
 
   @override
   State<PlaybackTimelineBar> createState() => _PlaybackTimelineBarState();
@@ -138,6 +143,28 @@ class _PlaybackTimelineBarState extends State<PlaybackTimelineBar> {
                 key: _barKey,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (widget.chapters.isEmpty && widget.highEnergy != null)
+                    ValueListenableBuilder<HighEnergyTrend?>(
+                      valueListenable: widget.highEnergy!,
+                      builder: (context, trend, _) =>
+                          trend == null ||
+                              !trend.matchesDuration(widget.duration)
+                          ? const SizedBox.shrink()
+                          : Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: timelineTrackInset,
+                              ),
+                              child: Transform.translate(
+                                offset: const Offset(0, 11),
+                                child: HighEnergyCurve(
+                                  key: const ValueKey('playback-high-energy'),
+                                  trend: trend,
+                                  fraction: enabled ? value / total : 0,
+                                  height: width < 600 ? 16 : 24,
+                                ),
+                              ),
+                            ),
+                    ),
                   if (chapters.isNotEmpty)
                     SizedBox(
                       width: double.infinity,

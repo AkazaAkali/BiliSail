@@ -12,6 +12,62 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   for (final inPlayer in [false, true]) {
+    testWidgets(
+      'high energy toggle persists in both settings entries: $inPlayer',
+      (tester) async {
+        final repository = _SettingsRepository();
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              settingsRepositoryProvider.overrideWithValue(repository),
+            ],
+            child: MaterialApp(
+              home: Scaffold(
+                body: inPlayer
+                    ? Builder(
+                        builder: (context) => TextButton(
+                          onPressed: () => showPlayerSettings(context),
+                          child: const Text('配置'),
+                        ),
+                      )
+                    : const SettingsScreen(category: SettingsCategory.playback),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        if (inPlayer) {
+          await tester.tap(find.text('配置'));
+          await tester.pumpAndSettle();
+        }
+        final toggle = find.widgetWithText(
+          SwitchListTile,
+          inPlayer ? '高能进度条（有章节时不显示）' : '高能进度条',
+        );
+        await tester.scrollUntilVisible(
+          toggle,
+          120,
+          scrollable: find
+              .descendant(
+                of: find.byType(ListView).first,
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await Scrollable.ensureVisible(tester.element(toggle), alignment: .5);
+        await tester.pumpAndSettle();
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect(repository.settings.highEnergyProgressEnabled, isTrue);
+        expect(repository.settings.danmakuEnabled, isTrue);
+        final container = ProviderScope.containerOf(tester.element(toggle));
+        container.invalidate(settingsControllerProvider);
+        await tester.pumpAndSettle();
+        expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+      },
+    );
+  }
+  for (final inPlayer in [false, true]) {
     testWidgets('live default quality saves separately (player: $inPlayer)', (
       tester,
     ) async {
@@ -39,12 +95,27 @@ void main() {
         await tester.pumpAndSettle();
       }
       expect(find.text('视频默认清晰度'), findsOneWidget);
+      if (inPlayer) {
+        await tester.scrollUntilVisible(
+          find.text('直播默认清晰度'),
+          120,
+          scrollable: find
+              .descendant(
+                of: find.byType(ListView).first,
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+      }
       expect(find.text('直播默认清晰度'), findsOneWidget);
       final liveDropdown = find.byKey(const ValueKey('preferred-live-quality'));
       for (final (label, quality) in [('自动', 0), ('超清', 250)]) {
         final choice = find.widgetWithText(ChoiceChip, label);
         if (inPlayer) {
-          await tester.ensureVisible(liveDropdown);
+          await Scrollable.ensureVisible(
+            tester.element(liveDropdown),
+            alignment: .5,
+          );
           await tester.pumpAndSettle();
           await tester.tap(liveDropdown);
           await tester.pumpAndSettle();

@@ -4,6 +4,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('high energy defaults on only for Windows and macOS', () {
+    for (final platform in TargetPlatform.values) {
+      expect(
+        highEnergyProgressEnabledForPlatform(platform),
+        platform == TargetPlatform.windows || platform == TargetPlatform.macOS,
+      );
+    }
+  });
   test(
     'workspace header is hidden on Android/iOS and visible on Windows/macOS',
     () {

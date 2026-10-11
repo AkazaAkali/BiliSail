@@ -16,6 +16,36 @@ void main() {
   });
   tearDown(() => database.close());
   test(
+    'high energy platform fallback migrates and explicit preferences win',
+    () async {
+      for (final fallback in [false, true]) {
+        final scoped = SqliteSettingsRepository(
+          database,
+          defaultHighEnergyProgressEnabled: fallback,
+        );
+        for (final invalid in [null, 'true', 1]) {
+          await database.writeSetting(
+            'preferences.v1',
+            jsonEncode({
+              'schemaVersion': 19,
+              'autoPlay': false,
+              'highEnergyProgressEnabled': ?invalid,
+            }),
+          );
+          final loaded = await scoped.load();
+          expect(loaded.highEnergyProgressEnabled, fallback);
+          expect(loaded.autoPlay, isFalse);
+        }
+        for (final chosen in [true, false]) {
+          await scoped.save(
+            (await scoped.load()).copyWith(highEnergyProgressEnabled: chosen),
+          );
+          expect((await scoped.load()).highEnergyProgressEnabled, chosen);
+        }
+      }
+    },
+  );
+  test(
     'live quality migrates independently and survives save and reload',
     () async {
       expect((await repository.load()).preferredLiveQuality, 10000);
@@ -42,7 +72,7 @@ void main() {
         final snapshot = jsonDecode(
           (await database.readSetting('preferences.v1')) ?? '{}',
         ) as Map<String, Object?>;
-        expect(snapshot['schemaVersion'], 19);
+        expect(snapshot['schemaVersion'], 20);
         expect(snapshot['preferredLiveQuality'], quality);
       }
       expect(database.schemaVersion, 3);
@@ -144,7 +174,7 @@ void main() {
         final snapshot = jsonDecode(
           (await database.readSetting('preferences.v1')) ?? '{}',
         ) as Map<String, Object?>;
-        expect(snapshot['schemaVersion'], 19);
+        expect(snapshot['schemaVersion'], 20);
         expect(snapshot['playerControlsMode'], mode.name);
       }
       expect(database.schemaVersion, 3);
@@ -211,7 +241,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 19);
+          expect(snapshot['schemaVersion'], 20);
           expect(snapshot['navigationMode'], mode.name);
         }
         for (final selected in WorkspaceNavigationMode.values) {
@@ -259,7 +289,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 19);
+      expect(snapshot['schemaVersion'], 20);
       expect(snapshot['theme'], 'dark');
       expect(database.schemaVersion, 3);
     },
@@ -301,7 +331,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 19);
+      expect(snapshot['schemaVersion'], 20);
       expect(snapshot['allowConcurrentPlayback'], allowed);
       expect(snapshot['navigationMode'], 'singlePage');
       final reloaded = await repository.load();

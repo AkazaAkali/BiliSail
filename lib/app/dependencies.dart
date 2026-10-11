@@ -161,6 +161,7 @@ class AppDependencies {
     final settings = SqliteSettingsRepository(
       database,
       defaultNavigationMode: defaultWorkspaceNavigationMode,
+      defaultHighEnergyProgressEnabled: defaultHighEnergyProgressEnabled,
     );
     Future<MediaCdnPreference> cdnPreference() async =>
         (await settings.load()).mediaCdn;

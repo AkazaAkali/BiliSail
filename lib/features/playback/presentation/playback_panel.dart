@@ -500,12 +500,23 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
     _hasError = widget.session.error != null;
     widget.settings.addListener(_onSettingsChanged);
     widget.session.addListener(_onSessionChanged);
+    widget.controlsVisible.addListener(_syncHighEnergyVisibility);
     FocusManager.instance.addListener(_onControlsFocusChanged);
     WidgetsBinding.instance.addObserver(this);
     _scheduleControlsHide();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncHighEnergyVisibility();
+    });
   }
 
+  void _syncHighEnergyVisibility() =>
+      widget.session.setHighEnergySurfaceVisible(
+        this,
+        mounted && widget.active && _appVisible && widget.controlsVisible.value,
+      );
+
   void _onSessionChanged() {
+    _syncHighEnergyVisibility();
     final generation = widget.session.sourceGeneration;
     final hasError = widget.session.error != null;
     if (_sourceGeneration == generation && _hasError == hasError) return;
@@ -553,6 +564,7 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
   void didUpdateWidget(covariant _PlayerView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.active != widget.active) {
+      _syncHighEnergyVisibility();
       _mouseInside = false;
       _pressedPointers.clear();
       _hoveredControlRegions.clear();
@@ -563,6 +575,7 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _appLifecycleState = state;
+    _syncHighEnergyVisibility();
     _pressedPointers.clear();
     _scheduleControlsHide();
   }
@@ -574,6 +587,8 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.settings.removeListener(_onSettingsChanged);
     widget.session.removeListener(_onSessionChanged);
+    widget.controlsVisible.removeListener(_syncHighEnergyVisibility);
+    widget.session.setHighEnergySurfaceVisible(this, false);
     FocusManager.instance.removeListener(_onControlsFocusChanged);
     widget.shortcuts.endTouchHold();
     _focusNode.dispose();
@@ -1385,6 +1400,8 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                                     duration: snapshot.duration,
                                                     buffered: snapshot.buffered,
                                                     chapters: session.chapters,
+                                                    highEnergy:
+                                                        session.highEnergy,
                                                     storyboard:
                                                         session.storyboard,
                                                     storyboardLoading: session

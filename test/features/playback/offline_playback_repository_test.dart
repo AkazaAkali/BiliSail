@@ -9,6 +9,7 @@ import 'package:bilisail/features/downloads/domain/download_repository.dart';
 import 'package:bilisail/features/playback/data/offline_playback_repository.dart';
 import 'package:bilisail/features/playback/domain/content_playback.dart';
 import 'package:bilisail/features/playback/domain/playback_repository.dart';
+import 'package:bilisail/features/playback/domain/high_energy_trend.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -30,6 +31,35 @@ void main() {
     downloads.task = _task(directory.path);
   });
   tearDown(() async => directory.delete(recursive: true));
+
+  test(
+    'production adapter forwards online high energy and skips offline sources',
+    () async {
+      final detail = _detail();
+      final part = downloads.task.item.part;
+      await repository.highEnergy(
+        detail,
+        part,
+        cancellation: RequestCancellation(),
+      );
+      expect(network.calls, ['high-energy']);
+      network.calls.clear();
+      await repository.content.resolve(
+        const OfflinePlaybackTarget('task-1'),
+        quality: 80,
+        cancellation: RequestCancellation(),
+      );
+      expect(
+        await repository.highEnergy(
+          detail,
+          part,
+          cancellation: RequestCancellation(),
+        ),
+        isNull,
+      );
+      expect(network.calls, isEmpty);
+    },
+  );
 
   test(
     'offline resolve uses separate local DASH files without network',
@@ -401,7 +431,20 @@ final class _FakeDownloads implements DownloadRepository {
 }
 
 final class _FakeNetwork
-    implements PlaybackRepository, PlaybackMetadataRepository {
+    implements
+        PlaybackRepository,
+        PlaybackMetadataRepository,
+        HighEnergyRepository {
+  @override
+  Future<HighEnergyTrend?> highEnergy(
+    VideoDetail video,
+    VideoPart part, {
+    required RequestCancellation cancellation,
+  }) async {
+    calls.add('high-energy');
+    return null;
+  }
+
   final calls = <String>[];
   static final media = PlaybackMedia(
     video: PlaybackTrack(

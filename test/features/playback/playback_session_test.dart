@@ -17,6 +17,7 @@ import 'package:bilisail/features/playback/application/playback_volume_memory.da
 import 'package:bilisail/features/video/application/watch_later_queue_playback.dart';
 import 'package:bilisail/features/video/domain/watch_later_queue.dart';
 import 'package:bilisail/features/playback/domain/playback_repository.dart';
+import 'package:bilisail/features/playback/domain/high_energy_trend.dart';
 import 'package:bilisail/features/playback/domain/content_playback.dart';
 import 'package:bilisail/features/playback/domain/sponsor_repository.dart';
 import 'package:bilisail/features/playback/domain/playback_history_repository.dart';
@@ -77,6 +78,164 @@ void main() {
       },
     );
   }
+
+  for (final cause in [
+    'chapters',
+    'chapterFailure',
+    'metadataFailure',
+    'disabled',
+    'hidden',
+    'offline',
+    'live',
+  ]) {
+    test(
+      'high energy waits for chapters, never blocks open, and skips $cause',
+      () async {
+        final metadata = _FakeMetadataRepository();
+        final session = PlaybackSession(
+          engine: _FakeEngine(),
+          repository: _FakeRepository(autoResolve: true),
+          metadataRepository: metadata,
+          contentRepository: _FakeContentRepository(),
+          progress: _FakeProgress(),
+          accountScope: () => 'guest',
+        );
+        addTearDown(session.close);
+        session.configureSettings(
+          AppSettings(highEnergyProgressEnabled: cause != 'disabled'),
+        );
+        session.setHighEnergySurfaceVisible(Object(), cause != 'hidden');
+        await session.open(
+          _detail('one'),
+          _part('one'),
+          target: switch (cause) {
+            'offline' => const OfflinePlaybackTarget('1'),
+            'live' => const LivePlaybackTarget('1'),
+            _ => null,
+          },
+        );
+        expect(session.media, isNotNull);
+        expect(metadata.highEnergyPending, isEmpty);
+        if (cause == 'metadataFailure') {
+          metadata.metadataPending['one']?.completeError(
+            const AppFailure(AppFailureKind.network, 'metadata failed'),
+          );
+        } else {
+          metadata.metadataPending['one']?.complete(
+            PlaybackMetadata(
+              subtitles: const [],
+              chapters: cause == 'chapters'
+                  ? _timelineMetadata.chapters
+                  : const [],
+              chapterFailure: cause == 'chapterFailure'
+                  ? const AppFailure(AppFailureKind.protocol, 'bad chapters')
+                  : null,
+            ),
+          );
+        }
+        await _flush();
+        await session.ensureHighEnergy();
+        expect(metadata.highEnergyPending, isEmpty);
+        expect(session.highEnergy.value, isNull);
+      },
+    );
+  }
+  for (final cause in [
+    'source',
+    'setting',
+    'hidden',
+    'account',
+    'epoch',
+    'stop',
+  ]) {
+    test('late high energy is rejected after $cause', () async {
+      var scope = 'guest';
+      var epoch = 0;
+      final surface = Object();
+      final metadata = _FakeMetadataRepository();
+      final session = PlaybackSession(
+        engine: _FakeEngine(),
+        repository: _FakeRepository(autoResolve: true),
+        metadataRepository: metadata,
+        progress: _FakeProgress(),
+        accountScope: () => scope,
+        sessionEpoch: () => epoch,
+      );
+      addTearDown(session.close);
+      session.configureSettings(AppSettings(highEnergyProgressEnabled: true));
+      session.setHighEnergySurfaceVisible(surface, true);
+      await session.open(_detail('one'), _part('one'));
+      metadata.metadataPending['one']?.complete(
+        const PlaybackMetadata(subtitles: [], chapters: []),
+      );
+      await _flush();
+      expect(metadata.highEnergyPending, hasLength(1));
+      switch (cause) {
+        case 'source':
+          await session.open(_detail('two'), _part('two'));
+        case 'setting':
+          session.configureSettings(
+            AppSettings(highEnergyProgressEnabled: false),
+          );
+        case 'hidden':
+          session.setHighEnergySurfaceVisible(surface, false);
+        case 'account':
+          scope = 'other';
+        case 'epoch':
+          epoch++;
+        case 'stop':
+          await session.stop();
+      }
+      if (cause != 'account' && cause != 'epoch') {
+        expect(metadata.highEnergyTokens['one']?.isCancelled, isTrue);
+      }
+      metadata.highEnergyPending['one']?.complete(_highEnergyTrend);
+      await _flush();
+      expect(session.highEnergy.value, isNull);
+    });
+  }
+  test('high energy uses only its notifier, reuses seeks and rejects span mismatch', () async {
+    final metadata = _FakeMetadataRepository();
+    final session = PlaybackSession(
+      engine: _FakeEngine(),
+      repository: _FakeRepository(autoResolve: true),
+      metadataRepository: metadata,
+      progress: _FakeProgress(),
+      accountScope: () => 'guest',
+    );
+    addTearDown(session.close);
+    session.configureSettings(AppSettings(highEnergyProgressEnabled: true));
+    session.setHighEnergySurfaceVisible(Object(), true);
+    await session.open(_detail('one'), _part('one'));
+    metadata.metadataPending['one']?.complete(
+      const PlaybackMetadata(subtitles: [], chapters: []),
+    );
+    await _flush();
+    var notifications = 0;
+    session.addListener(() => notifications++);
+    metadata.highEnergyPending['one']?.complete(_highEnergyTrend);
+    await _flush();
+    expect(session.highEnergy.value, same(_highEnergyTrend));
+    expect(notifications, 0);
+    await session.seek(const Duration(seconds: 15));
+    await session.ensureHighEnergy();
+    expect(metadata.highEnergyCalls, ['one']);
+    await session.open(_detail('two'), _part('two'));
+    metadata.metadataPending['two']?.complete(
+      const PlaybackMetadata(subtitles: [], chapters: []),
+    );
+    await _flush();
+    metadata.highEnergyPending['two']?.complete(
+      HighEnergyTrend(
+        step: const Duration(seconds: 45),
+        span: const Duration(seconds: 4479),
+        points: _highEnergyTrend.points,
+      ),
+    );
+    await _flush();
+    expect(session.highEnergy.value, isNull);
+    expect(session.error, isNull);
+  });
 
   for (final quality in [0, 250, 400, 20000]) {
     test('new live owner uses its own default qn $quality', () async {
@@ -4371,6 +4530,16 @@ PlaybackManager _manager({
   );
 }
 
+final _highEnergyTrend = HighEnergyTrend(
+  step: const Duration(seconds: 1),
+  span: const Duration(minutes: 2),
+  points: const [
+    HighEnergyPoint(0, 0),
+    HighEnergyPoint(.5, 1),
+    HighEnergyPoint(1, .3),
+  ],
+);
+
 const _timelineMetadata = PlaybackMetadata(
   subtitles: [],
   chapters: [
@@ -4390,7 +4559,24 @@ final _storyboard = VideoStoryboard(
   times: [Duration.zero],
 );
 
-final class _FakeMetadataRepository implements PlaybackMetadataRepository {
+final class _FakeMetadataRepository
+    implements PlaybackMetadataRepository, HighEnergyRepository {
+  final highEnergyPending = <String, Completer<HighEnergyTrend?>>{};
+  final highEnergyTokens = <String, RequestCancellation>{};
+  final highEnergyCalls = <String>[];
+  @override
+  Future<HighEnergyTrend?> highEnergy(
+    VideoDetail video,
+    VideoPart part, {
+    required RequestCancellation cancellation,
+  }) {
+    highEnergyCalls.add(part.cid);
+    highEnergyTokens[part.cid] = cancellation;
+    final gate = Completer<HighEnergyTrend?>();
+    highEnergyPending[part.cid] = gate;
+    return gate.future;
+  }
+
   final metadataPending = <String, Completer<PlaybackMetadata>>{};
   final storyboardPending = <String, Completer<VideoStoryboard?>>{};
   final storyboardTokens = <String, RequestCancellation>{};

@@ -57,6 +57,7 @@ final class AppSettings {
     this.continuousPlayback = false,
     this.resumePlayback = true,
     this.showCollapsedProgress = true,
+    this.highEnergyProgressEnabled = false,
     this.playerControlsMode = PlayerControlsMode.click,
     this.preferredQuality = 80,
     this.preferredLiveQuality = 10000,
@@ -97,6 +98,7 @@ final class AppSettings {
   const AppSettings.defaults({
     this.navigationMode = WorkspaceNavigationMode.multipleTabs,
     this.allowConcurrentPlayback = true,
+    this.highEnergyProgressEnabled = false,
   }) : shortcuts = const ShortcutSettings.defaults(),
        theme = AppThemePreference.system,
        font = AppFontPreference.harmonyOsSans,
@@ -161,6 +163,7 @@ final class AppSettings {
   final bool continuousPlayback;
   final bool resumePlayback;
   final bool showCollapsedProgress;
+  final bool highEnergyProgressEnabled;
   final PlayerControlsMode playerControlsMode;
   final int preferredQuality;
   final int preferredLiveQuality;
@@ -224,6 +227,7 @@ final class AppSettings {
     bool? continuousPlayback,
     bool? resumePlayback,
     bool? showCollapsedProgress,
+    bool? highEnergyProgressEnabled,
     PlayerControlsMode? playerControlsMode,
     int? preferredQuality,
     int? preferredLiveQuality,
@@ -273,6 +277,8 @@ final class AppSettings {
     continuousPlayback: continuousPlayback ?? this.continuousPlayback,
     resumePlayback: resumePlayback ?? this.resumePlayback,
     showCollapsedProgress: showCollapsedProgress ?? this.showCollapsedProgress,
+    highEnergyProgressEnabled:
+        highEnergyProgressEnabled ?? this.highEnergyProgressEnabled,
     playerControlsMode: playerControlsMode ?? this.playerControlsMode,
     preferredQuality: preferredQuality ?? this.preferredQuality,
     preferredLiveQuality: preferredLiveQuality ?? this.preferredLiveQuality,

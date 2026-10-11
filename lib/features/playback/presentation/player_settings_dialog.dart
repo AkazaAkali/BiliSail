@@ -159,6 +159,11 @@ class _PlayerSettingsDialogState extends ConsumerState<_PlayerSettingsDialog> {
                           s.resumePlayback,
                           (c, v) => c.copyWith(resumePlayback: v),
                         ),
+                        _switch(
+                          '高能进度条（有章节时不显示）',
+                          s.highEnergyProgressEnabled,
+                          (c, v) => c.copyWith(highEnergyProgressEnabled: v),
+                        ),
                         ListTile(
                           title: const Text('视频默认清晰度'),
                           subtitle: DropdownButton<int>(

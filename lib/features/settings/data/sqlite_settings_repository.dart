@@ -9,14 +9,19 @@ class SqliteSettingsRepository implements SettingsRepository {
   SqliteSettingsRepository(
     this.database, {
     this.defaultNavigationMode = WorkspaceNavigationMode.multipleTabs,
+    this.defaultHighEnergyProgressEnabled = false,
   });
   final AppDatabase database;
   final WorkspaceNavigationMode defaultNavigationMode;
+  final bool defaultHighEnergyProgressEnabled;
   @override
   Future<AppSettings> load() async {
     final value = await database.readSetting('preferences.v1');
     if (value == null) {
-      return AppSettings.defaults(navigationMode: defaultNavigationMode);
+      return AppSettings.defaults(
+        navigationMode: defaultNavigationMode,
+        highEnergyProgressEnabled: defaultHighEnergyProgressEnabled,
+      );
     }
     final Object? decoded = jsonDecode(value);
     if (decoded is! Map<String, Object?>) {
@@ -66,6 +71,10 @@ class SqliteSettingsRepository implements SettingsRepository {
       continuousPlayback: boolean('continuousPlayback', false),
       resumePlayback: boolean('resumePlayback', true),
       showCollapsedProgress: boolean('showCollapsedProgress', true),
+      highEnergyProgressEnabled: boolean(
+        'highEnergyProgressEnabled',
+        defaultHighEnergyProgressEnabled,
+      ),
       playerControlsMode:
           PlayerControlsMode.values
               .where((item) => item.name == decoded['playerControlsMode'])
@@ -156,7 +165,7 @@ class SqliteSettingsRepository implements SettingsRepository {
     return database.writeSetting(
       'preferences.v1',
       jsonEncode({
-        'schemaVersion': 19,
+        'schemaVersion': 20,
         'navigationMode': value.navigationMode.name,
         'allowConcurrentPlayback': value.allowConcurrentPlayback,
         'cacheImages': value.cacheImages,
@@ -172,6 +181,7 @@ class SqliteSettingsRepository implements SettingsRepository {
         'continuousPlayback': value.continuousPlayback,
         'resumePlayback': value.resumePlayback,
         'showCollapsedProgress': value.showCollapsedProgress,
+        'highEnergyProgressEnabled': value.highEnergyProgressEnabled,
         'playerControlsMode': value.playerControlsMode.name,
         'preferredQuality': value.preferredQuality,
         'preferredLiveQuality': value.preferredLiveQuality,

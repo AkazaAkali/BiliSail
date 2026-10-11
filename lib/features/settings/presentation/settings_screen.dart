@@ -258,6 +258,12 @@ final class _SettingsCategoryPageState
                             '打开视频后开始播放',
                           ),
                           _toggle(
+                            '高能进度条',
+                            s.highEnergyProgressEnabled,
+                            controller.setHighEnergyProgressEnabled,
+                            '显示视频热度曲线；有章节时优先显示章节',
+                          ),
+                          _toggle(
                             '连续播放',
                             s.continuousPlayback,
                             controller.setContinuousPlayback,

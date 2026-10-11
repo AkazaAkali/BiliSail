@@ -1753,6 +1753,70 @@ final class BiliApiClient {
     return response.body;
   }
 
+  /// Public PBP loader has no business-code envelope and never carries cookies.
+  /// Its host/path and response budget are deliberately not caller configurable.
+  Future<Uint8List> highEnergyBytes(
+    String aid,
+    String cid,
+    String bvid, {
+    ApiRequestContext? context,
+  }) async {
+    const endpoint = 'high_energy';
+    if (!RegExp(r'^[1-9][0-9]{0,19}$').hasMatch(aid) ||
+        !RegExp(r'^[1-9][0-9]{0,19}$').hasMatch(cid) ||
+        !RegExp(r'^BV[0-9A-Za-z]{10}$').hasMatch(bvid)) {
+      throw const ApiFailure(ApiFailureCategory.protocol, endpoint);
+    }
+    final epoch = _sessionProvider?.sessionEpoch;
+    if (context?.sessionEpoch != null && context?.sessionEpoch != epoch) {
+      throw const ApiFailure(ApiFailureCategory.cancelled, endpoint);
+    }
+    final budget = _clock().add(const Duration(seconds: 6));
+    final requested = context?.deadline;
+    final limited = ApiRequestContext(
+      cancellation: context?.cancellation,
+      sessionEpoch: context?.sessionEpoch,
+      deadline: requested != null && requested.isBefore(budget)
+          ? requested
+          : budget,
+    );
+    final response = await _sendWithRetry(
+      Uri.https('bvc.bilivideo.com', '/pbp/data', {
+        'aid': aid,
+        'cid': cid,
+        'bvid': bvid,
+        'r': 'loader',
+      }),
+      endpoint,
+      const {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://www.bilibili.com/',
+      },
+      limited,
+      epoch,
+      maxAttempts: 2,
+      maxBytes: 256 * 1024,
+    );
+    if (context?.cancellation?.isCancelled == true ||
+        (epoch != null && _sessionProvider?.sessionEpoch != epoch)) {
+      throw const ApiFailure(ApiFailureCategory.cancelled, endpoint);
+    }
+    if (response.statusCode != 200) {
+      throw ApiFailure(
+        response.statusCode == 429
+            ? ApiFailureCategory.rateLimited
+            : ApiFailureCategory.http,
+        endpoint,
+        httpStatus: response.statusCode,
+      );
+    }
+    if (response.body.length > 256 * 1024) {
+      throw const ApiFailure(ApiFailureCategory.protocol, endpoint);
+    }
+    return response.body;
+  }
+
   Future<ApiHttpResponse> _sendWithRetry(
     Uri uri,
     String endpoint,

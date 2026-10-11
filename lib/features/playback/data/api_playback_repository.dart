@@ -10,12 +10,15 @@ import '../../../domain/video.dart';
 import '../../../domain/media_cdn.dart';
 import '../../../domain/app_failure.dart';
 import '../domain/playback_repository.dart';
+import '../domain/high_energy_trend.dart';
+import 'high_energy_cache.dart';
 import 'dash_media_selection.dart';
 
 class ApiPlaybackRepository
     implements
         PlaybackRepository,
         PlaybackMetadataRepository,
+        HighEnergyRepository,
         VoicePlaybackRepository {
   ApiPlaybackRepository(
     this.api,
@@ -27,6 +30,34 @@ class ApiPlaybackRepository
   final ApiRequests requests;
   final Future<MediaCdnPreference> Function()? cdnPreference;
   final Future<({int width, int height})> Function(Uri)? imageDimensions;
+  late final _highEnergyCache = HighEnergyCache(requests);
+
+  @override
+  Future<HighEnergyTrend?> highEnergy(
+    VideoDetail video,
+    VideoPart part, {
+    required RequestCancellation cancellation,
+  }) {
+    final aid = video.aid;
+    if (aid == null || !video.summary.id.isValid) return Future.value();
+    return _highEnergyCache.load(
+      '$aid:${video.summary.id.value}:${part.cid}',
+      cancellation,
+      (token) => requests.run((context) async {
+        final data = await HighEnergyClient(api)
+            .load(aid, part.cid, video.summary.id.value, context: context);
+        if (data == null) return null;
+        return HighEnergyTrend(
+          step: data.step,
+          span: data.span,
+          points: [
+            for (final point in data.points)
+              HighEnergyPoint(point.fraction, point.intensity),
+          ],
+        );
+      }, cancellation: token),
+    );
+  }
 
   @override
   Future<PlaybackMetadata> metadata(
