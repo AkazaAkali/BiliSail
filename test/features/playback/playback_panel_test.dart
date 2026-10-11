@@ -12,6 +12,7 @@ import 'package:bili_danmaku/bili_danmaku.dart';
 import 'package:bilisail/app/router.dart';
 import 'package:bilisail/app/theme.dart';
 import 'package:bilisail/shared/ui/app_notice.dart';
+import 'package:bilisail/shared/ui/playback_page_commands.dart';
 import 'package:bilisail/core/platform/window_service.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/domain/video.dart';
@@ -1647,12 +1648,12 @@ void main() {
         );
         expect(
           find.byKey(const ValueKey('compact-playback-actions')),
-          findsOneWidget,
+          findsNothing,
         );
         expect(field, findsNothing);
         expect(
           tester.getSize(find.byKey(const ValueKey('player-controls'))).height,
-          lessThan(90),
+          lessThan(110),
         );
         expect(find.byTooltip('全屏（F）').hitTestable(), findsOneWidget);
       }
@@ -1691,6 +1692,100 @@ void main() {
       await _pumpFrames(tester);
     },
   );
+
+  for (final pgc in [false, true]) {
+    for (final fullScreen in [false, true]) {
+      testWidgets(
+        'compact transport stays at bottom left while composing pgc=$pgc fullscreen=$fullScreen',
+        (tester) async {
+          tester.view.devicePixelRatio = 1;
+          tester.view.physicalSize = const Size(390, 900);
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final engine = _FakeEngine();
+          final session = _session(engine);
+          addTearDown(session.close);
+          var nextCalls = 0;
+          await tester.pumpWidget(
+            _app(
+              session,
+              _FakeWindowService(),
+              const AppSettings.defaults(),
+              width: 390,
+              target: pgc ? const PgcPlaybackTarget('1', cid: '123') : null,
+              nextPart: () => nextCalls++,
+              composer: (_) => const SizedBox(
+                height: 36,
+                child: TextField(key: Key('compact-transport-draft')),
+              ),
+            ),
+          );
+          await _pumpFrames(tester);
+          if (fullScreen) {
+            await tester.tap(find.byTooltip('全屏（F）'));
+            await _pumpFrames(tester);
+          }
+          final next = find.byKey(const ValueKey('player-next-episode'));
+          final bar = find.byKey(const ValueKey('compact-control-row'));
+          void expectTransportInBar() {
+            final pause = find.byTooltip('暂停（空格）');
+            expect(pause.hitTestable(), findsOneWidget);
+            expect(find.descendant(of: bar, matching: pause), findsOneWidget);
+            expect(find.descendant(of: bar, matching: next), findsOneWidget);
+            expect(tester.getTopLeft(pause).dx, tester.getTopLeft(bar).dx);
+            expect(tester.getCenter(next).dy, tester.getCenter(pause).dy);
+            expect(tester.getTopLeft(next).dx, tester.getTopRight(pause).dx);
+          }
+
+          expectTransportInBar();
+          expect(find.byTooltip('暂停（空格）').hitTestable(), findsOneWidget);
+          expect(next, findsOneWidget);
+          final generation = session.sourceGeneration;
+          final opens = engine.opens;
+          await tester.tap(find.byTooltip('发送弹幕'));
+          await _pumpFrames(tester);
+          await tester.enterText(
+            find.byKey(const Key('compact-transport-draft')),
+            '保留草稿',
+          );
+          for (final width in [390.0, 320.0]) {
+            tester.view.physicalSize = Size(width, 900);
+            await _pumpFrames(tester);
+            expectTransportInBar();
+            expect(next, findsOneWidget);
+            expect(tester.widget<IconButton>(next).onPressed, isNotNull);
+            final beforeNext = nextCalls;
+            await tester.tap(next);
+            await _pumpFrames(tester);
+            expect(nextCalls, beforeNext + 1);
+            expect(
+              tester
+                  .renderObject<RenderParagraph>(find.text('00:00 / 03:00'))
+                  .didExceedMaxLines,
+              isFalse,
+            );
+            await tester.tap(find.byTooltip('暂停（空格）'));
+            await _pumpFrames(tester);
+            expect(session.snapshots.value.desiredPlaying, isFalse);
+            await tester.tap(find.byTooltip('播放（空格）'));
+            await _pumpFrames(tester);
+            expect(session.snapshots.value.desiredPlaying, isTrue);
+            expect(find.text('保留草稿'), findsOneWidget);
+            expect(tester.takeException(), isNull);
+          }
+          await tester.tap(find.byTooltip('收起弹幕输入'));
+          await _pumpFrames(tester);
+          expectTransportInBar();
+          expect(next, findsOneWidget);
+          expect(session.sourceGeneration, generation);
+          expect(engine.opens, opens);
+          expect(engine.maxSurfaces, 1);
+          await tester.pumpWidget(const SizedBox());
+          await _pumpFrames(tester);
+        },
+      );
+    }
+  }
 
   testWidgets('dynamic menu selection survives idle and pointer exit', (
     tester,
@@ -2937,7 +3032,7 @@ void main() {
               for (final region in [
                 controls,
                 find.byKey(const ValueKey('player-control-title-layer')),
-                if (width == 320)
+                if (width == 320 && live)
                   find.byKey(const ValueKey('compact-playback-actions')),
                 controls,
               ]) {
@@ -2976,7 +3071,7 @@ void main() {
     }
 
     testWidgets(
-      '${mode.name} controls release hover when resizing removes compact actions',
+      '${mode.name} controls release hover when resizing moves transport buttons',
       (tester) async {
         tester.view.physicalSize = const Size(1280, 800);
         tester.view.devicePixelRatio = 1;
@@ -2992,11 +3087,7 @@ void main() {
         final controls = find.byKey(const ValueKey('player-controls'));
         final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
         await mouse.addPointer(location: const Offset(-10, -10));
-        await mouse.moveTo(
-          tester.getCenter(
-            find.byKey(const ValueKey('compact-playback-actions')),
-          ),
-        );
+        await mouse.moveTo(tester.getCenter(find.byTooltip('暂停（空格）')));
         await tester.pump(const Duration(seconds: 6));
         expect(controls.hitTestable(), findsOneWidget);
         await tester.pumpWidget(_app(session, window, settings, width: 1200));
@@ -3942,6 +4033,7 @@ Widget _app(
   bool scopedComposer = false,
   NavigatorObserver? navigatorObserver,
   ContentPlaybackTarget? target,
+  VoidCallback? nextPart,
 }) => ProviderScope(
   overrides: [
     playbackSessionProvider.overrideWithValue(session),
@@ -3996,17 +4088,29 @@ Widget _app(
           ),
         ),
         scopedComposer,
+        nextPart: nextPart,
       ),
     ),
   ),
 );
 
-Widget _pageScope(Widget child, bool scoped) => scoped
-    ? ProviderScope(
-        overrides: [_composerScopeProvider.overrideWithValue('房间草稿')],
-        child: child,
-      )
-    : child;
+Widget _pageScope(Widget child, bool scoped, {VoidCallback? nextPart}) {
+  if (nextPart != null) {
+    child = PlaybackPageCommands(
+      previousPart: () {},
+      nextPart: nextPart,
+      hasNext: true,
+      toggleInfo: () {},
+      child: child,
+    );
+  }
+  return scoped
+      ? ProviderScope(
+          overrides: [_composerScopeProvider.overrideWithValue('房间草稿')],
+          child: child,
+        )
+      : child;
+}
 
 Offset _surfacePoint(WidgetTester tester) =>
     tester.getTopLeft(find.byKey(const ValueKey('player-surface-tap-target'))) +

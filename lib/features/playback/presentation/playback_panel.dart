@@ -945,6 +945,7 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                 ),
                               ),
                             if (layout.compact &&
+                                session.isLive &&
                                 !_composeExpanded &&
                                 session.error == null &&
                                 !session.isResolving &&
@@ -962,20 +963,6 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                     ),
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      if (widget.pageCommands.value != null &&
-                                          (session.detail?.parts.length ?? 0) >
-                                              1)
-                                        IconButton(
-                                          tooltip: '上一分 P',
-                                          onPressed: widget
-                                              .pageCommands
-                                              .value
-                                              ?.previousPart,
-                                          icon: const Icon(
-                                            Icons.skip_previous,
-                                            color: Colors.white,
-                                          ),
-                                        ),
                                       _PlayButton(
                                         session: session,
                                         snapshot: snapshot,
@@ -984,13 +971,6 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                         shortcuts:
                                             widget.settings.value.shortcuts,
                                       ),
-                                      if (!session.isLive &&
-                                          session.contentTarget
-                                              is! OfflinePlaybackTarget)
-                                        _NextButton(
-                                          session: session,
-                                          commands: widget.pageCommands.value,
-                                        ),
                                     ],
                                   ),
                                 ),
@@ -1743,14 +1723,30 @@ class _ControlBar extends StatelessWidget {
             key: composerKey,
             child: Builder(builder: composerBuilder),
           );
+    final showPlayInBar = !session.isLive || session.error != null;
+    final showNext = layout.inputs.hasNextButton;
+    // Keep transport controls at the bottom left even when the editor is open.
+    // On the narrowest layouts, give the time its own line instead of clipping
+    // it or shrinking the buttons' hit targets.
+    final compactButtonCount =
+        4 +
+        (composer != null ? 1 : 0) +
+        (showPlayInBar ? 1 : 0) +
+        (showNext ? 1 : 0);
+    final timeAboveRow =
+        layout.compact &&
+        layout.inputs.width <
+            compactButtonCount * _ControlsLayout.buttonWidth + layout.timeWidth;
     final row = Row(
       key: ValueKey(
         layout.compact ? 'compact-control-row' : 'standard-control-row',
       ),
       children: layout.compact
           ? [
-              if (session.error != null) slot(play),
-              Expanded(child: time),
+              if (showPlayInBar) slot(play),
+              if (showNext)
+                slot(_NextButton(session: session, commands: pageCommands)),
+              if (timeAboveRow) const Spacer() else Expanded(child: time),
               slot(danmakuButton),
               if (composer != null)
                 slot(
@@ -1771,8 +1767,7 @@ class _ControlBar extends StatelessWidget {
             ]
           : [
               slot(play),
-              if (!session.isLive &&
-                  session.contentTarget is! OfflinePlaybackTarget)
+              if (showNext)
                 slot(_NextButton(session: session, commands: pageCommands)),
               SizedBox(width: layout.timeWidth, child: time),
               const SizedBox(width: 12),
@@ -1811,6 +1806,7 @@ class _ControlBar extends StatelessWidget {
               ),
             ),
           ),
+        if (timeAboveRow) Align(alignment: Alignment.centerLeft, child: time),
         row,
       ],
     );
@@ -1826,6 +1822,12 @@ class _ControlBar extends StatelessWidget {
       action();
     },
     itemBuilder: (_) => [
+      if ((session.detail?.parts.length ?? 0) > 1)
+        if (pageCommands case final commands?)
+          PopupMenuItem(
+            value: commands.previousPart,
+            child: const Text('上一分 P'),
+          ),
       for (final (tab, title) in const [
         (0, '播放配置'),
         (1, '弹幕配置'),
