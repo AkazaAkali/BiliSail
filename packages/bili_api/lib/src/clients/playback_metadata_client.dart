@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../api_client.dart';
 import '../models.dart';
 
@@ -89,18 +91,17 @@ final class PlaybackMetadataClient {
     }
     _id(cid);
     const endpoint = 'video_storyboard';
+    final readContext = api.boundedReadContext(context);
     final data = await api.requestJson(
       Uri.https('api.bilibili.com', '/x/player/videoshot', {
         'bvid': bvid,
         'cid': cid,
-        'index': '1',
       }),
       endpoint,
-      context: context,
+      context: readContext,
     );
     final images = _list(data['image'], 200, endpoint);
-    final indices = _list(data['index'], 20001, endpoint);
-    if (images.isEmpty || indices.isEmpty) return null;
+    if (images.isEmpty) return null;
     final columns = _integer(data['img_x_len'], endpoint);
     final rows = _integer(data['img_y_len'], endpoint);
     final width = _integer(data['img_x_size'], endpoint);
@@ -116,8 +117,20 @@ final class PlaybackMetadataClient {
       throw const ApiFailure(ApiFailureCategory.protocol, endpoint);
     }
     final urls = images.map((value) => _image(value, endpoint)).toList();
-    final seconds = indices.map((value) => _integer(value, endpoint)).toList();
-    // The Web response can prefix frame-zero's timestamp with a zero sentinel.
+    final bytes = await api.storyboardIndexBytes(
+      _image(data['pvdata'], endpoint),
+      context: readContext,
+    );
+    if (bytes.length.isOdd) {
+      throw const ApiFailure(ApiFailureCategory.protocol, endpoint);
+    }
+    if (bytes.isEmpty) return null;
+    final binary = ByteData.sublistView(bytes);
+    final seconds = [
+      for (var offset = 0; offset < bytes.length; offset += 2)
+        binary.getUint16(offset, Endian.big),
+    ];
+    // pvdata can prefix frame-zero's timestamp with an extra zero sentinel.
     if (seconds.length > 1 && seconds[0] == 0 && seconds[1] == 0) {
       seconds.removeAt(0);
     }

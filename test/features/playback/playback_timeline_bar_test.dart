@@ -28,6 +28,45 @@ const _chapters = [
 ];
 
 void main() {
+  testWidgets('preview requests once on entry and drag start, never per move', (
+    tester,
+  ) async {
+    final harness = _Harness();
+    await tester.pumpWidget(harness.build());
+    final track = tester.getRect(
+      find.byKey(const ValueKey('playback-timeline-slider')),
+    );
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset(track.left, track.top - 40));
+    await mouse.moveTo(track.center);
+    await tester.pump();
+    expect(harness.previews, 1);
+    for (var i = 1; i < 5; i++) {
+      await mouse.moveTo(
+        Offset(track.left + track.width * i / 6, track.center.dy),
+      );
+      await tester.pump();
+    }
+    await tester.pump(const Duration(seconds: 30));
+    expect(harness.previews, 1);
+    await mouse.moveTo(Offset(track.center.dx, track.top - 40));
+    await mouse.moveTo(track.center);
+    await tester.pump();
+    expect(harness.previews, 2);
+    final slider = tester.widget<Slider>(
+      find.byKey(const ValueKey('playback-timeline-slider')),
+    );
+    slider.onChangeStart?.call(10000);
+    slider.onChanged?.call(20000);
+    slider.onChanged?.call(30000);
+    await tester.pump();
+    expect(harness.previews, 3);
+    expect(harness.seeks, isEmpty);
+    slider.onChangeEnd?.call(30000);
+    await tester.pump();
+    expect(harness.seeks, [const Duration(seconds: 30)]);
+    await mouse.removePointer();
+  });
   testWidgets(
     'zero-size sprite metadata resolves every crop and reuses the sheet',
     (tester) async {
@@ -304,25 +343,35 @@ final class _SpriteTransport implements ApiTransport {
     required Map<String, String> headers,
     required Duration timeout,
     ApiCancellation? cancellation,
-  }) async => ApiHttpResponse(
-    200,
-    Uint8List.fromList(
-      utf8.encode(
-        jsonEncode({
-          'code': 0,
-          'data': {
-            'img_x_len': 2,
-            'img_y_len': 2,
-            'img_x_size': 0,
-            'img_y_size': 0,
-            'image': ['https://i0.hdslb.com/synthetic-sprite.jpg'],
-            'index': [0, 0, 5, 10, 15],
-          },
-        }),
+  }) async {
+    if (uri.host == 'boss.hdslb.com') {
+      return ApiHttpResponse(
+        200,
+        Uint8List.fromList([0, 0, 0, 0, 0, 5, 0, 10, 0, 15]),
+        const {},
+      );
+    }
+    return ApiHttpResponse(
+      200,
+      Uint8List.fromList(
+        utf8.encode(
+          jsonEncode({
+            'code': 0,
+            'data': {
+              'img_x_len': 2,
+              'img_y_len': 2,
+              'img_x_size': 0,
+              'img_y_size': 0,
+              'image': ['https://i0.hdslb.com/synthetic-sprite.jpg'],
+              'pvdata': '//boss.hdslb.com/index.bin',
+              'index': [],
+            },
+          }),
+        ),
       ),
-    ),
-    const {},
-  );
+      const {},
+    );
+  }
 }
 
 class _Harness {

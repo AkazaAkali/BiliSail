@@ -58,6 +58,14 @@ final class BiliApiClient {
   static final _api = Uri.https('api.bilibili.com', '/');
   static final _passport = Uri.https('passport.bilibili.com', '/');
 
+  /// Pin one deadline and account epoch across a multi-step protocol read.
+  ApiRequestContext boundedReadContext(ApiRequestContext? context) =>
+      ApiRequestContext(
+        cancellation: context?.cancellation,
+        deadline: context?.deadline ?? _clock().add(timeout),
+        sessionEpoch: context?.sessionEpoch ?? _sessionProvider?.sessionEpoch,
+      );
+
   /// Registered Web reads share WBI keys and bounded re-signing.
   Future<Map<String, Object?>> requestWbiJson(
     String path,
@@ -1648,6 +1656,9 @@ final class BiliApiClient {
       headers,
       context,
       epoch,
+      // The official progress preview retries on the next interaction, rather
+      // than replaying a failed videoshot request inside the same interaction.
+      maxAttempts: endpoint == 'video_storyboard' ? 1 : 3,
     );
     if (epoch != null && _sessionProvider?.sessionEpoch != epoch ||
         context?.cancellation?.isCancelled == true) {
@@ -1689,15 +1700,70 @@ final class BiliApiClient {
     return response;
   }
 
+  /// Public pvdata is big-endian uint16 timestamps, without a JSON envelope.
+  /// Keep this CDN read credential-free and bounded before decoding it.
+  Future<Uint8List> storyboardIndexBytes(
+    Uri uri, {
+    ApiRequestContext? context,
+  }) async {
+    const endpoint = 'video_storyboard_index';
+    const maxBytes = 40002; // 20,000 frames plus the leading zero sentinel.
+    if (uri.scheme != 'https' ||
+        uri.userInfo.isNotEmpty ||
+        uri.port != 443 ||
+        !(uri.host == 'hdslb.com' ||
+            uri.host.endsWith('.hdslb.com') ||
+            uri.host == 'bilibili.com' ||
+            uri.host.endsWith('.bilibili.com'))) {
+      throw const ApiFailure(ApiFailureCategory.protocol, endpoint);
+    }
+    final epoch = _sessionProvider?.sessionEpoch;
+    if (context?.sessionEpoch != null && context?.sessionEpoch != epoch) {
+      throw const ApiFailure(ApiFailureCategory.cancelled, endpoint);
+    }
+    final response = await _sendWithRetry(
+      uri,
+      endpoint,
+      const {
+        'Accept': 'application/octet-stream',
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://www.bilibili.com/',
+      },
+      context,
+      epoch,
+      maxAttempts: 1,
+      maxBytes: maxBytes,
+    );
+    if (context?.cancellation?.isCancelled == true ||
+        (epoch != null && _sessionProvider?.sessionEpoch != epoch)) {
+      throw const ApiFailure(ApiFailureCategory.cancelled, endpoint);
+    }
+    if (response.statusCode != 200) {
+      throw ApiFailure(
+        response.statusCode == 429
+            ? ApiFailureCategory.rateLimited
+            : ApiFailureCategory.http,
+        endpoint,
+        httpStatus: response.statusCode,
+      );
+    }
+    if (response.body.length > maxBytes) {
+      throw const ApiFailure(ApiFailureCategory.protocol, endpoint);
+    }
+    return response.body;
+  }
+
   Future<ApiHttpResponse> _sendWithRetry(
     Uri uri,
     String endpoint,
     Map<String, String> headers,
     ApiRequestContext? context,
-    int? epoch,
-  ) async {
+    int? epoch, {
+    int maxAttempts = 3,
+    int? maxBytes,
+  }) async {
     final deadline = context?.deadline ?? _clock().add(timeout);
-    for (var attempt = 0; attempt < 3; attempt++) {
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
       if (context?.cancellation?.isCancelled == true ||
           (epoch != null && _sessionProvider?.sessionEpoch != epoch)) {
         throw ApiFailure(ApiFailureCategory.cancelled, endpoint);
@@ -1707,26 +1773,34 @@ final class BiliApiClient {
         throw ApiFailure(ApiFailureCategory.timeout, endpoint);
       }
       try {
-        final response = await _transport
-            .get(
-              uri,
-              headers: headers,
-              timeout: remaining,
-              cancellation: context?.cancellation,
-            )
-            .timeout(remaining);
-        if (attempt < 2 &&
+        final transport = _transport;
+        final read = maxBytes != null && transport is ApiBoundedTransport
+            ? (transport as ApiBoundedTransport).getBounded(
+                uri,
+                headers: headers,
+                timeout: remaining,
+                maxBytes: maxBytes,
+                cancellation: context?.cancellation,
+              )
+            : transport.get(
+                uri,
+                headers: headers,
+                timeout: remaining,
+                cancellation: context?.cancellation,
+              );
+        final response = await read.timeout(remaining);
+        if (attempt + 1 < maxAttempts &&
             const [500, 502, 503, 504].contains(response.statusCode)) {
           await _retryDelay(attempt, deadline, context?.cancellation);
           continue;
         }
         return response;
       } on TimeoutException {
-        if (attempt == 2) {
+        if (attempt + 1 == maxAttempts) {
           throw ApiFailure(ApiFailureCategory.timeout, endpoint);
         }
       } on ApiFailure catch (failure) {
-        if (attempt == 2 ||
+        if (attempt + 1 == maxAttempts ||
             (failure.category != ApiFailureCategory.timeout &&
                 failure.category != ApiFailureCategory.network)) {
           throw ApiFailure(

@@ -15,14 +15,15 @@
 | Profile / 能力 | Host、方法、Path | 鉴权、签名、响应和读取规则 |
 | --- | --- | --- |
 | Web / 章节与字幕列表 | `api.bilibili.com` GET `/x/player/wbi/v2` | Web Cookie 可选、WBI；字符串 `aid`、`cid`；JSON `view_points` 与 `subtitle.subtitles`；无分页 |
-| Web / 缩略图索引 | `api.bilibili.com` GET `/x/player/videoshot` | Web Cookie 可选、无签名；`bvid`、`cid`、`index=1`；JSON 图片页、时间索引、网格和单帧尺寸；无分页 |
+| Web / 缩略图描述 | `api.bilibili.com` GET `/x/player/videoshot` | Web Cookie 可选、无签名；`bvid`、`cid`，不传 `index=1`；JSON `pvdata`、图片页、网格和单帧尺寸；无分页 |
+| Public CDN / 缩略图时间索引 | 描述返回的 HTTPS `*.hdslb.com` 或 `*.bilibili.com` | 不携带 Cookie/Authorization；`pvdata` 二进制，每两个字节按大端 uint16 解析为秒；至多 40002 字节，不跟随重定向 |
 | Public CDN / 图片 | 接口返回的 HTTPS `*.hdslb.com` 或 `*.bilibili.com` | 独立公开图片传输；Referer 为 Bilibili，不携带 Cookie/Authorization；至多 3 次重定向并重新检查目标 |
 
-两项 API 使用现有 `ApiRequests` 的取消、账号 epoch 和 25 秒总 deadline，继承只读请求最多额外两次网络/服务端故障重试；认证、限流、风控、协议错误不重放。缩略图端点使用 `Mozilla/5.0` User-Agent：该样本在默认应用 UA 下返回空图片/索引，用此 UA 可读到真实帧；修改仅限此端点，其余 API 保留原 UA。
+章节 API 使用现有只读网络／服务端故障的最多三次传输尝试。缩略图描述和 `pvdata` 每次交互各尝试一次，不在底层自动重放；两步共同遵守 `ApiRequests` 的取消、账号 epoch 和 25 秒总 deadline。协议包单独调用且未指定 deadline 时，两步共享默认 12 秒预算。缩略图描述和二进制均使用 `Mozilla/5.0` User-Agent 与 Bilibili Referer，其余 API 的 UA 和重试规则不变。
 
-`PlaybackMetadataRepository` 为应用领域端口，`bili_api` 只提供协议模型和读取。章节与字幕合并为一次读取；任一可选组件格式错误被分类记录，不丢弃另一组件。章节最多 200 项，规范化乱序、越界、重叠；空白间隔不虚构标题。缩略图首次悬停或拖动才请求，同一播放源只有一个在途读取。成功获取非空索引后不重复查询；返回空索引，或网络错误、服务端故障、超时最终失败时，分别冷却 5 秒、10 秒，允许后续悬停/移动/拖动再次触发。空结果与可恢复失败共用每个播放源最多 3 次逻辑读取的预算，空结果仍只显示时间/章节而不弹错误。每次逻辑读取仍使用 25 秒总 deadline 和最多 3 次底层传输尝试，索引最多产生 9 次 HTTP 请求，不设置后台重试定时器。鉴权、权限、限流、未找到和协议错误不补试。失败保留时间/章节预览，换源后重置次数与冷却。旧源、旧账号响应不能改写新状态，账号 scope/epoch 已改变的会话也不能发起补试。
+`PlaybackMetadataRepository` 为应用领域端口，`bili_api` 只提供协议模型和读取。章节与字幕合并为一次读取；任一可选组件格式错误被分类记录，不丢弃另一组件。章节最多 200 项，规范化乱序、越界、重叠，空白间隔不虚构标题。缩略图在首次移入进度条或开始拖动时请求，同一播放源只有一个在途读取。连续移动只改变预览位置，不再次请求。失败或空结果后，移出再移入、重新开始拖动可立即补试，不设置后台定时器、5/10 秒冷却或每源三次上限。成功获取后按源复用索引；失败保留时间／章节预览，不影响媒体。换源清除索引，旧源／旧账号响应不能改写新状态，账号 scope/epoch 已改变的会话也不能发起补试。
 
-索引最多 20000 帧、图片最多 200 页、网格至多 20×20、单格尺寸至多 4096，时间不超过七天。单格宽高为零表示未提供，应用仓储通过共享图片缓存读取第一页的原始编码尺寸，按网格推导有效尺寸；负数、越界、不整除或与已提供尺寸矛盾的数据仍拒绝。只移除 `[0,0,...]` 中多余的前导零，严格校验后续时间递增和网格容量。二分查找选取最近的前序帧，按页、行、列裁剪雪碧图，不使用播放器抓帧。图片复用现有容量受限缓存：编码图片单张 4 MiB、总量 64 MiB/512 项，解码缓存 64 MiB/256 项、长边至多 1280；大网格预览清晰度受该解码上限约束。
+索引最多 20000 帧、图片最多 200 页、网格至多 20×20、单格尺寸至多 4096，二进制时间值至多 65535 秒。单格宽高为零表示未提供，应用仓储通过共享图片缓存读取第一页的原始编码尺寸，按网格推导有效尺寸；负数、越界、不整除或与已提供尺寸矛盾的数据仍拒绝。只移除 `[0,0,...]` 中多余的前导零，严格校验后续时间递增和网格容量。二分查找选取最近的前序帧，按页、行、列裁剪雪碧图，不使用播放器抓帧。图片复用现有容量受限缓存：编码图片单张 4 MiB、总量 64 MiB/512 项，解码缓存 64 MiB/256 项、长边至多 1280；大网格预览清晰度受该解码上限约束。
 
 高频指针更新留在 `PlaybackTimelineBar` 的局部状态中；源级元数据交由会话管理。界面不解析 JSON、发网络请求或调用 media_kit。未添加新依赖或原生接口。
 
@@ -92,3 +93,28 @@ fake clock/repository 回归覆盖首次空结果后恢复、冷却期间禁止�
 本轮缩略图定向测试 15 项、根应用全量 1821 项通过；四个独立包完成格式、分析和测试，`bili_api` 390 项、`bili_player` 40 项、`bili_danmaku` 86 项、`bili_mux` 2 项通过。`bili_mux` 另 7 项因未设置 `BILI_MUX_LIBRARY` 按条件跳过。日志为 `artifacts/storyboard-empty-retry-targeted.log`、`artifacts/storyboard-empty-retry-root-tests.log` 和 `artifacts/storyboard-empty-retry-packages.log`。
 
 `tool/check.ps1 -SkipPub` 的平台边界脚本与根格式检查通过，首次根分析被并行音量均衡工作的 `tool/audio_normalization_smoke.dart:38` lint 阻断；该并行改动自行修正后，单独重跑根分析通过，后续根测试及四包检查分别完成。本次只提交缩略图相关差异，不包含并行功能。本轮通过受控空响应验证恢复，没有捕获原故障的真实接口响应，也未进行原生构建或三端实机验收。
+
+## 2026-10-11 官网 pvdata 与交互补试
+
+样本 `BV1HX8v6UEZ3`（`cid=41212379830`）有一次参数正确的 `index=1` 请求返回 HTTP 200／业务码 0、空 JSON `index`，但四张图片和 `pvdata` 均存在。后续游客读取恢复正常，不能据此把所有间歇故障都归因于超时。官网正常请求使用 `aid`、`cid`，不传 `index=1`，时间索引另从 `pvdata` 下载；应用保留已验证的 `bvid`、`cid` 别名参数，改用相同的二进制索引格式。
+
+只读检查官网当前加载的 [播放器核心 core.ba67b466.js](https://s1.hdslb.com/bfs/static/player/main/core.ba67b466.js) 和 [进度条组件 npd.911.a6141530.js](https://s1.hdslb.com/bfs/static/player/main/widgets/npd.911.a6141530.js)：`HttpVideoShot` 没有定时重试次数／间隔，失败的 HTTP Promise 从内存缓存移除，下一次进度条 mouseenter／触摸开始重新读取；正常 HTTP 描述的内存缓存期限为 900 秒。进度条的 300 毫秒计时属于悬停显示状态，元数据请求在移入时立即发起。`pvdata` 的 XHR 只见 onload 解析，没有该组件自己的 onerror、timeout 或自动补试分支；不能据此推断官网所有网络服务的全局超时。
+
+在独立测试标签中仅阻断 `/x/player/videoshot`：首次移入只发一次，保持停留期间没有追加请求，再次移入发一次；解除阻断后再移入，重新获取描述并下载 `pvdata`。测试阻断已解除，标签已关闭。脱敏证据为 `build/validation/storyboard-diagnostics/retry-observations.json`。未复制官网源码、图片或资源，协议解析与测试独立编写；上述来源是观察依据，不假定其源码有再分发许可。
+
+本轮对齐的是索引格式、失败后由新交互触发补试和每次 HTTP 读取不自动重放。应用仍按播放源缓存完整结果，不增加官网的通用 15 分钟 HTTP 缓存；维持有界单飞、25 秒操作预算、取消、账号隔离与公开 CDN 校验，避免网络失败留下永久在途读取。图片 CDN 变体／错误后尝试下一图片页的官网策略未改变项目既有图片缓存；本轮不宣称整个官网网络层逐项相同。旧的冷却、次数上限与 JSON index 规则仅为上方历史验收记录。
+
+新回归覆盖空 JSON index 不影响 pvdata、二进制大端／零哨兵／严格递增／帧容量、奇数字节与 40002 字节上限、URL 与凭据边界、描述和二进制共享 deadline、两阶段失败不自动重放、二进制迟到取消／账号切换、移入／拖动一次触发与连续移动不请求、超过三次失败仍可恢复、换源迟到失败隔离。定向协议测试 39 项、应用播放相关测试 200 项通过；真实游客接口读到指定视频 359 帧、四张 10×10 图片页、单帧 480×270。
+
+Windows Debug 在线回归构建并运行成功：`BV1HX8v6UEZ3` 的四张图片页均实际解码／显示，六次跨页移动合计四次图片下载、一次预览请求、零次 seek；既有 `ep323085` 回归继续读到 186 帧、推导 256×144 单格并显示两页，合计两次图片下载。日志为 `artifacts/storyboard-pvdata-online.log`、`artifacts/storyboard-pvdata-pgc-online.log`。该验证覆盖元数据和 Flutter 预览渲染，不宣称本轮重新验证原生音视频解码。未执行 Android/macOS 实机回归或 Release 性能测试。
+
+指定视频只读在线回归需显式启用：
+
+```powershell
+flutter test integration_test/windows_storyboard_pvdata_test.dart -d windows --no-pub --dart-define=BILI_ONLINE_SMOKE=true
+```
+
+
+`tool/check.ps1 -SkipPub` 通过根应用和四个独立包的格式、静态分析、测试及平台边界脚本：根应用 1908 项、`bili_api` 426 项、`bili_player` 51 项、`bili_danmaku` 86 项、`bili_mux` 2 项通过；`bili_mux` 另 7 项因未设置 `BILI_MUX_LIBRARY` 条件跳过。日志为 `artifacts/storyboard-pvdata-check.log`。文档相对链接和本轮差异空白检查通过。
+
+提交前将本任务暂存区单独导出源码快照，排除并行高能进度条、设置和依赖修改；快照静态分析与 10 个 Dart 文件格式检查通过，协议回归 39 项、应用播放相关回归 184 项通过。日志为 `artifacts/storyboard-commit-analysis.log`、`artifacts/storyboard-commit-targeted.log`。前述全工程检查数量对应当时整个工作区，本提交只包含本任务及公开二进制读取所需的有界传输支持。

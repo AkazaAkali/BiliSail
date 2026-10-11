@@ -44,7 +44,6 @@ class PlaybackSession extends ChangeNotifier {
     int Function()? sessionEpoch,
     Duration Function()? historyNow,
     Duration Function()? danmakuNow,
-    Duration Function()? storyboardNow,
     PlaybackRateMemory? rateMemory,
     PlaybackVolumeMemory? volumeMemory,
     PlaybackStartupDiagnostics? startupDiagnostics,
@@ -53,7 +52,6 @@ class PlaybackSession extends ChangeNotifier {
        _rateMemory = rateMemory ?? PlaybackRateMemory(),
        _volumeMemory = volumeMemory ?? PlaybackVolumeMemory() {
     _clock.start();
-    _storyboardNow = storyboardNow ?? () => _clock.elapsed;
     final history = historyRepository;
     _historyReporter = history == null
         ? null
@@ -214,11 +212,6 @@ class PlaybackSession extends ChangeNotifier {
   VideoStoryboard? storyboard;
   bool storyboardLoading = false;
   bool _storyboardRequested = false;
-  // Each logical read already has bounded transport retries and a deadline.
-  static const _maxStoryboardAttempts = 3;
-  int _storyboardAttempts = 0;
-  Duration? _storyboardRetryAt;
-  late final Duration Function() _storyboardNow;
   String? storyboardMessage;
   String? chaptersMessage;
   RequestCancellation? _storyboardCancellation;
@@ -1575,8 +1568,6 @@ class PlaybackSession extends ChangeNotifier {
     storyboardLoading = false;
     storyboardMessage = null;
     _storyboardRequested = false;
-    _storyboardAttempts = 0;
-    _storyboardRetryAt = null;
   }
 
   /// Hover loads only metadata/images; the active engine never seeks for preview.
@@ -1596,13 +1587,7 @@ class PlaybackSession extends ChangeNotifier {
         _storyboardRequested) {
       return;
     }
-    if (_storyboardRetryAt case final retryAt?
-        when _storyboardNow() < retryAt) {
-      return;
-    }
     _storyboardRequested = true;
-    _storyboardAttempts++;
-    _storyboardRetryAt = null;
     storyboardLoading = true;
     storyboardMessage = null;
     final generation = _generation;
@@ -1618,9 +1603,7 @@ class PlaybackSession extends ChangeNotifier {
       if (!_acceptMetadata(generation, token)) return;
       storyboard = result;
       if (result == null) {
-        // An empty response can be temporary. Keep the time-only preview, but
-        // let a later interaction retry within the same bounded read budget.
-        _scheduleStoryboardRetry();
+        _storyboardRequested = false;
       }
     } on AppFailure catch (failure) {
       if (!_acceptMetadata(generation, token) ||
@@ -1628,10 +1611,9 @@ class PlaybackSession extends ChangeNotifier {
         return;
       }
       storyboardMessage = '缩略图暂时不可用';
-      if (failure.kind == AppFailureKind.network ||
-          failure.kind == AppFailureKind.timeout) {
-        _scheduleStoryboardRetry();
-      }
+      // Like the official progress bar, a new preview interaction can retry.
+      // The widget invokes this once on entry/drag start, never on every move.
+      _storyboardRequested = false;
     } finally {
       if (_acceptMetadata(generation, token)) {
         _storyboardCancellation = null;
@@ -1639,14 +1621,6 @@ class PlaybackSession extends ChangeNotifier {
         _notify();
       }
     }
-  }
-
-  void _scheduleStoryboardRetry() {
-    if (_storyboardAttempts >= _maxStoryboardAttempts) return;
-    // No timer: only a later preview interaction can start the next read.
-    _storyboardRetryAt =
-        _storyboardNow() + Duration(seconds: 5 * _storyboardAttempts);
-    _storyboardRequested = false;
   }
 
   Future<void> selectSubtitle(int index) async {

@@ -195,6 +195,7 @@ final _shot = {
   'img_x_size': 0,
   'img_y_size': 0,
   'image': ['//i0.hdslb.com/sheet-1.jpg', '//i0.hdslb.com/sheet-2.jpg'],
+  'pvdata': '//boss.hdslb.com/index.bin',
   'index': [0, ...List.generate(186, (i) => i * 6)],
 };
 
@@ -207,9 +208,19 @@ final class _Transport implements ApiTransport {
     required Map<String, String> headers,
     required Duration timeout,
     ApiCancellation? cancellation,
-  }) async => ApiHttpResponse(
-    200,
-    Uint8List.fromList(utf8.encode(jsonEncode({'code': 0, 'data': shot}))),
-    const {},
-  );
+  }) async {
+    if (uri.host == 'boss.hdslb.com') {
+      final seconds = (shot['index'] as List<int>);
+      final bytes = ByteData(seconds.length * 2);
+      for (var i = 0; i < seconds.length; i++) {
+        bytes.setUint16(i * 2, seconds[i], Endian.big);
+      }
+      return ApiHttpResponse(200, bytes.buffer.asUint8List(), const {});
+    }
+    return ApiHttpResponse(
+      200,
+      Uint8List.fromList(utf8.encode(jsonEncode({'code': 0, 'data': shot}))),
+      const {},
+    );
+  }
 }

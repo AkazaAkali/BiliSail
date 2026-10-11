@@ -8,6 +8,8 @@ import '../domain/playback_timeline.dart';
 
 export '../../../shared/ui/storyboard_thumbnail.dart';
 
+const timelineTrackInset = 8.0;
+
 /// Hover and drag state stay local. Preview never commands the media engine.
 class PlaybackTimelineBar extends StatefulWidget {
   const PlaybackTimelineBar({
@@ -67,11 +69,24 @@ class _PlaybackTimelineBarState extends State<PlaybackTimelineBar> {
     }
   }
 
-  void _show(Duration position) {
+  void _show(Duration position, {bool request = false}) {
     if (widget.duration <= Duration.zero) return;
+    final entering = _preview == null;
     setState(() => _preview = position);
     _overlay.show();
-    widget.onPreviewRequest();
+    if (entering || request) widget.onPreviewRequest();
+  }
+
+  void _hover(double x, double trackWidth, double total) {
+    if (_drag != null || trackWidth <= 0) return;
+    final horizontalFraction = ((x - timelineTrackInset) / trackWidth).clamp(
+      0.0,
+      1.0,
+    );
+    final fraction = Directionality.of(context) == TextDirection.rtl
+        ? 1 - horizontalFraction
+        : horizontalFraction;
+    _show(Duration(milliseconds: (fraction * total).round()));
   }
 
   void _hide() {
@@ -101,28 +116,19 @@ class _PlaybackTimelineBarState extends State<PlaybackTimelineBar> {
             });
           }
         }
-        final trackWidth = math.max(0.0, width - 16);
+        final trackWidth = math.max(0.0, width - 2 * timelineTrackInset);
         return OverlayPortal(
           controller: _overlay,
           overlayChildBuilder: (context) => _buildPreview(context, trackWidth),
           child: CompositedTransformTarget(
             link: _link,
             child: MouseRegion(
-              onEnter: (_) => _hovering = true,
+              onEnter: (event) {
+                _hovering = true;
+                if (enabled) _hover(event.localPosition.dx, trackWidth, total);
+              },
               onHover: enabled
-                  ? (event) {
-                      if (_drag != null || trackWidth <= 0) return;
-                      final horizontalFraction =
-                          ((event.localPosition.dx - 8) / trackWidth).clamp(
-                            0.0,
-                            1.0,
-                          );
-                      final fraction =
-                          Directionality.of(context) == TextDirection.rtl
-                          ? 1 - horizontalFraction
-                          : horizontalFraction;
-                      _show(Duration(milliseconds: (fraction * total).round()));
-                    }
+                  ? (event) => _hover(event.localPosition.dx, trackWidth, total)
                   : null,
               onExit: (_) {
                 _hovering = false;
@@ -229,7 +235,10 @@ class _PlaybackTimelineBarState extends State<PlaybackTimelineBar> {
                           onChangeStart: enabled
                               ? (value) {
                                   _drag = value;
-                                  _show(Duration(milliseconds: value.round()));
+                                  _show(
+                                    Duration(milliseconds: value.round()),
+                                    request: true,
+                                  );
                                 }
                               : null,
                           onChanged: enabled
@@ -453,9 +462,9 @@ class ChapterSliderTrackShape extends SliderTrackShape {
     bool isEnabled = false,
     bool isDiscrete = false,
   }) => Rect.fromLTWH(
-    offset.dx + 8,
+    offset.dx + timelineTrackInset,
     offset.dy + (parentBox.size.height - 3) / 2,
-    math.max(0, parentBox.size.width - 16),
+    math.max(0, parentBox.size.width - 2 * timelineTrackInset),
     3,
   );
 

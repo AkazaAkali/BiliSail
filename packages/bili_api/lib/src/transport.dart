@@ -22,6 +22,17 @@ abstract interface class ApiTransport {
   });
 }
 
+/// Optional bounded reads stop receiving once the decompressed byte cap is hit.
+abstract interface class ApiBoundedTransport {
+  Future<ApiHttpResponse> getBounded(
+    Uri uri, {
+    required Map<String, String> headers,
+    required Duration timeout,
+    required int maxBytes,
+    ApiCancellation? cancellation,
+  });
+}
+
 /// Mutation transport deliberately has no retry contract.
 abstract interface class ApiFormTransport {
   Future<ApiHttpResponse> postForm(
@@ -44,9 +55,84 @@ abstract interface class ApiJsonTransport {
 }
 
 final class DioApiTransport
-    implements ApiTransport, ApiFormTransport, ApiJsonTransport {
+    implements
+        ApiTransport,
+        ApiFormTransport,
+        ApiJsonTransport,
+        ApiBoundedTransport {
   DioApiTransport({Dio? dio}) : _dio = dio ?? Dio();
   final Dio _dio;
+
+  @override
+  Future<ApiHttpResponse> getBounded(
+    Uri uri, {
+    required Map<String, String> headers,
+    required Duration timeout,
+    required int maxBytes,
+    ApiCancellation? cancellation,
+  }) async {
+    if (cancellation?.isCancelled == true) {
+      throw const ApiFailure(ApiFailureCategory.cancelled, 'transport');
+    }
+    final token = CancelToken();
+    cancellation?.whenCancelled.then((_) => token.cancel());
+    Future<ApiHttpResponse> receive() async {
+      final response = await _dio.get<ResponseBody>(
+        uri.toString(),
+        cancelToken: token,
+        options: Options(
+          headers: headers,
+          responseType: ResponseType.stream,
+          followRedirects: false,
+          validateStatus: (_) => true,
+          receiveTimeout: timeout,
+          connectTimeout: timeout,
+        ),
+      );
+      final body = BytesBuilder(copy: false);
+      final stream = response.data?.stream;
+      if (stream != null) {
+        await for (final chunk in stream) {
+          if (body.length + chunk.length > maxBytes) {
+            token.cancel();
+            throw const ApiFailure(ApiFailureCategory.protocol, 'transport');
+          }
+          body.add(chunk);
+        }
+      }
+      return ApiHttpResponse(
+        response.statusCode ?? 0,
+        body.takeBytes(),
+        response.headers.map,
+      );
+    }
+
+    try {
+      return await receive().timeout(
+        timeout,
+        onTimeout: () {
+          token.cancel();
+          throw const ApiFailure(ApiFailureCategory.timeout, 'transport');
+        },
+      );
+    } on DioException catch (error) {
+      throw ApiFailure(switch (error.type) {
+        DioExceptionType.cancel => ApiFailureCategory.cancelled,
+        DioExceptionType.connectionTimeout ||
+        DioExceptionType.receiveTimeout ||
+        DioExceptionType.sendTimeout => ApiFailureCategory.timeout,
+        _ => ApiFailureCategory.network,
+      }, 'transport');
+    } on FormatException {
+      throw const ApiFailure(ApiFailureCategory.protocol, 'transport');
+    } on ApiFailure {
+      rethrow;
+    } on Exception {
+      // A streamed IO/decompression failure may arrive after Dio returned the
+      // response headers. Keep it inside the transport failure boundary.
+      throw const ApiFailure(ApiFailureCategory.network, 'transport');
+    }
+  }
 
   @override
   Future<ApiHttpResponse> get(
