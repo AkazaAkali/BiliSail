@@ -30,8 +30,10 @@ class LiveStreamMenuButton extends StatelessWidget {
     final generation = session.sourceGeneration;
     return PopupMenuButton<_LiveSelection>(
       tooltip: '直播清晰度与线路',
-      color: const Color(0xff282828),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      initialValue: (
+        quality: session.requestedQuality == 0 ? 0 : media.quality,
+        line: null,
+      ),
       onOpened: () => onMenuChanged(true),
       onCanceled: () => onMenuChanged(false),
       onSelected: (selection) {
@@ -45,11 +47,19 @@ class LiveStreamMenuButton extends StatelessWidget {
         }
       },
       itemBuilder: (_) => [
-        _LiveStreamMenuEntry(
-          media: media,
-          line: session.liveLine,
-          automatic: session.requestedQuality == 0,
-        ),
+        for (final quality in media.qualities)
+          PopupMenuItem(
+            value: (quality: quality, line: null),
+            child: Text(media.qualityLabels[quality] ?? '$quality'),
+          ),
+        const PopupMenuItem(value: (quality: 0, line: null), child: Text('自动')),
+        const PopupMenuDivider(),
+        for (var line = 0; line < media.video.urls.length; line++)
+          CheckedPopupMenuItem(
+            checked: line == session.liveLine,
+            value: (quality: null, line: line),
+            child: Text('直播线路 ${liveLineLabel(line)}'),
+          ),
       ],
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -64,120 +74,4 @@ class LiveStreamMenuButton extends StatelessWidget {
       ),
     );
   }
-}
-
-class _LiveStreamMenuEntry extends PopupMenuEntry<_LiveSelection> {
-  const _LiveStreamMenuEntry({
-    required this.media,
-    required this.line,
-    required this.automatic,
-  });
-  final PlaybackMedia media;
-  final int line;
-  final bool automatic;
-
-  @override
-  double get height => 48;
-  @override
-  bool represents(_LiveSelection? value) => false;
-  @override
-  State<_LiveStreamMenuEntry> createState() => _LiveStreamMenuEntryState();
-}
-
-class _LiveStreamMenuEntryState extends State<_LiveStreamMenuEntry> {
-  bool _showLines = false;
-
-  Widget _row(String label, VoidCallback onTap, {bool selected = false}) =>
-      InkWell(
-        onTap: onTap,
-        child: SizedBox(
-          height: 40,
-          width: double.infinity,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: selected ? const Color(0xfffb7299) : Colors.white70,
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 180,
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        InkWell(
-          key: const ValueKey('live-stream-line-header'),
-          onTap: () => setState(() => _showLines = !_showLines),
-          child: SizedBox(
-            height: 40,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  if (_showLines)
-                    const Icon(
-                      Icons.chevron_left,
-                      size: 16,
-                      color: Colors.white70,
-                    ),
-                  Text(
-                    liveLineLabel(widget.line),
-                    style: const TextStyle(fontSize: 13, color: Colors.white70),
-                  ),
-                  if (!_showLines)
-                    const Icon(
-                      Icons.chevron_right,
-                      size: 16,
-                      color: Colors.white70,
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        const Divider(height: 1, color: Colors.white12),
-        if (_showLines)
-          for (var line = 0; line < widget.media.video.urls.length; line++)
-            _row(
-              liveLineLabel(line),
-              () => Navigator.pop<_LiveSelection>(context, (
-                quality: null,
-                line: line,
-              )),
-              selected: line == widget.line,
-            )
-        else ...[
-          for (final quality in widget.media.qualities)
-            _row(
-              widget.media.qualityLabels[quality] ?? '$quality',
-              () => Navigator.pop<_LiveSelection>(context, (
-                quality: quality,
-                line: null,
-              )),
-              selected: !widget.automatic && quality == widget.media.quality,
-            ),
-          _row(
-            '自动',
-            () => Navigator.pop<_LiveSelection>(context, (
-              quality: 0,
-              line: null,
-            )),
-            selected: widget.automatic,
-          ),
-        ],
-      ],
-    ),
-  );
 }

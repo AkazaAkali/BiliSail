@@ -2018,6 +2018,73 @@ void main() {
     await _pumpFrames(tester);
   });
 
+  for (final brightness in Brightness.values) {
+    testWidgets('live menu follows video menu theme in ${brightness.name}', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1400, 900);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final theme = brightness == Brightness.light
+          ? BiliTheme.light()
+          : BiliTheme.dark();
+      final session = _session(
+        _FakeEngine(),
+        repository: _MenuRepository(),
+        contentRepository: _LiveMenuRepository(),
+      );
+      addTearDown(session.close);
+      await tester.pumpWidget(
+        _app(
+          session,
+          _FakeWindowService(),
+          const AppSettings.defaults(),
+          width: 1200,
+          theme: theme,
+        ),
+      );
+      await _pumpFrames(tester);
+      await session.pause();
+      await tester.tap(find.byTooltip('清晰度'));
+      await tester.pumpAndSettle();
+      final videoText = find.text('720P');
+      final videoStyle = DefaultTextStyle.of(tester.element(videoText)).style;
+      final videoPopup = tester.widget<Material>(
+        find.ancestor(of: videoText, matching: find.byType(Material)).first,
+      );
+      await tester.tapAt(const Offset(2, 2));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        _app(
+          session,
+          _FakeWindowService(),
+          const AppSettings.defaults(),
+          width: 1200,
+          theme: theme,
+          target: const LivePlaybackTarget('12'),
+        ),
+      );
+      await _pumpFrames(tester);
+      await tester.tap(find.byTooltip('直播清晰度与线路'));
+      await tester.pumpAndSettle();
+      final liveText = find.text('720P 超清');
+      final liveStyle = DefaultTextStyle.of(tester.element(liveText)).style;
+      final livePopup = tester.widget<Material>(
+        find.ancestor(of: liveText, matching: find.byType(Material)).first,
+      );
+      expect(livePopup.color, videoPopup.color);
+      expect(livePopup.shape, videoPopup.shape);
+      expect(liveStyle.color, videoStyle.color);
+      expect(liveStyle.fontSize, videoStyle.fontSize);
+      expect(find.text('直播线路 主线'), findsOneWidget);
+      expect(find.text('直播线路 备线2'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+    });
+  }
+
   for (final compact in [false, true]) {
     for (final fullscreen in [false, true]) {
       testWidgets(
@@ -2064,13 +2131,18 @@ void main() {
 
           await openMenu();
           if (!compact) {
-            expect(find.text('主线'), findsOneWidget);
-            await tester.tap(
-              find.byKey(const ValueKey('live-stream-line-header')),
-            );
-            await tester.pump();
-            expect(find.text('备线2'), findsOneWidget);
-            await tester.tap(find.text('备线1'));
+            expect(find.text('直播线路 主线'), findsOneWidget);
+            expect(find.text('直播线路 备线2'), findsOneWidget);
+            final line = find
+                .ancestor(
+                  of: find.text('直播线路 备线1'),
+                  matching: find.byWidgetPredicate(
+                    (widget) => widget is PopupMenuEntry,
+                  ),
+                )
+                .first;
+            await tester.ensureVisible(line);
+            await tester.tap(line);
           } else {
             final line = find.widgetWithText(
               CheckedPopupMenuItem<VoidCallback>,
@@ -4292,6 +4364,7 @@ Widget _app(
   AppSettings settings, {
   double textScale = 1,
   double width = 400,
+  ThemeData? theme,
   WidgetBuilder? composer,
   WidgetBuilder? overlay,
   bool active = true,
@@ -4306,7 +4379,7 @@ Widget _app(
   ],
   child: InputTestApp(
     shortcuts: settings.shortcuts,
-    theme: BiliTheme.light(),
+    theme: theme ?? BiliTheme.light(),
     navigatorObservers: [?navigatorObserver],
     builder: (context, child) => AppNoticeHost(
       child: MediaQuery(
