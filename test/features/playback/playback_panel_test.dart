@@ -39,6 +39,59 @@ import 'package:flutter_test/flutter_test.dart';
 final _composerScopeProvider = Provider<String>((ref) => 'root');
 
 void main() {
+  testWidgets(
+    'subtitle cue stays mounted between boundaries and ignores buffer',
+    (tester) async {
+      final engine = _FakeEngine();
+      final session = _session(engine, repository: _MenuRepository());
+      addTearDown(session.close);
+      addTearDown(() => debugOnRebuildDirtyWidget = null);
+      await tester.pumpWidget(
+        _app(session, _FakeWindowService(), const AppSettings.defaults()),
+      );
+      await _pumpFrames(tester);
+      await session.pause();
+      await session.selectSubtitle(0);
+      await _pumpFrames(tester);
+      final subtitle = find.text('字幕回归');
+      expect(subtitle, findsOneWidget);
+      var builds = 0;
+      debugOnRebuildDirtyWidget = (element, builtOnce) {
+        final widget = element.widget;
+        if (widget is Text && widget.data == '字幕回归') builds++;
+      };
+      for (var i = 1; i <= 20; i++) {
+        engine._emit(
+          engine.currentSnapshot.copyWith(
+            position: Duration(milliseconds: i * 100),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(builds, 0);
+      final lookups = session.subtitleLookupCount;
+      for (var i = 1; i <= 20; i++) {
+        engine._emit(
+          engine.currentSnapshot.copyWith(buffered: Duration(seconds: i)),
+        );
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(session.subtitleLookupCount, lookups);
+      expect(builds, 0);
+      engine._emit(
+        engine.currentSnapshot.copyWith(position: const Duration(minutes: 3)),
+      );
+      await tester.pump();
+      expect(subtitle, findsNothing);
+      engine._emit(
+        engine.currentSnapshot.copyWith(position: const Duration(seconds: 1)),
+      );
+      await tester.pump();
+      expect(subtitle, findsOneWidget);
+      expect(builds, 1);
+    },
+  );
+
   testWidgets('snapshot ticks only rebuild their displayed values', (
     tester,
   ) async {

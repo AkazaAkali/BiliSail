@@ -84,6 +84,7 @@ final class LiveDanmakuController extends ChangeNotifier {
   int get textLayoutCount => _layouts.length;
   int get textLayoutBuildCount => _layouts.buildCount;
   int get textRasterBytes => _layouts.rasterBytes;
+  DanmakuRasterStatistics get rasterStatistics => _layouts.rasterStatistics;
   bool get isAnimating =>
       _enabled && (_pending.isNotEmpty || _visible.isNotEmpty);
   Duration get _scrollLifetime =>

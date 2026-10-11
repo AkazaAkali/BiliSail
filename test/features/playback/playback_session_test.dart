@@ -9,6 +9,7 @@ import 'package:bilisail/domain/app_failure.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/domain/video.dart';
 import 'package:bilisail/features/playback/application/playback_session.dart';
+import 'package:bilisail/features/playback/application/playback_startup_diagnostics.dart';
 import 'package:bilisail/features/playback/application/playback_manager.dart';
 import 'package:bilisail/features/playback/application/playback_rate_memory.dart';
 import 'package:bilisail/features/video/application/watch_later_queue_playback.dart';
@@ -23,6 +24,274 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test(
+    'startup overlaps independent stages but waits before native open',
+    () async {
+      var now = Duration.zero;
+      final diagnostics = PlaybackStartupDiagnostics(now: () => now);
+      final stopped = Completer<void>();
+      final local = Completer<Duration?>();
+      final engine = _FakeEngine()..nextStop = stopped;
+      final repository = _FakeRepository();
+      final progress = _FakeProgress()..nextRead = local;
+      final session = PlaybackSession(
+        engine: engine,
+        repository: repository,
+        progress: progress,
+        accountScope: () => 'guest',
+        startupDiagnostics: diagnostics,
+      );
+      addTearDown(session.close);
+      final opening = session.open(_detail('one'), _part('one'));
+      await _flush();
+      expect(repository.pendingResolves, contains('one'));
+      expect(progress.nextRead, isNull);
+      now = const Duration(milliseconds: 5);
+      local.complete(const Duration(seconds: 7));
+      await _flush();
+      expect(engine.openOptions, isEmpty);
+      now = const Duration(milliseconds: 10);
+      stopped.complete();
+      await _flush();
+      expect(repository.pendingResolves, contains('one'));
+      expect(engine.openOptions, isEmpty);
+      now = const Duration(milliseconds: 20);
+      repository.completeResolve('one');
+      await _flush();
+      expect(progress.nextRead, isNull);
+      await opening;
+      expect(
+        engine.openOptions.single.startPosition,
+        const Duration(seconds: 7),
+      );
+      expect(diagnostics.samples.map((s) => s.stage), [
+        PlaybackStartupStage.saveProgress,
+        PlaybackStartupStage.localResumeRead,
+        PlaybackStartupStage.stopPrevious,
+        PlaybackStartupStage.resolve,
+        PlaybackStartupStage.nativeOpen,
+        PlaybackStartupStage.playAndAudioReady,
+      ]);
+      expect(diagnostics.samples.map((s) => s.elapsed.inMilliseconds), [
+        0,
+        5,
+        10,
+        20,
+        0,
+        0,
+      ]);
+      expect(
+        diagnostics.samples
+            .singleWhere((s) => s.stage == PlaybackStartupStage.nativeOpen)
+            .startedAt,
+        const Duration(milliseconds: 20),
+      );
+      for (final sample in diagnostics.samples.where(
+        (s) =>
+            s.stage == PlaybackStartupStage.stopPrevious ||
+            s.stage == PlaybackStartupStage.resolve ||
+            s.stage == PlaybackStartupStage.localResumeRead,
+      )) {
+        expect(sample.startedAt, Duration.zero);
+      }
+      expect(engine.maxSimultaneousPlayers, 1);
+    },
+  );
+
+  test(
+    'startup waits for release after data is ready and preserves pause intent',
+    () async {
+      final stopped = Completer<void>();
+      final engine = _FakeEngine()..nextStop = stopped;
+      final session = PlaybackSession(
+        engine: engine,
+        repository: _FakeRepository(autoResolve: true),
+        progress: _FakeProgress()..readValue = const Duration(seconds: 11),
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      final opening = session.open(_detail('one'), _part('one'));
+      await _flush();
+      expect(engine.openedUris, isEmpty);
+      await session.pause();
+      stopped.complete();
+      await opening;
+      expect(
+        engine.openOptions.single.startPosition,
+        const Duration(seconds: 11),
+      );
+      expect(engine.playCount, 0);
+      expect(engine.currentSnapshot.phase, PlaybackPhase.paused);
+      expect(engine.maxSimultaneousPlayers, 1);
+    },
+  );
+
+  test(
+    'startup settles all failing operations before reporting a failure',
+    () async {
+      final stopped = Completer<void>();
+      final local = Completer<Duration?>();
+      final engine = _FakeEngine()..nextStop = stopped;
+      final repository = _FakeRepository();
+      final session = PlaybackSession(
+        engine: engine,
+        repository: repository,
+        progress: _FakeProgress()..nextRead = local,
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      var finished = false;
+      final opening = session
+          .open(_detail('one'), _part('one'))
+          .then((_) => finished = true);
+      await _flush();
+      repository.pendingResolves['one']!.completeError(
+        StateError('resolve failed'),
+      );
+      local.completeError(StateError('read failed'));
+      await _flush();
+      expect(finished, isFalse);
+      expect(engine.openedUris, isEmpty);
+      stopped.completeError(StateError('release failed'));
+      await opening;
+      expect(finished, isTrue);
+      expect(session.error, isNotNull);
+      expect(
+        session.startupDiagnostics.samples.where((s) => !s.completed),
+        hasLength(3),
+      );
+    },
+  );
+
+  test('startup late errors from a superseded source cannot replace the new source', () async {
+    final stopped = Completer<void>();
+    final engine = _FakeEngine()..nextStop = stopped;
+    final repository = _FakeRepository();
+    final session = PlaybackSession(
+      engine: engine,
+      repository: repository,
+      progress: _FakeProgress(),
+      accountScope: () => 'guest',
+    );
+    addTearDown(session.close);
+    final old = session.open(_detail('one'), _part('one'));
+    await _flush();
+    final current = session.open(_detail('two'), _part('two'));
+    await _flush();
+    expect(repository.resolveCancellations['one']!.isCancelled, isTrue);
+    repository.completeResolve('two');
+    await current;
+    repository.pendingResolves['one']!.completeError(
+      StateError('late resolution'),
+    );
+    stopped.completeError(StateError('late release'));
+    await old;
+    expect(session.part?.cid, 'two');
+    expect(session.error, isNull);
+    expect(engine.openedUris, hasLength(1));
+    expect(engine.maxSimultaneousPlayers, 1);
+  });
+
+  for (final fail in [false, true]) {
+    test(
+      'startup discards obsolete account epoch after parallel work fail=$fail',
+      () async {
+        var epoch = 1;
+        final stopped = Completer<void>();
+        final engine = _FakeEngine()..nextStop = stopped;
+        final repository = _FakeRepository();
+        final session = PlaybackSession(
+          engine: engine,
+          repository: repository,
+          progress: _FakeProgress(),
+          accountScope: () => 'user:1',
+          sessionEpoch: () => epoch,
+        );
+        addTearDown(session.close);
+        final opening = session.open(_detail('one'), _part('one'));
+        await _flush();
+        epoch++;
+        if (fail) {
+          repository.pendingResolves['one']!.completeError(
+            StateError('old account'),
+          );
+        } else {
+          repository.completeResolve('one');
+        }
+        stopped.complete();
+        await opening;
+        expect(engine.openedUris, isEmpty);
+        expect(engine.playCount, 0);
+        expect(session.error, isNull);
+      },
+    );
+  }
+
+  test(
+    'startup retains the progress save barrier before parallel work',
+    () async {
+      final engine = _FakeEngine();
+      final repository = _FakeRepository(autoResolve: true);
+      final progress = _FakeProgress();
+      final session = PlaybackSession(
+        engine: engine,
+        repository: repository,
+        progress: progress,
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      await session.open(_detail('one'), _part('one'));
+      final saved = Completer<void>();
+      final local = Completer<Duration?>();
+      progress.nextWrite = saved;
+      progress.nextRead = local;
+      final stops = engine.stopCount;
+      final resolves = repository.qualities.length;
+      final opening = session.open(_detail('two'), _part('two'));
+      await _flush();
+      expect(engine.stopCount, stops);
+      expect(repository.qualities.length, resolves);
+      expect(progress.nextRead, same(local));
+      saved.complete();
+      await _flush();
+      expect(engine.stopCount, stops + 1);
+      expect(repository.qualities.length, resolves + 1);
+      expect(progress.nextRead, isNull);
+      local.complete(const Duration(seconds: 8));
+      await opening;
+      expect(engine.openOptions.last.startPosition, const Duration(seconds: 8));
+    },
+  );
+
+  test('startup reads local resume when enabled during resolution', () async {
+    final engine = _FakeEngine();
+    final repository = _FakeRepository();
+    final local = Completer<Duration?>();
+    final progress = _FakeProgress()..nextRead = local;
+    final session = PlaybackSession(
+      engine: engine,
+      repository: repository,
+      progress: progress,
+      accountScope: () => 'guest',
+    );
+    addTearDown(session.close);
+    session.configureSettings(AppSettings(resumePlayback: false));
+    final opening = session.open(_detail('one'), _part('one'));
+    await _flush();
+    expect(progress.nextRead, same(local));
+    session.configureSettings(AppSettings(resumePlayback: true));
+    repository.completeResolve('one');
+    await _flush();
+    expect(progress.nextRead, isNull);
+    expect(engine.openedUris, isEmpty);
+    local.complete(const Duration(seconds: 23));
+    await opening;
+    expect(
+      engine.openOptions.single.startPosition,
+      const Duration(seconds: 23),
+    );
+  });
 
   test(
     'identical settings leave danmaku scheduling and caches untouched',
@@ -3540,6 +3809,7 @@ final class _FakeRepository implements PlaybackRepository {
   bool failNextResolve = false;
   final Duration mediaDuration;
   final pendingResolves = <String, Completer<PlaybackMedia>>{};
+  final resolveCancellations = <String, RequestCancellation>{};
   final pendingComments = <String, Completer<List<TimedComment>>>{};
   final commentCancellations = <String, RequestCancellation>{};
   final pendingSubtitles = <String, Completer<List<SubtitleTrack>>>{};
@@ -3559,6 +3829,7 @@ final class _FakeRepository implements PlaybackRepository {
     required RequestCancellation cancellation,
   }) {
     qualities.add(quality);
+    resolveCancellations[cid] = cancellation;
     codecs.add(preferredCodec);
     if (failNextResolve) {
       failNextResolve = false;
@@ -3800,6 +4071,7 @@ final class _FakeEngine implements PlayerEngine {
   int volumeCalls = 0;
   Completer<void>? nextPause;
   Completer<void>? nextOpen;
+  Completer<void>? nextStop;
   PlayerFailureKind? nextOpenFailure;
   void Function()? onOpenFailure;
 
@@ -3919,6 +4191,9 @@ final class _FakeEngine implements PlayerEngine {
         generation: _current.generation + 1,
       ),
     );
+    final pending = nextStop;
+    nextStop = null;
+    if (pending != null) await pending.future;
   }
 
   @override

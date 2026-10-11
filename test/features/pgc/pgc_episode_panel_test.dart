@@ -11,6 +11,83 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets(
+    'long-season index survives hover/order/view and refreshes same ID',
+    (tester) async {
+      final episodes = [
+        for (var i = 1; i <= 5000; i++)
+          PgcEpisode(
+            id: PgcEpisodeId('$i'),
+            title: '$i',
+            bvid: 'BV1ab411c7mD',
+            cid: '$i',
+          ),
+      ];
+      var season = PgcSeason(
+        id: const PgcSeasonId('42'),
+        title: '长季',
+        episodes: episodes,
+      );
+      var selected = season.episodes.last;
+      Widget frame() => MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 360,
+              child: PgcEpisodePanel(
+                season: season,
+                selected: selected,
+                onSelect: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpWidget(frame());
+      await tester.pumpAndSettle();
+      final selectedFinder = find.byKey(const ValueKey('pgc-episode-5000'));
+      expect(selectedFinder, findsOneWidget);
+      final listFinder = find.byKey(const ValueKey('pgc-episode-list'));
+      final list = tester.widget<ListView>(listFinder);
+      final groups = season.episodeGroups;
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(
+        tester.getCenter(find.byKey(const ValueKey('pgc-section-tabs'))),
+      );
+      await tester.pumpAndSettle();
+      expect(identical(tester.widget<ListView>(listFinder), list), isTrue);
+      expect(identical(season.episodeGroups, groups), isTrue);
+      await tester.tap(find.byKey(const ValueKey('pgc-episode-order')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<ListView>(listFinder).controller!.offset, 0);
+      expect(selectedFinder, findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('pgc-episode-view')));
+      await tester.pumpAndSettle();
+      expect(selectedFinder, findsOneWidget);
+      selected = const PgcEpisode(
+        id: PgcEpisodeId('5000'),
+        title: '刷新后的SP',
+        bvid: 'BV1ab411c7mD',
+        cid: '5000',
+        sectionTitle: 'SP',
+      );
+      season = PgcSeason(
+        id: season.id,
+        title: season.title,
+        episodes: [episodes.first, selected],
+      );
+      await tester.pumpWidget(frame());
+      await tester.pumpAndSettle();
+      expect(find.text('刷新后的SP'), findsOneWidget);
+      expect(find.text('选集 (2/2)'), findsOneWidget);
+      expect(identical(season.episodeGroups, groups), isFalse);
+      await mouse.removePointer();
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('section wheel and hovered thumb reach later episode groups', (
     tester,
   ) async {

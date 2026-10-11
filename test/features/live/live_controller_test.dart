@@ -52,6 +52,70 @@ void main() {
 
   LiveState current() => container.read(liveControllerProvider(requested));
 
+  test('unchanged background history is silent and manual refresh reports progress', () async {
+    repository.messages = List.generate(
+      500,
+      (i) => LiveChatMessage(id: '$i', userName: '观众', text: '内容 $i'),
+    );
+    controller.setActive(true);
+    await Future<void>.delayed(Duration.zero);
+    final messages = current().messages;
+    var notifications = 0;
+    container.listen(
+      liveControllerProvider(requested),
+      (_, _) => notifications++,
+    );
+    for (var batch = 0; batch < 20; batch++) {
+      repository.messages = List.generate(
+        500,
+        (i) => LiveChatMessage(id: '$i', userName: '观众', text: '内容 $i'),
+      );
+      await controller.refreshChat(background: true);
+      expect(identical(current().messages, messages), isTrue);
+    }
+    expect(notifications, 0);
+    await controller.refreshChat();
+    expect(notifications, 2);
+    expect(identical(current().messages, messages), isTrue);
+  });
+
+  test('background read stays single flight and explicit refresh can show its progress', () async {
+    controller.setActive(true);
+    await Future<void>.delayed(Duration.zero);
+    final pending = Completer<List<LiveChatMessage>>();
+    repository.pendingChat = pending;
+    final calls = repository.chatCalls;
+    final read = controller.refreshChat(background: true);
+    expect(current().chatLoading, isFalse);
+    await controller.refreshChat(background: true);
+    await controller.refreshChat();
+    expect(repository.chatCalls, calls + 1);
+    expect(current().chatLoading, isTrue);
+    pending.complete(const [LiveChatMessage(userName: '观众', text: '新增')]);
+    await read;
+    expect(current().chatLoading, isFalse);
+    expect(current().messages.single.text, '新增');
+  });
+
+  test('background history failures notify once and successful retry clears the error', () async {
+    controller.setActive(true);
+    await Future<void>.delayed(Duration.zero);
+    var notifications = 0;
+    container.listen(
+      liveControllerProvider(requested),
+      (_, _) => notifications++,
+    );
+    repository.failure = const AppFailure(AppFailureKind.network, '离线');
+    await controller.refreshChat(background: true);
+    await controller.refreshChat(background: true);
+    expect(notifications, 1);
+    expect(current().chatMessage, '离线');
+    repository.failure = null;
+    await controller.refreshChat(background: true);
+    expect(notifications, 2);
+    expect(current().chatMessage, isNull);
+  });
+
   test('uses canonical room ID for chat and caps retained messages', () async {
     repository.messages = List.generate(
       520,

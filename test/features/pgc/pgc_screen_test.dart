@@ -497,6 +497,7 @@ void main() {
     container.listen(pgcControllerProvider(locator), (_, _) {});
     await Future<void>.delayed(Duration.zero);
     final controller = container.read(pgcControllerProvider(locator).notifier);
+    expect(repo.lastRefresh, isFalse);
     expect(
       container.read(pgcControllerProvider(locator)).selectedEpisodeId,
       const PgcEpisodeId('e2'),
@@ -505,6 +506,7 @@ void main() {
     final late = Completer<PgcSeason>();
     repo.pending = late;
     final old = controller.load();
+    expect(repo.lastRefresh, isTrue);
     final oldCancellation = repo.lastCancellation;
     repo.pending = null;
     await controller.load();
@@ -1053,6 +1055,7 @@ void main() {
 }
 
 final class _Repo implements PgcRepository {
+  bool? lastRefresh;
   PgcSeason value = _season;
   String scope = 'guest';
   int epoch = 0;
@@ -1069,9 +1072,11 @@ final class _Repo implements PgcRepository {
   Future<PgcSeason> detail({
     PgcSeasonId? seasonId,
     PgcEpisodeId? episodeId,
+    bool refresh = false,
     required RequestCancellation cancellation,
   }) {
     reads++;
+    lastRefresh = refresh;
     lastCancellation = cancellation;
     lastEpisodeId = episodeId;
     if (failure case final Object error) return Future<PgcSeason>.error(error);

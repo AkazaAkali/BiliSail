@@ -47,59 +47,145 @@ final class ImageLoadRequest {
   }
 }
 
-/// Only public CDN requests are supported. No Cookie or Authorization is sent,
-/// including redirects. Each request owns its client so abort closes sockets.
+/// One-shot transport for consumers without a longer-lived image service.
 Future<Uint8List> loadPublicImage(Uri uri, ImageLoadRequest limits) async {
-  final client = HttpClient()..connectionTimeout = limits.timeout;
-  limits.onCancel(() => client.close(force: true));
+  final transport = PublicImageTransport(maxConnections: 1);
   try {
-    return await (() async {
-      var target = uri;
-      for (var redirect = 0; redirect <= 3; redirect++) {
-        limits.check();
-        final request = await client.getUrl(target);
-        request.followRedirects = false;
-        request.headers.set(
-          HttpHeaders.refererHeader,
-          'https://www.bilibili.com/',
-        );
-        request.headers.set(HttpHeaders.acceptHeader, 'image/*');
-        final response = await request.close();
-        if ([301, 302, 303, 307, 308].contains(response.statusCode)) {
-          final location = response.headers.value(HttpHeaders.locationHeader);
-          if (location == null || redirect == 3) {
-            throw const HttpException('Invalid image redirect');
-          }
-          target = target.resolve(location);
-          if (!ImageByteCache.isPublicImageUri(target)) {
-            throw const HttpException('Unsupported image redirect');
-          }
-          // Closing this response subscription prevents downloading its body.
-          await response.listen((_) {}).cancel();
-          continue;
-        }
-        if (response.statusCode != HttpStatus.ok ||
-            response.contentLength > limits.maxBytes) {
-          throw const HttpException('Image response rejected');
-        }
-        final bytes = BytesBuilder(copy: false);
-        await for (final chunk in response) {
-          limits.check();
-          if (bytes.length + chunk.length > limits.maxBytes) {
-            throw const HttpException('Image response too large');
-          }
-          bytes.add(chunk);
-        }
-        if (bytes.isEmpty) throw const HttpException('Empty image response');
-        return bytes.takeBytes();
-      }
-      throw const HttpException('Image redirect limit exceeded');
-    })().timeout(limits.timeout);
-  } on TimeoutException {
-    limits.cancel();
-    rethrow;
+    return await transport.load(uri, limits);
   } finally {
-    client.close(force: true);
+    transport.close();
+  }
+}
+
+/// A bounded pool of public-only connections. Each client is exclusively leased
+/// to one transfer, so cancellation can also abort a pending DNS/TLS handshake
+/// without closing any other image's sockets. Successful same-origin transfers
+/// return the client for keep-alive reuse; failures and cross-origin redirects
+/// retire it. No credentials or authentication callbacks are ever installed.
+final class PublicImageTransport {
+  PublicImageTransport({this.maxConnections = 6}) {
+    if (maxConnections < 1) {
+      throw ArgumentError.value(
+        maxConnections,
+        'maxConnections',
+        'Must be positive',
+      );
+    }
+  }
+  final int maxConnections;
+  final _idle = <(Uri, HttpClient)>[];
+  final _active = <HttpClient>{};
+  bool _closed = false;
+
+  Future<Uint8List> load(Uri uri, ImageLoadRequest limits) async {
+    limits.check();
+    if (_closed) throw const ImageLoadCancelled();
+    if (!ImageByteCache.isPublicImageUri(uri)) {
+      throw const HttpException('Unsupported image URL');
+    }
+    if (_active.length >= maxConnections) throw const ImageQueueFull();
+    final origin = uri.replace(path: '', query: '', fragment: '');
+    final matching = _idle.indexWhere((entry) => entry.$1 == origin);
+    final HttpClient client;
+    if (matching >= 0) {
+      client = _idle.removeAt(matching).$2;
+    } else {
+      if (_active.length + _idle.length >= maxConnections) {
+        _idle.removeAt(0).$2.close(force: true);
+      }
+      client = HttpClient()
+        ..maxConnectionsPerHost = 1
+        ..idleTimeout = const Duration(seconds: 15);
+    }
+    client.connectionTimeout = limits.timeout;
+    _active.add(client);
+    void retire() {
+      if (_active.remove(client)) client.close(force: true);
+    }
+
+    limits.onCancel(retire);
+    var successful = false;
+    var sameOrigin = true;
+    try {
+      final bytes = await (() async {
+        var target = uri;
+        for (var redirect = 0; redirect <= 3; redirect++) {
+          limits.check();
+          final request = await client.getUrl(target);
+          limits.check();
+          request.followRedirects = false;
+          request.headers.set(
+            HttpHeaders.refererHeader,
+            'https://www.bilibili.com/',
+          );
+          request.headers.set(HttpHeaders.acceptHeader, 'image/*');
+          final response = await request.close();
+          if ([301, 302, 303, 307, 308].contains(response.statusCode)) {
+            final location = response.headers.value(HttpHeaders.locationHeader);
+            if (location == null || redirect == 3) {
+              throw const HttpException('Invalid image redirect');
+            }
+            target = target.resolve(location);
+            if (!ImageByteCache.isPublicImageUri(target)) {
+              throw const HttpException('Unsupported image redirect');
+            }
+            if (target.replace(path: '', query: '', fragment: '') != origin) {
+              sameOrigin = false;
+            }
+            // Closing this response subscription prevents downloading its body.
+            await response.listen((_) {}).cancel();
+            continue;
+          }
+          if (response.statusCode != HttpStatus.ok ||
+              response.contentLength > limits.maxBytes) {
+            throw const HttpException('Image response rejected');
+          }
+          final bytes = BytesBuilder(copy: false);
+          await for (final chunk in response) {
+            limits.check();
+            if (bytes.length + chunk.length > limits.maxBytes) {
+              throw const HttpException('Image response too large');
+            }
+            bytes.add(chunk);
+          }
+          if (bytes.isEmpty) throw const HttpException('Empty image response');
+          return bytes.takeBytes();
+        }
+        throw const HttpException('Image redirect limit exceeded');
+      })().timeout(limits.timeout);
+      limits.check();
+      successful = true;
+      return bytes;
+    } on TimeoutException {
+      limits.cancel();
+      rethrow;
+    } catch (_) {
+      limits.check();
+      rethrow;
+    } finally {
+      // A released consumer must not later close a client leased to a new image.
+      limits.onCancel(() {});
+      if (successful && sameOrigin && !_closed && _active.remove(client)) {
+        _idle.add((origin, client));
+      } else {
+        retire();
+      }
+    }
+  }
+
+  /// Session boundaries also discard idle sockets, despite the public transport
+  /// never carrying credentials. The service can start fresh after this call.
+  void reset() {
+    for (final client in [..._active, ..._idle.map((entry) => entry.$2)]) {
+      client.close(force: true);
+    }
+    _active.clear();
+    _idle.clear();
+  }
+
+  void close() {
+    _closed = true;
+    reset();
   }
 }
 
@@ -174,7 +260,7 @@ final class ImageByteCache {
   ImageByteCache({
     required this.directory,
     this.fileForPath = File.new,
-    this.loader = loadPublicImage,
+    ImageByteLoader? loader,
     DateTime Function()? now,
     this.maxEntries = 512,
     this.maxTotalBytes = 64 * 1024 * 1024,
@@ -186,13 +272,20 @@ final class ImageByteCache {
     this.ttl = const Duration(days: 7),
     this.timeout = const Duration(seconds: 15),
     bool enabled = true,
-  }) : _now = now ?? DateTime.now,
+    // Keep the public named `loader` override while storing it privately.
+    // ignore: prefer_initializing_formals
+  }) : _loader = loader,
+       _now = now ?? DateTime.now,
        // ignore: prefer_initializing_formals
        _enabled = enabled;
 
   final Future<Directory> Function() directory;
   final File Function(String path) fileForPath;
-  final ImageByteLoader loader;
+  final ImageByteLoader? _loader;
+  PublicImageTransport? _transport;
+  late final ImageByteLoader loader =
+      _loader ??
+      (_transport = PublicImageTransport(maxConnections: maxConcurrent)).load;
   final DateTime Function() _now;
   final int maxEntries, maxTotalBytes, maxImageBytes, maxConcurrent, maxPending;
   final int maxPendingWrites, maxPendingWriteBytes;
@@ -264,6 +357,7 @@ final class ImageByteCache {
     for (final entry in _inFlight.entries.toList()) {
       _cancel(entry.key, entry.value);
     }
+    _transport?.reset();
   }
 
   Future<void> clearScope(String scope) {
@@ -651,6 +745,7 @@ final class ImageByteCache {
     for (final entry in _inFlight.entries.toList()) {
       _cancel(entry.key, entry.value);
     }
+    _transport?.close();
     await Future.wait(_running.toList());
     await Future.wait(_diskReads.toList());
     await _diskQueue;

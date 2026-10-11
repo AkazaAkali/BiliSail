@@ -15,6 +15,7 @@ import '../../../shared/ui/state_view.dart';
 import '../application/live_controller.dart';
 import '../domain/live_chat_repository.dart';
 import '../domain/live_room.dart';
+import '../domain/live_chat_content.dart';
 import 'live_super_chat_card.dart';
 import 'live_player_danmaku.dart';
 import 'live_chat_bubble.dart';
@@ -66,6 +67,21 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
   String? _playerRequestedId;
   LivePlayerBuilder? _playerBuilder;
   Widget? _playerWidget;
+  final _chatContent = LiveChatContentCache();
+  final _chatViewportKey = GlobalKey();
+  final _chatRows =
+      <
+        String,
+        ({
+          LiveChatMessage message,
+          ValueChanged<UserId>? onOpenUser,
+          GlobalKey anchor,
+          Widget widget,
+        })
+      >{};
+  bool _chatAnchorScheduled = false;
+  List<LiveChatMessage>? _indexedMessages;
+  Map<String, int> _messageIndices = const {};
 
   bool get _foreground => !const {
     AppLifecycleState.hidden,
@@ -667,17 +683,23 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
     LiveState state,
     LiveController controller,
   ) {
+    if (!identical(_indexedMessages, state.messages)) {
+      _indexedMessages = state.messages;
+      _messageIndices = {
+        for (var index = 0; index < state.messages.length; index++)
+          state.messages[index].deduplicationKey: index,
+      };
+      _preserveChatAnchor(_messageIndices.keys.toSet());
+      _chatRows.removeWhere((key, _) => !_messageIndices.containsKey(key));
+      _chatContent.retain(_messageIndices.keys.toSet());
+    }
     final selected = state.superChats
         .where((message) => message.id == _selectedSuperChatId)
         .firstOrNull;
     if (selected == null) _scheduleChatFollow();
     final bodyCount = state.messages.isEmpty ? 1 : state.messages.length;
     final statusAnchor = _chatStatusAfterMessageKey;
-    final anchorIndex = statusAnchor == null
-        ? -1
-        : state.messages.indexWhere(
-            (message) => message.deduplicationKey == statusAnchor,
-          );
+    final anchorIndex = _messageIndices[statusAnchor] ?? -1;
     // Drop the notice with its message once the bounded chat window evicts it.
     final statusIndex = statusAnchor == null
         ? (state.messages.isEmpty ? bodyCount : 0)
@@ -690,6 +712,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
         const Divider(height: 1),
         Expanded(
           child: Listener(
+            key: _chatViewportKey,
             onPointerSignal: _onChatPointerSignal,
             child: NotificationListener<ScrollMetricsNotification>(
               onNotification: (notification) {
@@ -706,16 +729,35 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
                       (selected == null ? 0 : 1) +
                       bodyCount +
                       (statusIndex == null ? 0 : 1),
+                  findChildIndexCallback: (key) {
+                    if (key == const ValueKey('live-selected-sc')) {
+                      return selected == null ? null : 0;
+                    }
+                    final prefix = selected == null ? 0 : 1;
+                    if (key == const ValueKey('live-chat-status')) {
+                      return statusIndex == null ? null : prefix + statusIndex;
+                    }
+                    if (key is! ValueKey<(String, String)>) return null;
+                    final index = _messageIndices[key.value.$2];
+                    if (index == null) return null;
+                    return prefix +
+                        index +
+                        (statusIndex != null && index >= statusIndex ? 1 : 0);
+                  },
                   itemBuilder: (context, index) {
                     if (selected != null && index == 0) {
                       return Padding(
+                        key: const ValueKey('live-selected-sc'),
                         padding: const EdgeInsets.only(bottom: 8),
                         child: _superChatCard(selected),
                       );
                     }
                     final bodyIndex = index - (selected == null ? 0 : 1);
                     if (bodyIndex == statusIndex) {
-                      return _chatConnectionStatus(context, state);
+                      return KeyedSubtree(
+                        key: const ValueKey('live-chat-status'),
+                        child: _chatConnectionStatus(context, state),
+                      );
                     }
                     if (state.messages.isEmpty) {
                       return switch (state.chatMessage) {
@@ -738,10 +780,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
                             ? 1
                             : 0);
                     final message = state.messages[messageIndex];
-                    return LiveChatBubble(
-                      message: message,
-                      onOpenUser: widget.onOpenUser,
-                    );
+                    return _chatRow(message);
                   },
                 ),
               ),
@@ -750,6 +789,106 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
         ),
       ],
     );
+  }
+
+  Widget _chatRow(LiveChatMessage message) {
+    final key = message.deduplicationKey;
+    final previous = _chatRows[key];
+    if (previous != null &&
+        identical(previous.message, message) &&
+        previous.onOpenUser == widget.onOpenUser) {
+      return previous.widget;
+    }
+    final anchor = previous?.anchor ?? GlobalKey();
+    final row = KeyedSubtree(
+      key: ValueKey(('live-message', key)),
+      child: LiveChatBubble(
+        key: anchor,
+        message: message,
+        content: _chatContent.resolve(message),
+        onOpenUser: widget.onOpenUser,
+      ),
+    );
+    _chatRows[key] = (
+      message: message,
+      onOpenUser: widget.onOpenUser,
+      anchor: anchor,
+      widget: row,
+    );
+    return row;
+  }
+
+  // Pixel offsets alone cannot retain the reading position when the bounded
+  // window evicts a variable-height head. Anchor a surviving visible row for
+  // one layout; following and active user scrolling keep their own semantics.
+  void _preserveChatAnchor(Set<String> retained) {
+    if (_followChat ||
+        _chatUserScrolling ||
+        _chatAnchorScheduled ||
+        _lastActive != true ||
+        !_infoVisible ||
+        _tab != 0 ||
+        !_chatScrollController.hasClients) {
+      return;
+    }
+    final viewport = _chatViewportKey.currentContext?.findRenderObject();
+    if (viewport is! RenderBox || !viewport.attached || !viewport.hasSize) {
+      return;
+    }
+    final top = viewport.localToGlobal(Offset.zero).dy;
+    final bottom = top + viewport.size.height;
+    GlobalKey? selected;
+    double? selectedTop;
+    for (final entry in _chatRows.entries) {
+      if (!retained.contains(entry.key)) continue;
+      final box = entry.value.anchor.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.attached || !box.hasSize) continue;
+      final dy = box.localToGlobal(Offset.zero).dy;
+      if (dy < bottom &&
+          dy + box.size.height > top &&
+          (selectedTop == null || dy < selectedTop)) {
+        selected = entry.value.anchor;
+        selectedTop = dy;
+      }
+    }
+    if (selected == null || selectedTop == null) return;
+    final anchor = selected;
+    final oldTop = selectedTop - top;
+    _chatAnchorScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _chatAnchorScheduled = false;
+      if (!mounted ||
+          _followChat ||
+          _chatUserScrolling ||
+          !_chatScrollController.hasClients ||
+          _lastActive != true ||
+          !_infoVisible ||
+          _tab != 0) {
+        return;
+      }
+      final box = anchor.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.attached || !box.hasSize) return;
+      final currentViewport = _chatViewportKey.currentContext
+          ?.findRenderObject();
+      if (currentViewport is! RenderBox ||
+          !currentViewport.attached ||
+          !currentViewport.hasSize) {
+        return;
+      }
+      final delta =
+          box.localToGlobal(Offset.zero).dy -
+          currentViewport.localToGlobal(Offset.zero).dy -
+          oldTop;
+      final position = _chatScrollController.position;
+      if (delta.abs() > 0.1 && position.hasContentDimensions) {
+        _jumpChatTo(
+          (position.pixels + delta).clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
+          ),
+        );
+      }
+    });
   }
 
   Widget _chatConnectionStatus(BuildContext context, LiveState state) {

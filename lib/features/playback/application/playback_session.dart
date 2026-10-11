@@ -13,12 +13,14 @@ import '../../../domain/media_cdn.dart';
 import '../../../domain/request_cancellation.dart';
 import '../../../domain/video.dart';
 import '../domain/playback_repository.dart';
+import '../domain/subtitle_cue_index.dart';
 import '../domain/content_playback.dart';
 import '../domain/comment_window.dart';
 import '../domain/sponsor_repository.dart';
 import '../domain/playback_history_repository.dart';
 import 'playback_history_reporter.dart';
 import 'playback_rate_memory.dart';
+import 'playback_startup_diagnostics.dart';
 import '../../settings/domain/app_settings.dart';
 
 final playbackSessionProvider = Provider<PlaybackSession>(
@@ -43,7 +45,9 @@ class PlaybackSession extends ChangeNotifier {
     Duration Function()? danmakuNow,
     Duration Function()? storyboardNow,
     PlaybackRateMemory? rateMemory,
+    PlaybackStartupDiagnostics? startupDiagnostics,
   }) : sessionEpoch = sessionEpoch ?? _zeroEpoch,
+       startupDiagnostics = startupDiagnostics ?? PlaybackStartupDiagnostics(),
        _rateMemory = rateMemory ?? PlaybackRateMemory() {
     _clock.start();
     _storyboardNow = storyboardNow ?? () => _clock.elapsed;
@@ -113,6 +117,7 @@ class PlaybackSession extends ChangeNotifier {
   final PlaybackMetadataRepository? metadataRepository;
   final ContentPlaybackRepository? contentRepository;
   final PlaybackProgressStore progress;
+  final PlaybackStartupDiagnostics startupDiagnostics;
   final PlaybackHistoryRepository? historyRepository;
   late final PlaybackHistoryReporter? _historyReporter;
   final int Function() sessionEpoch;
@@ -177,7 +182,18 @@ class PlaybackSession extends ChangeNotifier {
   String? error;
   String? auxiliaryMessage;
   List<SubtitleTrack> subtitleTracks = const [];
-  List<SubtitleCue> subtitleCues = const [];
+  List<SubtitleCue> _subtitleCues = const [];
+  List<SubtitleCue> get subtitleCues => _subtitleCues;
+  SubtitleCueIndex _subtitleIndex = SubtitleCueIndex(const []);
+  set subtitleCues(List<SubtitleCue> cues) {
+    _subtitleCues = List.unmodifiable(cues);
+    _subtitleIndex = SubtitleCueIndex(_subtitleCues);
+  }
+
+  SubtitleCue? subtitleAt(Duration position) => _subtitleIndex.at(position);
+
+  @visibleForTesting
+  int get subtitleLookupCount => _subtitleIndex.lookupCount;
   bool subtitleLoading = false;
   String? subtitleMessage;
   PlaybackVoice get selectedVoice => _voice;
@@ -488,7 +504,11 @@ class PlaybackSession extends ChangeNotifier {
     _failedSegments.clear();
     _prefetchFailedSegments.clear();
     _lastCommentWindow = null;
-    final savedProgress = _saveProgress();
+    final savedProgress = startupDiagnostics.measure(
+      generation,
+      PlaybackStartupStage.saveProgress,
+      _saveProgress,
+    );
     _cancelCloudResume();
     final resumeRevision = _resumeRevision;
     final mediaReady = Completer<bool>();
@@ -536,57 +556,119 @@ class PlaybackSession extends ChangeNotifier {
     selectedSubtitle = -1;
     _scope = accountScope();
     _epoch = sessionEpoch();
+    final sourceScope = _scope;
+    final sourceEpoch = _epoch;
+    bool isCurrent() =>
+        generation == _generation &&
+        !_disposed &&
+        !_closing &&
+        !cancellation.isCancelled &&
+        sourceScope == accountScope() &&
+        sourceEpoch == sessionEpoch();
     _resolving = true;
     danmaku.replaceEvents(const []);
     _notify();
     try {
       await savedProgress;
-      if (generation != _generation || _disposed) return;
-      await engine.stop();
-      if (generation != _generation) return;
+      if (!isCurrent()) return;
+      // Saving the previous source must finish before reading its local resume
+      // record. Release, resolution and that read otherwise share no state.
+      final scope = _scope;
+      final requestedVoice = _voice;
+      final readResume =
+          !isLive &&
+          position == null &&
+          _settings.resumePlayback &&
+          video != null &&
+          selected != null;
+      final stopped = startupDiagnostics.measure(
+        generation,
+        PlaybackStartupStage.stopPrevious,
+        engine.stop,
+      );
       final contentResolver = contentRepository;
-      final PlaybackMedia resolved;
-      if (target != null) {
-        if (contentResolver == null) {
-          throw const AppFailure(AppFailureKind.playback, '内容播放服务未配置');
-        }
-        resolved = await contentResolver.resolve(
-          target,
-          quality: quality,
-          preferredCodec: preferredCodec,
-          cancellation: cancellation,
+      final resolution = startupDiagnostics.measure(
+        generation,
+        PlaybackStartupStage.resolve,
+        () async {
+          if (target != null) {
+            if (contentResolver == null) {
+              throw const AppFailure(AppFailureKind.playback, '内容播放服务未配置');
+            }
+            return contentResolver.resolve(
+              target,
+              quality: quality,
+              preferredCodec: preferredCodec,
+              cancellation: cancellation,
+            );
+          } else if (video != null && selected != null) {
+            final resolver = repository;
+            if (!requestedVoice.isOriginal &&
+                resolver is VoicePlaybackRepository) {
+              return (resolver as VoicePlaybackRepository).resolveVoice(
+                video.summary.id,
+                selected.cid,
+                voice: requestedVoice,
+                quality: quality,
+                preferredCodec: preferredCodec,
+                cancellation: cancellation,
+              );
+            } else {
+              return repository.resolve(
+                video.summary.id,
+                selected.cid,
+                quality: quality,
+                preferredCodec: preferredCodec,
+                cancellation: cancellation,
+              );
+            }
+          } else {
+            throw const AppFailure(AppFailureKind.playback, '缺少播放内容');
+          }
+        },
+      );
+      Duration? localResume;
+      late final PlaybackMedia resolved;
+      // Attach handlers to every operation immediately, and settle all of them
+      // even on error. No new native source can open before release finishes.
+      await Future.wait<void>([
+        stopped,
+        resolution.then<void>((value) {
+          resolved = value;
+        }),
+        if (readResume)
+          startupDiagnostics
+              .measure(
+                generation,
+                PlaybackStartupStage.localResumeRead,
+                () => progress.read(scope, video.summary.id, selected.cid),
+              )
+              .then<void>((value) {
+                localResume = value;
+              }),
+      ]);
+      if (!isCurrent()) return;
+      // A user may enable resume while resolution is pending. Preserve that
+      // intent without treating an unread local record as a cache miss.
+      if (!readResume &&
+          !isLive &&
+          position == null &&
+          _settings.resumePlayback &&
+          video != null &&
+          selected != null) {
+        localResume = await startupDiagnostics.measure(
+          generation,
+          PlaybackStartupStage.localResumeRead,
+          () => progress.read(scope, video.summary.id, selected.cid),
         );
-      } else if (video != null && selected != null) {
-        final resolver = repository;
-        if (!_voice.isOriginal && resolver is VoicePlaybackRepository) {
-          resolved = await (resolver as VoicePlaybackRepository).resolveVoice(
-            video.summary.id,
-            selected.cid,
-            voice: _voice,
-            quality: quality,
-            preferredCodec: preferredCodec,
-            cancellation: cancellation,
-          );
-        } else {
-          resolved = await repository.resolve(
-            video.summary.id,
-            selected.cid,
-            quality: quality,
-            preferredCodec: preferredCodec,
-            cancellation: cancellation,
-          );
-        }
-      } else {
-        return;
+        if (!isCurrent()) return;
       }
-      if (generation != _generation || _scope != accountScope()) return;
       final resume = isLive
           ? Duration.zero
           : position ??
                 (_settings.resumePlayback && video != null && selected != null
-                    ? await _resumePosition(
-                        video,
-                        selected,
+                    ? _resumePosition(
+                        localResume,
                         resolved.duration,
                         generation,
                         cancellation,
@@ -594,13 +676,7 @@ class PlaybackSession extends ChangeNotifier {
                         resumeRevision,
                       )
                     : Duration.zero);
-      if (generation != _generation ||
-          _disposed ||
-          cancellation.isCancelled ||
-          _scope != accountScope() ||
-          _epoch != sessionEpoch()) {
-        return;
-      }
+      if (!isCurrent()) return;
       final policy = MediaRequestPolicy(headers: resolved.headers);
       _openingPosition = resume;
       PlayerFailure? lastFailure;
@@ -619,13 +695,7 @@ class PlaybackSession extends ChangeNotifier {
       const totalOpenBudget = Duration(seconds: 35);
       // At most two opens in one resolution, using only server-provided backups.
       for (var attempt = 0; attempt < 2; attempt++) {
-        if (generation != _generation ||
-            _disposed ||
-            cancellation.isCancelled ||
-            _scope != accountScope() ||
-            _epoch != sessionEpoch()) {
-          return;
-        }
+        if (!isCurrent()) return;
         final remaining = isLive || !hasBackup
             ? totalOpenBudget
             : totalOpenBudget - openingWatch.elapsed;
@@ -648,39 +718,43 @@ class PlaybackSession extends ChangeNotifier {
             ? audio.urls.first
             : audioBackup ?? audio.urls.first;
         try {
-          await engine.open(
-            resolved.kind == PlaybackMediaKind.liveHls
-                ? ManifestSource(
-                    MediaTrack(uri: videoUri, requestPolicy: policy),
-                    isLive: true,
-                  )
-                : resolved.kind == PlaybackMediaKind.liveFlv
-                ? ProgressiveSource(
-                    MediaTrack(uri: videoUri, requestPolicy: policy),
-                  )
-                : DashPairSource(
-                    video: MediaTrack(
-                      uri: videoUri,
-                      requestPolicy: policy,
-                      codec: resolved.video.codec,
-                      bandwidth: resolved.video.bandwidth,
+          await startupDiagnostics.measure(
+            generation,
+            PlaybackStartupStage.nativeOpen,
+            () => engine.open(
+              resolved.kind == PlaybackMediaKind.liveHls
+                  ? ManifestSource(
+                      MediaTrack(uri: videoUri, requestPolicy: policy),
+                      isLive: true,
+                    )
+                  : resolved.kind == PlaybackMediaKind.liveFlv
+                  ? ProgressiveSource(
+                      MediaTrack(uri: videoUri, requestPolicy: policy),
+                    )
+                  : DashPairSource(
+                      video: MediaTrack(
+                        uri: videoUri,
+                        requestPolicy: policy,
+                        codec: resolved.video.codec,
+                        bandwidth: resolved.video.bandwidth,
+                      ),
+                      audio: audio == null || audioUri == null
+                          ? null
+                          : MediaTrack(
+                              uri: audioUri,
+                              requestPolicy: policy,
+                              codec: audio.codec,
+                              bandwidth: audio.bandwidth,
+                            ),
                     ),
-                    audio: audio == null || audioUri == null
-                        ? null
-                        : MediaTrack(
-                            uri: audioUri,
-                            requestPolicy: policy,
-                            codec: audio.codec,
-                            bandwidth: audio.bandwidth,
-                          ),
-                  ),
-            OpenOptions(
-              startPosition: resume,
-              play: false,
-              rate: isLive ? 1 : oldRate,
-              volume: oldVolume,
-              videoDecoding: videoDecoding,
-              openTimeout: attemptBudget,
+              OpenOptions(
+                startPosition: resume,
+                play: false,
+                rate: isLive ? 1 : oldRate,
+                volume: oldVolume,
+                videoDecoding: videoDecoding,
+                openTimeout: attemptBudget,
+              ),
             ),
           );
           lastFailure = null;
@@ -693,7 +767,7 @@ class PlaybackSession extends ChangeNotifier {
         }
       }
       if (lastFailure != null) throw lastFailure;
-      if (generation != _generation) return;
+      if (!isCurrent()) return;
       media = resolved;
       if (target == null) {
         _voice = resolved.voice;
@@ -702,8 +776,12 @@ class PlaybackSession extends ChangeNotifier {
       _mediaGeneration = generation;
       _resolving = false;
       danmaku.seekConfirmed(engine.currentSnapshot.position);
-      await _syncPlayback();
-      if (generation != _generation) return;
+      await startupDiagnostics.measure(
+        generation,
+        PlaybackStartupStage.playAndAudioReady,
+        _syncPlayback,
+      );
+      if (!isCurrent()) return;
       _reportProgress();
       _notify();
       mediaReady.complete(true);
@@ -715,20 +793,19 @@ class PlaybackSession extends ChangeNotifier {
       }
       if (target == null) unawaited(_loadSponsorSegments());
     } on AppFailure catch (failure) {
-      if (generation == _generation &&
-          failure.kind != AppFailureKind.cancelled) {
+      if (isCurrent() && failure.kind != AppFailureKind.cancelled) {
         error = failure.message;
         _resolving = false;
         _notify();
       }
     } on PlayerFailure catch (failure) {
-      if (generation == _generation) {
+      if (isCurrent()) {
         error = failure.message;
         _resolving = false;
         _notify();
       }
     } catch (_) {
-      if (generation == _generation) {
+      if (isCurrent()) {
         error = '播放准备失败，请检查网络后重试';
         _resolving = false;
         _notify();
@@ -866,18 +943,16 @@ class PlaybackSession extends ChangeNotifier {
     );
   }
 
-  Future<Duration> _resumePosition(
-    VideoDetail video,
-    VideoPart selected,
+  Duration _resumePosition(
+    Duration? local,
     Duration duration,
     int generation,
     RequestCancellation cancellation,
     Future<bool> mediaReady,
     int resumeRevision,
-  ) async {
+  ) {
     final scope = _scope;
     final epoch = _epoch;
-    final local = await progress.read(scope, video.summary.id, selected.cid);
     if (local != null) return local;
     if (generation != _generation ||
         cancellation.isCancelled ||

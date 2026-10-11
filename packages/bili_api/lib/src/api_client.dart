@@ -6,7 +6,9 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'cookies.dart';
+import 'decoding/pgc_season_decoder.dart';
 import 'models.dart';
+import 'models/pgc_models.dart';
 import 'mappers/video_access_parser.dart';
 import 'transport.dart';
 import 'wbi.dart';
@@ -31,12 +33,14 @@ final class BiliApiClient {
     this.timeout = const Duration(seconds: 12),
     DateTime Function()? clock,
     Future<List<ApiDanmakuItem>> Function(Uint8List)? danmakuDecoder,
+    Future<ApiPgcSeason> Function(Uint8List)? pgcSeasonDecoder,
   }) : _transport = transport ?? DioApiTransport(),
        _ownsTransport = transport == null,
        _sessionProvider = sessionProvider,
        cookieJar = cookieJar ?? ApiCookieJar(),
        _clock = clock ?? DateTime.now,
-       _danmakuDecoder = danmakuDecoder ?? _decodeInIsolate;
+       _danmakuDecoder = danmakuDecoder ?? _decodeInIsolate,
+       _pgcSeasonDecoder = pgcSeasonDecoder ?? _decodePgcInIsolate;
 
   final ApiTransport _transport;
   final bool _ownsTransport;
@@ -46,6 +50,7 @@ final class BiliApiClient {
   final Duration timeout;
   final DateTime Function() _clock;
   final Future<List<ApiDanmakuItem>> Function(Uint8List) _danmakuDecoder;
+  final Future<ApiPgcSeason> Function(Uint8List) _pgcSeasonDecoder;
   _WbiKeyFlight? _wbiInFlight;
   WbiSigner? _wbi;
   DateTime? _wbiFetched;
@@ -131,6 +136,60 @@ final class BiliApiClient {
       throw ArgumentError('Unsupported Web API destination');
     }
     return _jsonValue(uri, endpoint, context);
+  }
+
+  /// PGC metadata shares the HTTP/session budget and the process decode gate.
+  /// Large bodies move UTF-8, JSON and all DTO parsing together off the caller.
+  Future<ApiPgcSeason> requestPgcSeason(
+    Uri uri, {
+    ApiRequestContext? context,
+  }) async {
+    const endpoint = 'pgc_season';
+    if (uri.scheme != 'https' ||
+        uri.host != 'api.bilibili.com' ||
+        uri.port != 443 ||
+        uri.userInfo.isNotEmpty ||
+        uri.path != '/pgc/view/web/season') {
+      throw ArgumentError('Unsupported PGC destination');
+    }
+    final epoch = _sessionProvider?.sessionEpoch;
+    final deadline = context?.deadline ?? _clock().add(timeout);
+    final activeContext = ApiRequestContext(
+      cancellation: context?.cancellation,
+      deadline: deadline,
+      sessionEpoch: context?.sessionEpoch,
+    );
+    void check() =>
+        _checkDecodeContext(activeContext, epoch, deadline, endpoint: endpoint);
+    check();
+    final response = await _request(uri, endpoint, activeContext);
+    check();
+    // Also enforce the transport's 4 MiB limit for injected transports and
+    // before copying bytes into the worker message.
+    if (response.body.length > 4 * 1024 * 1024) {
+      throw const ApiFailure(ApiFailureCategory.protocol, endpoint);
+    }
+    if (response.body.length < 512 * 1024) {
+      final season = decodePgcSeasonBytes(response.body);
+      check();
+      return season;
+    }
+    await _decodeGate.enter(
+      activeContext.cancellation,
+      deadline,
+      _clock,
+      endpoint: endpoint,
+    );
+    try {
+      check();
+      final season = await _pgcSeasonDecoder(response.body);
+      check();
+      return season;
+    } finally {
+      // Cancellation discards output; the running worker retains its slot
+      // until it really finishes, so cancelled work cannot exceed the budget.
+      _decodeGate.leave();
+    }
   }
 
   /// Authenticated form writes are sent once. Unknown outcomes must be
@@ -1320,15 +1379,16 @@ final class BiliApiClient {
   void _checkDecodeContext(
     ApiRequestContext context,
     int? epoch,
-    DateTime deadline,
-  ) {
+    DateTime deadline, {
+    String endpoint = 'danmaku_segment',
+  }) {
     if (context.cancellation?.isCancelled == true ||
         (epoch != null && _sessionProvider?.sessionEpoch != epoch) ||
         (context.sessionEpoch != null && context.sessionEpoch != epoch)) {
-      throw const ApiFailure(ApiFailureCategory.cancelled, 'danmaku_segment');
+      throw ApiFailure(ApiFailureCategory.cancelled, endpoint);
     }
     if (!deadline.isAfter(_clock())) {
-      throw const ApiFailure(ApiFailureCategory.timeout, 'danmaku_segment');
+      throw ApiFailure(ApiFailureCategory.timeout, endpoint);
     }
   }
 
@@ -1872,6 +1932,13 @@ Future<List<ApiDanmakuItem>> _decodeInIsolate(Uint8List bytes) {
   );
 }
 
+Future<ApiPgcSeason> _decodePgcInIsolate(Uint8List bytes) {
+  final payload = TransferableTypedData.fromList([bytes]);
+  return Isolate.run(
+    () => decodePgcSeasonBytes(payload.materialize().asUint8List()),
+  );
+}
+
 final class _DecodeGate {
   int _active = 0;
   final Queue<_DecodeWaiter> _waiting = Queue<_DecodeWaiter>();
@@ -1879,21 +1946,22 @@ final class _DecodeGate {
   Future<void> enter(
     ApiCancellation? cancellation,
     DateTime deadline,
-    DateTime Function() clock,
-  ) async {
+    DateTime Function() clock, {
+    String endpoint = 'danmaku_segment',
+  }) async {
     if (cancellation?.isCancelled == true) {
-      throw const ApiFailure(ApiFailureCategory.cancelled, 'danmaku_segment');
+      throw ApiFailure(ApiFailureCategory.cancelled, endpoint);
     }
     final remaining = deadline.difference(clock());
     if (remaining <= Duration.zero) {
-      throw const ApiFailure(ApiFailureCategory.timeout, 'danmaku_segment');
+      throw ApiFailure(ApiFailureCategory.timeout, endpoint);
     }
     if (_active < 2 && _waiting.isEmpty) {
       _active++;
       return;
     }
     if (_waiting.length >= 4) {
-      throw const ApiFailure(ApiFailureCategory.unavailable, 'danmaku_segment');
+      throw ApiFailure(ApiFailureCategory.unavailable, endpoint);
     }
     final waiter = _DecodeWaiter();
     _waiting.add(waiter);
@@ -1901,7 +1969,7 @@ final class _DecodeGate {
     final timer = Timer(
       remaining,
       () => expired.completeError(
-        const ApiFailure(ApiFailureCategory.timeout, 'danmaku_segment'),
+        ApiFailure(ApiFailureCategory.timeout, endpoint),
       ),
     );
     try {
@@ -1910,10 +1978,7 @@ final class _DecodeGate {
         expired.future,
         if (cancellation != null)
           cancellation.whenCancelled.then<void>(
-            (_) => throw const ApiFailure(
-              ApiFailureCategory.cancelled,
-              'danmaku_segment',
-            ),
+            (_) => throw ApiFailure(ApiFailureCategory.cancelled, endpoint),
           ),
       ]);
     } catch (_) {

@@ -4,6 +4,38 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('unrelated rebuilds do not postpone an active countdown tick', (
+    tester,
+  ) async {
+    var now = DateTime.utc(2026, 10, 11);
+    DateTime clock() => now;
+    final expiry = now.add(const Duration(seconds: 5));
+    Widget frame(int price) => MaterialApp(
+      home: Scaffold(
+        body: LiveSuperChatCard(
+          message: LiveSuperChatMessage(
+            id: '1',
+            userName: '观众',
+            text: 'SC',
+            price: price,
+            expiresAt: expiry,
+          ),
+          clock: clock,
+        ),
+      ),
+    );
+    await tester.pumpWidget(frame(30));
+    for (var index = 0; index < 4; index++) {
+      now = now.add(const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pumpWidget(frame(31 + index));
+    }
+    now = now.add(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text('4s'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets(
     'bubble and card show remaining seconds without unrelated rebuilds',
     (tester) async {

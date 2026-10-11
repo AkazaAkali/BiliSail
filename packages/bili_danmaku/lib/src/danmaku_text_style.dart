@@ -5,6 +5,32 @@ import 'package:flutter/painting.dart';
 
 enum DanmakuTextEffect { shadow, stroke, plain }
 
+/// Cumulative local paint counters. A paint is one item on one rendered frame,
+/// not one Flutter frame. Reading a snapshot never retains text or images.
+@immutable
+final class DanmakuRasterStatistics {
+  const DanmakuRasterStatistics({
+    required this.imagePaints,
+    required this.cacheHits,
+    required this.rasterBuilds,
+    required this.dimensionFallbacks,
+    required this.imageBudgetFallbacks,
+    required this.workingSetFallbacks,
+    required this.uncachedPaints,
+    required this.peakRasterBytes,
+  });
+
+  final int imagePaints, cacheHits, rasterBuilds;
+  final int dimensionFallbacks, imageBudgetFallbacks, workingSetFallbacks;
+  final int uncachedPaints, peakRasterBytes;
+  int get directPaints =>
+      dimensionFallbacks +
+      imageBudgetFallbacks +
+      workingSetFallbacks +
+      uncachedPaints;
+  int get totalPaints => imagePaints + directPaints;
+}
+
 @immutable
 final class DanmakuTextStyle {
   const DanmakuTextStyle({
@@ -53,6 +79,24 @@ final class DanmakuTextLayouts {
   int buildCount = 0;
   int rasterBuildCount = 0;
   int get length => _cache.length;
+  int _imagePaints = 0;
+  int _cacheHits = 0;
+  int _dimensionFallbacks = 0;
+  int _imageBudgetFallbacks = 0;
+  int _workingSetFallbacks = 0;
+  int _uncachedPaints = 0;
+  int _peakRasterBytes = 0;
+
+  DanmakuRasterStatistics get rasterStatistics => DanmakuRasterStatistics(
+    imagePaints: _imagePaints,
+    cacheHits: _cacheHits,
+    rasterBuilds: rasterBuildCount,
+    dimensionFallbacks: _dimensionFallbacks,
+    imageBudgetFallbacks: _imageBudgetFallbacks,
+    workingSetFallbacks: _workingSetFallbacks,
+    uncachedPaints: _uncachedPaints,
+    peakRasterBytes: _peakRasterBytes,
+  );
 
   /// Avoid cyclic bitmap eviction when the visible working set exceeds the
   /// pixel budget: keep resident visible images and draw overflow as text.
@@ -137,6 +181,7 @@ final class DanmakuTextLayouts {
       if (entry.image != null && entry.pixelRatio != ratio) {
         _releaseRaster(entry);
       }
+      if (entry.image != null) _cacheHits++;
       const padding = 6.0; // Covers the 2px blur plus glyph overhang.
       final width = ((entry.fill.width + padding * 2) * ratio).ceil();
       final height = ((entry.fill.height + padding * 2) * ratio).ceil();
@@ -167,11 +212,13 @@ final class DanmakuTextLayouts {
           entry.pixelRatio = ratio;
           _rasters[entry] = bytes;
           _rasterBytes += bytes;
+          if (_rasterBytes > _peakRasterBytes) _peakRasterBytes = _rasterBytes;
           rasterBuildCount++;
         }
       }
       final image = entry.image;
       if (image != null) {
+        _imagePaints++;
         final cost = _rasters.remove(entry);
         if (cost != null) _rasters[entry] = cost;
         canvas.drawImageRect(
@@ -187,6 +234,15 @@ final class DanmakuTextLayouts {
         );
         return;
       }
+      if (width > 4096 || height > 4096) {
+        _dimensionFallbacks++;
+      } else if (bytes > maxRasterBytes) {
+        _imageBudgetFallbacks++;
+      } else {
+        _workingSetFallbacks++;
+      }
+    } else {
+      _uncachedPaints++;
     }
     entry.paint(canvas, offset);
   }

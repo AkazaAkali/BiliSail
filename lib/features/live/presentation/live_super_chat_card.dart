@@ -249,14 +249,19 @@ class _SuperChatCountdownState extends State<_SuperChatCountdown> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _enabled = TickerMode.valuesOf(context).enabled;
+    final enabled = TickerMode.valuesOf(context).enabled;
+    if (_enabled == enabled) return;
+    _enabled = enabled;
     _schedule();
   }
 
   @override
   void didUpdateWidget(covariant _SuperChatCountdown oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _schedule();
+    if (oldWidget.message.expiresAt != widget.message.expiresAt ||
+        oldWidget.clock != widget.clock) {
+      _schedule();
+    }
   }
 
   void _schedule() {

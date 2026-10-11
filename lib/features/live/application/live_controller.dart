@@ -230,8 +230,8 @@ class LiveController extends Notifier<LiveState> {
   void _startChatTimer() {
     _chatTimer?.cancel();
     _chatTimer = Timer.periodic(chatRefreshInterval, (_) {
-      refreshChat();
-      refreshSuperChats();
+      refreshChat(background: true);
+      refreshSuperChats(background: true);
       refreshViewerCount();
     });
   }
@@ -248,6 +248,8 @@ class LiveController extends Notifier<LiveState> {
     _roomRead?.cancel();
     _chatRead?.cancel();
     _superChatRead?.cancel();
+    _chatRead = null;
+    _superChatRead = null;
     _superChatExpiryTimer?.cancel();
     _superChatExpiryTimer = null;
     final read = RequestCancellation();
@@ -380,16 +382,23 @@ class LiveController extends Notifier<LiveState> {
     return (number * unit).ceil();
   }
 
-  Future<void> refreshChat() async {
+  Future<void> refreshChat({bool background = false}) async {
     final room = state.room;
-    if (!_active || room == null || state.chatLoading) return;
-    _chatRead?.cancel();
+    if (!_active || room == null) return;
+    if (_chatRead != null) {
+      if (!background && !state.chatLoading) {
+        state = state.copyWith(chatLoading: true, clearChatMessage: true);
+      }
+      return;
+    }
     final read = RequestCancellation();
     _chatRead = read;
     final version = ++_chatVersion, generation = _generation;
     final repository = ref.read(liveRepositoryProvider);
     final scope = repository.accountScope, epoch = repository.sessionEpoch;
-    state = state.copyWith(chatLoading: true, clearChatMessage: true);
+    if (!background) {
+      state = state.copyWith(chatLoading: true, clearChatMessage: true);
+    }
     try {
       final incoming = await repository.loadChatHistory(
         room.id,
@@ -404,9 +413,12 @@ class LiveController extends Notifier<LiveState> {
         for (final message in state.messages) message.deduplicationKey: message,
       };
       for (final message in incoming) {
-        unique[message.deduplicationKey] = message.withFallbackMetadata(
-          unique[message.deduplicationKey],
-        );
+        final key = message.deduplicationKey;
+        final previous = unique[key];
+        final merged = message.withFallbackMetadata(previous);
+        unique[key] = previous != null && _sameChat(previous, merged)
+            ? previous
+            : merged;
       }
       final all = unique.values.toList(growable: false);
       if (all.every((message) => message.timestamp != null)) {
@@ -415,46 +427,70 @@ class LiveController extends Notifier<LiveState> {
           return at == null || bt == null ? 0 : at.compareTo(bt);
         });
       }
-      state = state.copyWith(
-        chatLoading: false,
-        messages: List.unmodifiable(
-          all.length <= maxChatMessages
-              ? all
-              : all.skip(all.length - maxChatMessages),
-        ),
-        chatUpdatedAt: DateTime.now(),
-      );
+      final retained = all.length <= maxChatMessages
+          ? all
+          : all.sublist(all.length - maxChatMessages);
+      final changed = !_sameList(state.messages, retained, _sameChat);
+      if (changed || state.chatLoading || state.chatMessage != null) {
+        state = state.copyWith(
+          chatLoading: false,
+          clearChatMessage: true,
+          messages: changed ? List.unmodifiable(retained) : null,
+          chatUpdatedAt: ref.read(liveClockProvider)(),
+        );
+      }
     } on AppFailure catch (error) {
       if (_active &&
           _current(generation, scope, epoch) &&
           version == _chatVersion) {
-        state = state.copyWith(
-          chatLoading: false,
-          chatMessage: error.kind == AppFailureKind.cancelled
-              ? null
-              : error.message,
-        );
+        final message = error.kind == AppFailureKind.cancelled
+            ? null
+            : error.message;
+        if (state.chatLoading || state.chatMessage != message) {
+          state = state.copyWith(
+            chatLoading: false,
+            chatMessage: message,
+            clearChatMessage: message == null,
+          );
+        }
       }
     } catch (_) {
       if (_active &&
           _current(generation, scope, epoch) &&
           version == _chatVersion) {
-        state = state.copyWith(chatLoading: false, chatMessage: '历史消息暂时无法更新');
+        if (state.chatLoading || state.chatMessage != '历史消息暂时无法更新') {
+          state = state.copyWith(chatLoading: false, chatMessage: '历史消息暂时无法更新');
+        }
       }
+    } finally {
+      if (identical(_chatRead, read)) _chatRead = null;
     }
   }
 
-  Future<void> refreshSuperChats() async {
+  Future<void> refreshSuperChats({bool background = false}) async {
     final room = state.room;
-    if (!_active || room == null || state.superChatLoading) return;
-    _superChatRead?.cancel();
+    if (!_active || room == null) return;
+    if (_superChatRead != null) {
+      if (!background && !state.superChatLoading) {
+        state = state.copyWith(
+          superChatLoading: true,
+          clearSuperChatMessage: true,
+        );
+      }
+      return;
+    }
     final read = RequestCancellation();
     _superChatRead = read;
     final version = ++_superChatVersion, generation = _generation;
     final repository = ref.read(liveRepositoryProvider);
     final scope = repository.accountScope, epoch = repository.sessionEpoch;
     final sequence = _liveSequence;
-    state = state.copyWith(superChatLoading: true, clearSuperChatMessage: true);
+    if (!background) {
+      state = state.copyWith(
+        superChatLoading: true,
+        clearSuperChatMessage: true,
+      );
+    }
     try {
       final incoming = await repository.loadSuperChats(
         room.id,
@@ -466,6 +502,9 @@ class LiveController extends Notifier<LiveState> {
         return;
       }
       final now = ref.read(liveClockProvider)();
+      final previous = {
+        for (final message in state.superChats) message.id: message,
+      };
       final unique = <String, LiveSuperChatMessage>{};
       for (final incomingMessage in incoming.take(maxSuperChats)) {
         final message = _resolveSuperChatTiming(incomingMessage, now);
@@ -473,7 +512,10 @@ class LiveController extends Notifier<LiveState> {
         if (message.expiresAt case final expiry?) {
           if (!expiry.isAfter(now)) continue;
         }
-        unique[message.id] = message;
+        final old = previous[message.id];
+        unique[message.id] = old != null && _sameSuperChat(old, message)
+            ? old
+            : message;
       }
       // The snapshot describes the start of this read. Events arriving while
       // it was in flight must win over missing/stale HTTP snapshot entries.
@@ -485,34 +527,56 @@ class LiveController extends Notifier<LiveState> {
         }
       }
       final merged = unique.values.toList();
-      state = state.copyWith(
-        superChatLoading: false,
-        superChats: List.unmodifiable(
-          merged.skip((merged.length - maxSuperChats).clamp(0, merged.length)),
-        ),
+      final retained = merged.sublist(
+        (merged.length - maxSuperChats).clamp(0, merged.length),
       );
+      final changed = !_sameList(state.superChats, retained, _sameSuperChat);
+      if (changed || state.superChatLoading || state.superChatMessage != null) {
+        state = state.copyWith(
+          superChatLoading: false,
+          clearSuperChatMessage: true,
+          superChats: changed ? List.unmodifiable(retained) : null,
+        );
+      }
       _scheduleSuperChatExpiry();
     } on AppFailure catch (error) {
       if (_active &&
           _current(generation, scope, epoch) &&
           version == _superChatVersion) {
-        state = state.copyWith(
-          superChatLoading: false,
-          superChatMessage: error.kind == AppFailureKind.cancelled
-              ? null
-              : error.message,
-        );
+        final message = error.kind == AppFailureKind.cancelled
+            ? null
+            : error.message;
+        if (state.superChatLoading || state.superChatMessage != message) {
+          state = state.copyWith(
+            superChatLoading: false,
+            superChatMessage: message,
+            clearSuperChatMessage: message == null,
+          );
+        }
       }
     } catch (_) {
       if (_active &&
           _current(generation, scope, epoch) &&
           version == _superChatVersion) {
-        state = state.copyWith(
-          superChatLoading: false,
-          superChatMessage: '醒目留言暂时无法更新',
-        );
+        if (state.superChatLoading || state.superChatMessage != '醒目留言暂时无法更新') {
+          state = state.copyWith(
+            superChatLoading: false,
+            superChatMessage: '醒目留言暂时无法更新',
+          );
+        }
       }
+    } finally {
+      if (identical(_superChatRead, read)) _superChatRead = null;
     }
+  }
+
+  static bool _sameList<T>(List<T> a, List<T> b, bool Function(T, T) same) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var index = 0; index < a.length; index++) {
+      if (!same(a[index], b[index])) return false;
+    }
+    return true;
   }
 
   void _stopRealtime() {

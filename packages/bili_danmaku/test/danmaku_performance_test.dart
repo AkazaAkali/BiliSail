@@ -320,8 +320,54 @@ void main() {
         expect(layouts.rasterBytes, lessThanOrEqualTo(20000));
       }
       expect(layouts.rasterBuildCount, 1);
+      final stats = layouts.rasterStatistics;
+      expect(stats.totalPaints, 20);
+      expect(stats.imagePaints, 10);
+      expect(stats.cacheHits, 9);
+      expect(stats.workingSetFallbacks, 10);
+      expect(stats.directPaints, 10);
+      expect(stats.dimensionFallbacks, 0);
+      expect(stats.imageBudgetFallbacks, 0);
+      expect(stats.peakRasterBytes, lessThanOrEqualTo(20000));
       layouts.clear();
       expect(layouts.rasterBytes, 0);
+    },
+  );
+
+  test(
+    'raster counters distinguish oversized, image-budget and uncached paint',
+    () {
+      final layouts = DanmakuTextLayouts(8, maxRasterBytes: 100);
+      addTearDown(layouts.clear);
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      layouts.paint(
+        'x' * 300,
+        const Color(0xffffffff),
+        24,
+        canvas,
+        Offset.zero,
+        pixelRatio: 3,
+      );
+      layouts.paint('short', const Color(0xffffffff), 24, canvas, Offset.zero);
+      layouts.paint(
+        'direct',
+        const Color(0xffffffff),
+        24,
+        canvas,
+        Offset.zero,
+        cacheRaster: false,
+      );
+      recorder.endRecording().dispose();
+      final stats = layouts.rasterStatistics;
+      expect(stats.dimensionFallbacks, 1);
+      expect(stats.imageBudgetFallbacks, 1);
+      expect(stats.uncachedPaints, 1);
+      expect(stats.workingSetFallbacks, 0);
+      expect(stats.directPaints, 3);
+      expect(stats.totalPaints, 3);
+      expect(stats.rasterBuilds, 0);
+      expect(stats.peakRasterBytes, 0);
     },
   );
 }

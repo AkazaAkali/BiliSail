@@ -212,6 +212,7 @@ final class _PgcRepository implements PgcRepository {
   Future<PgcSeason> detail({
     PgcSeasonId? seasonId,
     PgcEpisodeId? episodeId,
+    bool refresh = false,
     required RequestCancellation cancellation,
   }) {
     reads++;

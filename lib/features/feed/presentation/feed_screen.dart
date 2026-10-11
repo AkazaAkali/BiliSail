@@ -310,10 +310,16 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
 
   @override
   Widget build(BuildContext context) {
-    final currentFeed = ref.watch(feedControllerProvider);
-    final controller = ref.read(feedControllerProvider.notifier);
+    final controller = ref.watch(feedControllerProvider.notifier);
     final channel = widget.channel;
-    final feed = controller.stateForChannel(channel);
+    final feed = channel.hasVideoFeed
+        ? ref.watch(
+            feedControllerProvider.select(
+              (current) =>
+                  controller.stateForChannel(channel, current: current),
+            ),
+          )
+        : FeedState(channel: channel, items: const AsyncData([]));
     final section = _sections[channel] ?? channel.sections.firstOrNull;
     final categories = switch (channel) {
       HomeChannel.categories => ref.watch(feedCategoriesProvider),
@@ -414,7 +420,7 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
                   key: ValueKey(('video-feed', channel)),
                   active: widget.active && channel.hasVideoFeed,
                   canLoadMore:
-                      currentFeed.channel == channel &&
+                      widget.active &&
                       feed.hasMore &&
                       !feed.loadingMore &&
                       feed.items.asData != null &&

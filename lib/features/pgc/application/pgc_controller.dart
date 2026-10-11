@@ -30,7 +30,7 @@ final class PgcState {
     final current = season;
     if (current == null || current.episodes.isEmpty) return null;
     return current.episode(selectedEpisodeId) ??
-        current.episodes.where((episode) => episode.playable).firstOrNull ??
+        current.firstPlayableEpisode ??
         current.episodes.first;
   }
 }
@@ -56,7 +56,7 @@ final class PgcController extends Notifier<PgcState> {
     }
     Future<void>.microtask(() {
       if (ref.mounted && generation == _generation) {
-        unawaited(load());
+        unawaited(load(refresh: false));
       }
     });
     return PgcState(selectedEpisodeId: locator.episodeId, loading: true);
@@ -75,7 +75,10 @@ final class PgcController extends Notifier<PgcState> {
       repository.accountScope == scope &&
       repository.sessionEpoch == epoch;
 
-  Future<void> load({PgcEpisodeId? requestedEpisode}) async {
+  Future<void> load({
+    PgcEpisodeId? requestedEpisode,
+    bool refresh = true,
+  }) async {
     _active?.cancel();
     final cancellation = RequestCancellation();
     _active = cancellation;
@@ -93,6 +96,7 @@ final class PgcController extends Notifier<PgcState> {
       final season = await repository.detail(
         seasonId: locator.seasonId,
         episodeId: requestedEpisode ?? locator.episodeId,
+        refresh: refresh,
         cancellation: cancellation,
       );
       if (!_isCurrent(generation, cancellation, repository, scope, epoch)) {
@@ -101,7 +105,7 @@ final class PgcController extends Notifier<PgcState> {
       final preferred = requestedEpisode ?? previous.selectedEpisodeId;
       final selected =
           season.episode(preferred) ??
-          season.episodes.where((episode) => episode.playable).firstOrNull ??
+          season.firstPlayableEpisode ??
           season.episodes.firstOrNull;
       state = PgcState(season: season, selectedEpisodeId: selected?.id);
     } on AppFailure catch (error) {

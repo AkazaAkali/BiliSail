@@ -979,15 +979,12 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                               ),
                             PlaybackSnapshotBuilder(
                               snapshots: session.snapshots,
-                              select: (snapshot) => snapshot.position,
+                              select: (snapshot) =>
+                                  session.subtitleAt(snapshot.position),
                               builder: (context, snapshot) {
-                                final cue = session.subtitleCues
-                                    .where(
-                                      (cue) =>
-                                          snapshot.position >= cue.start &&
-                                          snapshot.position < cue.end,
-                                    )
-                                    .firstOrNull;
+                                final cue = session.subtitleAt(
+                                  snapshot.position,
+                                );
                                 if (cue == null) return const SizedBox.shrink();
                                 return Positioned(
                                   left: 20,

@@ -485,6 +485,7 @@ class _PgcRepo extends Fake implements PgcRepository {
   Future<PgcSeason> detail({
     PgcSeasonId? seasonId,
     PgcEpisodeId? episodeId,
+    bool refresh = false,
     required RequestCancellation cancellation,
   }) async => _season;
 }

@@ -7,6 +7,7 @@ import '../../../domain/video.dart';
 import '../../video/domain/video_actions_repository.dart';
 import '../domain/feed_repository.dart';
 import '../domain/home_channel.dart';
+import 'feed_item_index.dart';
 
 final feedRepositoryProvider = Provider<FeedRepository>(
   (ref) => throw UnimplementedError('FeedRepository must be provided by app'),
@@ -93,6 +94,8 @@ final class FeedController extends Notifier<FeedState> {
   int _pagesWithoutNewItems = 0;
   RequestCancellation? _cancellation;
   final Map<HomeChannel, (FeedState, int, int)> _savedChannels = {};
+  final _itemIndices = <HomeChannel, FeedItemIndex>{};
+  final _unloadedChannels = <HomeChannel, FeedState>{};
   final _rejectWrites = <VideoId, RequestCancellation>{};
   // Undo uses the exact context that was accepted, even after a refresh.
   final _rejected = <VideoId, RecommendationFeedback>{};
@@ -101,14 +104,41 @@ final class FeedController extends Notifier<FeedState> {
 
   /// Keep cached content visible during the widget's deferred channel change.
   /// A temporary short loading page would clamp the restored scroll offset.
-  FeedState stateForChannel(HomeChannel channel) => _withFeedback(
-    state.channel == channel
-        ? state
-        : _savedChannels[channel]?.$1 ?? FeedState(channel: channel),
-  );
+  FeedState stateForChannel(HomeChannel channel, {FeedState? current}) {
+    // A selector supplies its snapshot: Riverpod forbids reading Notifier.state
+    // from a select callback, even when the notifier was captured beforehand.
+    final active = current ?? state;
+    if (active.channel == channel) return active;
+    final saved = _savedChannels[channel];
+    if (saved == null) {
+      return _unloadedChannels.putIfAbsent(
+        channel,
+        () => FeedState(channel: channel),
+      );
+    }
+    // Only recommendation cards consume feedback. Derive it when changed,
+    // without replacing unrelated channels' pagination/content versions.
+    if (channel != HomeChannel.recommended ||
+        saved.$1.rejecting.length == _rejectWrites.length &&
+            saved.$1.rejecting.containsAll(_rejectWrites.keys) &&
+            saved.$1.rejected.length == _rejected.length &&
+            saved.$1.rejected.containsAll(_rejected.keys) &&
+            saved.$1.uncertainRestorations.length ==
+                _uncertainRestorations.length &&
+            saved.$1.uncertainRestorations.containsAll(
+              _uncertainRestorations,
+            )) {
+      return saved.$1;
+    }
+    final updated = _withFeedback(saved.$1);
+    _savedChannels[channel] = (updated, saved.$2, saved.$3);
+    return updated;
+  }
 
   FeedState _withFeedback(FeedState value) => value.copyWith(
-    rejecting: Set.unmodifiable(_rejectWrites.keys),
+    rejecting: value.channel == HomeChannel.recommended
+        ? Set.unmodifiable(_rejectWrites.keys)
+        : const {},
     rejected: value.channel == HomeChannel.recommended
         ? Set.unmodifiable(_rejected.keys)
         : const {},
@@ -125,6 +155,16 @@ final class FeedController extends Notifier<FeedState> {
       for (final token in _rejectWrites.values) {
         token.cancel();
       }
+      _savedChannels.clear();
+      _itemIndices.clear();
+      _unloadedChannels.clear();
+      _rejectWrites.clear();
+      _rejected.clear();
+      _uncertainRejections.clear();
+      _uncertainRestorations.clear();
+      _page = 0;
+      _pagesWithoutNewItems = 0;
+      _cancellation = null;
     });
     return const FeedState();
   }
@@ -213,7 +253,7 @@ final class FeedController extends Notifier<FeedState> {
       if (!current() || failure.kind == AppFailureKind.cancelled) return false;
       rethrow;
     } finally {
-      _rejectWrites.remove(id);
+      if (identical(_rejectWrites[id], token)) _rejectWrites.remove(id);
       if (ref.mounted) {
         state = _withFeedback(state);
       }
@@ -270,6 +310,7 @@ final class FeedController extends Notifier<FeedState> {
     _cancellation = cancellation;
     _page = 0;
     _pagesWithoutNewItems = 0;
+    _itemIndices.remove(state.channel);
     state = state.copyWith(
       items: const AsyncLoading(),
       hasMore: false,
@@ -287,7 +328,9 @@ final class FeedController extends Notifier<FeedState> {
           cancellation.isCancelled) {
         return;
       }
-      final items = _mergeItems(const [], result.items);
+      final index = FeedItemIndex();
+      final items = index.merge(result.items);
+      _itemIndices[state.channel] = index;
       _page = 1;
       _pagesWithoutNewItems = items.isEmpty ? 1 : 0;
       state = state.copyWith(items: AsyncData(items), hasMore: result.hasMore);
@@ -319,8 +362,9 @@ final class FeedController extends Notifier<FeedState> {
           cancellation.isCancelled) {
         return;
       }
-      final latest = state.items.asData?.value ?? current;
-      final items = _mergeItems(latest, result.items);
+      final index = _itemIndices[state.channel];
+      if (index == null) throw StateError('Loaded feed has no item index');
+      final items = index.merge(result.items);
       _pagesWithoutNewItems = items.length == current.length
           ? _pagesWithoutNewItems + 1
           : 0;
@@ -343,17 +387,6 @@ final class FeedController extends Notifier<FeedState> {
       }
       state = state.copyWith(loadingMore: false, pageError: error);
     }
-  }
-
-  List<VideoSummary> _mergeItems(
-    List<VideoSummary> current,
-    List<VideoSummary> incoming,
-  ) {
-    final unique = {for (final item in current) item.id: item};
-    for (final item in incoming) {
-      unique[item.id] = item;
-    }
-    return List.unmodifiable(unique.values);
   }
 
   Future<PageResult<VideoSummary>> _loadPage(

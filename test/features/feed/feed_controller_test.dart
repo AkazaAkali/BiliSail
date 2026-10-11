@@ -11,6 +11,76 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('channel selector follows the workspace controller override', () async {
+    final (parent, repository, parentController) = _setup();
+    final parentChannel = feedControllerProvider.select(
+      (current) => parentController.stateForChannel(
+        HomeChannel.recommended,
+        current: current,
+      ),
+    );
+    expect(parent.read(parentChannel).items.isLoading, isTrue);
+    final child = ProviderContainer(
+      parent: parent,
+      overrides: [feedControllerProvider.overrideWith(FeedController.new)],
+    );
+    addTearDown(child.dispose);
+    final controller = child.read(feedControllerProvider.notifier);
+    final childChannel = feedControllerProvider.select(
+      (current) =>
+          controller.stateForChannel(HomeChannel.recommended, current: current),
+    );
+    await _refresh(
+      controller,
+      repository,
+      _videos(['workspace'], hasMore: true),
+    );
+    expect(
+      child.read(childChannel).items.requireValue.single.id.value,
+      'workspace',
+    );
+    expect(parent.read(parentChannel).items.isLoading, isTrue);
+  });
+
+  test(
+    'provider lifetime resets saved channel snapshots and query indexes',
+    () async {
+      final (container, repository, controller) = _setup();
+      await _refresh(
+        controller,
+        repository,
+        _videos(['old-recommendation'], hasMore: true),
+      );
+      final popular = controller.selectPopular();
+      repository.calls.last.result.complete(
+        _videos(['old-popular'], hasMore: true),
+      );
+      await popular;
+      final old = controller
+          .stateForChannel(HomeChannel.recommended)
+          .items
+          .requireValue;
+      container.invalidate(feedControllerProvider);
+      final reset = container.read(feedControllerProvider.notifier);
+      expect(
+        reset.stateForChannel(HomeChannel.recommended).items.isLoading,
+        isTrue,
+      );
+      expect(
+        reset.stateForChannel(HomeChannel.popular).items.isLoading,
+        isTrue,
+      );
+      await _refresh(reset, repository, _videos(['new'], hasMore: true));
+      await _more(
+        reset,
+        repository,
+        _videos(['new', 'second'], hasMore: false),
+      );
+      expect(_ids(container), ['new', 'second']);
+      expect(old.single.id.value, 'old-recommendation');
+    },
+  );
+
   test(
     'channel change cancels old read and discards its completed response',
     () async {

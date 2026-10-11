@@ -796,6 +796,78 @@ void main() {
         .pixels;
     expect(after, closeTo(before, 1));
   });
+
+  testWidgets(
+    '500 comments use a lazy delegate and reply targeting does not rebuild the list',
+    (tester) async {
+      repo.items = List.generate(
+        500,
+        (index) => CommentEntry(
+          id: '$index',
+          author: '用户 $index',
+          message: '评论内容 $index',
+          replyCount: 3,
+        ),
+      );
+      await controller.load(refresh: true);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                width: 340,
+                child: VideoCommentsPanel(detail: _detail),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final list = tester.widget<ListView>(find.byType(ListView));
+      expect(list.childrenDelegate, isA<SliverChildBuilderDelegate>());
+      expect(list.childrenDelegate.estimatedChildCount, 501);
+      expect(find.byType(CommentRichContent).evaluate().length, lessThan(30));
+      final first = find.byKey(const ValueKey(('comment', '0')));
+      final firstElement = tester.element(first);
+      controller.target(state().items.first);
+      await tester.pumpAndSettle();
+      expect(find.text('回复 @用户 0'), findsOneWidget);
+      expect(
+        identical(tester.widget<ListView>(find.byType(ListView)), list),
+        isTrue,
+      );
+      expect(identical(tester.element(first), firstElement), isTrue);
+      repo.writePending = Completer<void>();
+      final write = controller.toggleLike(state().items.first);
+      await tester.pump();
+      expect(
+        identical(tester.widget<ListView>(find.byType(ListView)), list),
+        isTrue,
+      );
+      expect(
+        tester
+            .widget<IconButton>(
+              find.widgetWithIcon(IconButton, BiliIcons.reply).first,
+            )
+            .onPressed,
+        isNull,
+      );
+      repo.writePending!.complete();
+      await write;
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<IconButton>(
+              find.widgetWithIcon(IconButton, BiliIcons.reply).first,
+            )
+            .onPressed,
+        isNotNull,
+      );
+      expect(identical(tester.element(first), firstElement), isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 const _detail = VideoDetail(

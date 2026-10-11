@@ -10,6 +10,7 @@ import 'package:bilisail/features/live/domain/live_repository.dart';
 import 'package:bilisail/features/live/domain/live_chat_repository.dart';
 import 'package:bilisail/features/live/domain/live_room.dart';
 import 'package:bilisail/features/live/presentation/live_screen.dart';
+import 'package:bilisail/features/live/presentation/live_chat_bubble.dart';
 import 'package:bilisail/features/live/presentation/live_player_danmaku.dart';
 import 'package:bilisail/features/live/presentation/live_super_chat_card.dart';
 import 'package:bilisail/shared/ui/smooth_scroll_behavior.dart';
@@ -444,6 +445,40 @@ void main() {
         container.read(liveControllerProvider(room.id)).messages,
         hasLength(LiveController.maxChatMessages),
       );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'bounded chat eviction preserves a scrolled message element and position',
+    (tester) async {
+      repository.chatMessages = List.generate(
+        500,
+        (index) =>
+            LiveChatMessage(id: '$index', userName: '观众', text: '保留消息 $index'),
+      );
+      await showPage(tester);
+      await tester.pumpAndSettle();
+      final list = find.byKey(const ValueKey('live-chat-list'));
+      await tester.drag(list, const Offset(0, 400));
+      await tester.pumpAndSettle();
+      final visible = find.byType(LiveChatBubble).hitTestable().first;
+      final bubble = tester.widget<LiveChatBubble>(visible);
+      final anchor = find.byKey(bubble.key!);
+      final element = tester.element(anchor);
+      final position = tester.getTopLeft(anchor);
+      realtime.events.add(const [
+        LiveChatReceived(
+          LiveChatMessage(id: 'new', userName: '观众', text: '最新消息'),
+        ),
+      ]);
+      await tester.pumpAndSettle();
+      expect(
+        container.read(liveControllerProvider(room.id)).messages,
+        hasLength(500),
+      );
+      expect(identical(tester.element(anchor), element), isTrue);
+      expect(tester.getTopLeft(anchor).dy, closeTo(position.dy, 1));
       expect(tester.takeException(), isNull);
     },
   );

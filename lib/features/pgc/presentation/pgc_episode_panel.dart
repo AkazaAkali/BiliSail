@@ -34,20 +34,20 @@ final class _PgcEpisodePanelState extends State<PgcEpisodePanel> {
   bool _grid = false;
   bool _focusSelected = true;
   bool _scrollToStart = false;
-  bool _groupHovered = false;
+  final _groupHovered = ValueNotifier(false);
 
   @override
   void initState() {
     super.initState();
-    _group = _section(widget.selected);
+    _group = pgcEpisodeSection(widget.selected);
   }
 
   @override
   void didUpdateWidget(covariant PgcEpisodePanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.season.id != widget.season.id ||
+    if (!identical(oldWidget.season, widget.season) ||
         oldWidget.selected?.id != widget.selected?.id) {
-      _group = _section(widget.selected);
+      _group = pgcEpisodeSection(widget.selected);
       _focusSelected = true;
     }
   }
@@ -56,12 +56,8 @@ final class _PgcEpisodePanelState extends State<PgcEpisodePanel> {
   void dispose() {
     _scroll.dispose();
     _groupScroll.dispose();
+    _groupHovered.dispose();
     super.dispose();
-  }
-
-  static String _section(PgcEpisode? episode) {
-    final title = episode?.sectionTitle?.trim();
-    return title == null || title.isEmpty ? '正片' : title;
   }
 
   void _queueScroll(
@@ -98,22 +94,24 @@ final class _PgcEpisodePanelState extends State<PgcEpisodePanel> {
       scaler.scale(_gridRowHeight),
     );
     final groupHeight = math.max(42.0, scaler.scale(42));
-    final groups = <String, List<PgcEpisode>>{};
-    for (final episode in widget.season.episodes) {
-      (groups[_section(episode)] ??= []).add(episode);
-    }
+    final groups = widget.season.episodeGroups;
     if (groups.isNotEmpty && !groups.containsKey(_group)) {
       _group = groups.keys.first;
     }
-    final entries = [...?groups[_group]];
-    final episodes = _descending ? entries.reversed.toList() : entries;
-    final selectedIndex = episodes.indexWhere(
-      (episode) => episode.id == widget.selected?.id,
-    );
+    final episodes = groups[_group] ?? const <PgcEpisode>[];
+    final originalIndex = pgcEpisodeSection(widget.selected) == _group
+        ? widget.season.episodeGroupPosition(
+            widget.selected?.id,
+            section: _group,
+          )
+        : -1;
+    final selectedIndex = originalIndex < 0 || !_descending
+        ? originalIndex
+        : episodes.length - 1 - originalIndex;
+    PgcEpisode displayedEpisode(int index) =>
+        episodes[_descending ? episodes.length - 1 - index : index];
     _queueScroll(selectedIndex, listRowHeight, gridRowHeight);
-    final currentIndex = widget.season.episodes.indexWhere(
-      (episode) => episode.id == widget.selected?.id,
-    );
+    final currentIndex = widget.season.episodePosition(widget.selected?.id);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.surfaceContainerLow,
@@ -165,20 +163,24 @@ final class _PgcEpisodePanelState extends State<PgcEpisodePanel> {
                 height: groupHeight,
                 child: MouseRegion(
                   key: const ValueKey('pgc-section-tabs'),
-                  onEnter: (_) => setState(() => _groupHovered = true),
-                  onExit: (_) => setState(() => _groupHovered = false),
+                  onEnter: (_) => _groupHovered.value = true,
+                  onExit: (_) => _groupHovered.value = false,
                   child: ScrollConfiguration(
                     behavior: const SmoothScrollBehavior(
                       horizontalMouseWheel: true,
                     ).copyWith(scrollbars: false),
-                    child: Scrollbar(
-                      key: const ValueKey('pgc-section-scrollbar'),
-                      controller: _groupScroll,
-                      thumbVisibility: _groupHovered,
-                      interactive: true,
-                      thickness: 3,
-                      radius: const Radius.circular(2),
-                      scrollbarOrientation: ScrollbarOrientation.bottom,
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: _groupHovered,
+                      builder: (context, hovered, child) => Scrollbar(
+                        key: const ValueKey('pgc-section-scrollbar'),
+                        controller: _groupScroll,
+                        thumbVisibility: hovered,
+                        interactive: true,
+                        thickness: 3,
+                        radius: const Radius.circular(2),
+                        scrollbarOrientation: ScrollbarOrientation.bottom,
+                        child: child!,
+                      ),
                       child: ListView(
                         key: const ValueKey('pgc-section-list'),
                         controller: _groupScroll,
@@ -223,16 +225,22 @@ final class _PgcEpisodePanelState extends State<PgcEpisodePanel> {
                                 crossAxisSpacing: 5,
                                 mainAxisSpacing: 5,
                               ),
-                          itemBuilder: (context, index) =>
-                              _tile(context, episodes[index], grid: true),
+                          itemBuilder: (context, index) => _tile(
+                            context,
+                            displayedEpisode(index),
+                            grid: true,
+                          ),
                         )
                       : ListView.builder(
                           key: const ValueKey('pgc-episode-list'),
                           controller: _scroll,
                           itemExtent: listRowHeight,
                           itemCount: episodes.length,
-                          itemBuilder: (context, index) =>
-                              _tile(context, episodes[index], grid: false),
+                          itemBuilder: (context, index) => _tile(
+                            context,
+                            displayedEpisode(index),
+                            grid: false,
+                          ),
                         ),
                 ),
               ),

@@ -152,6 +152,7 @@ final class DanmakuController extends ChangeNotifier {
   int get textLayoutCount => _layouts.length;
   int get textLayoutBuildCount => _layouts.buildCount;
   int get textRasterBytes => _layouts.rasterBytes;
+  DanmakuRasterStatistics get rasterStatistics => _layouts.rasterStatistics;
 
   /// Media history needed to rebuild after seeking or refresh visible items.
   Duration get requiredHistory {

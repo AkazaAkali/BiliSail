@@ -51,6 +51,44 @@ void main() {
 
   LiveState current() => container.read(liveControllerProvider(requested));
 
+  test(
+    'unchanged background SC preserves identity and its original deadline',
+    () async {
+      repository.superChats = const [
+        LiveSuperChatMessage(
+          id: 'duration',
+          userName: '观众',
+          text: 'SC',
+          price: 30,
+          displayDuration: Duration(seconds: 60),
+        ),
+      ];
+      controller.setActive(true);
+      await Future<void>.delayed(Duration.zero);
+      final messages = current().superChats;
+      final expiry = messages.single.expiresAt;
+      var notifications = 0;
+      container.listen(
+        liveControllerProvider(requested),
+        (_, _) => notifications++,
+      );
+      for (var batch = 0; batch < 20; batch++) {
+        now = now.add(const Duration(seconds: 1));
+        await controller.refreshSuperChats(background: true);
+      }
+      expect(notifications, 0);
+      expect(identical(current().superChats, messages), isTrue);
+      expect(current().superChats.single.expiresAt, expiry);
+      await controller.refreshSuperChats();
+      expect(notifications, 2);
+      expect(identical(current().superChats, messages), isTrue);
+      repository.superChats = const [];
+      await controller.refreshSuperChats(background: true);
+      expect(notifications, 3);
+      expect(current().superChats, isEmpty);
+    },
+  );
+
   testWidgets('uses canonical ID, caps SC and expires it without a read', (
     tester,
   ) async {
