@@ -45,6 +45,7 @@ final class PlayerDiagnostics {
 enum PlayerDiagnosticKind {
   openStarted,
   openReady,
+  openTerminated,
   nativeLog,
   nativeError,
   recovered,
@@ -147,6 +148,7 @@ final class PlayerDiagnosticEvent {
     this.nativeError,
     this.failureKind,
     this.severity,
+    this.nativeErrorCode,
   }) : timestamp = DateTime.now().toUtc();
 
   final DateTime timestamp;
@@ -155,6 +157,7 @@ final class PlayerDiagnosticEvent {
   final NativeErrorSummary? nativeError;
   final PlayerFailureKind? failureKind;
   final NativeLogSeverity? severity;
+  final int? nativeErrorCode;
 
   Map<String, Object?> toJson() => {
     'time': timestamp.toIso8601String(),
@@ -169,6 +172,7 @@ final class PlayerDiagnosticEvent {
     'seeking': snapshot.isSeeking,
     'rate': snapshot.rate,
     'severity': ?severity?.name,
+    'nativeErrorCode': ?nativeErrorCode,
     if (nativeError case final error?) ...{
       'component': error.component,
       'cause': error.cause.name,

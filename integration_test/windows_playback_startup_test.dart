@@ -8,7 +8,88 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
 void main() {
-  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized().framePolicy =
+      LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
+
+  testWidgets('Windows terminal load failure immediately permits a backup', (
+    tester,
+  ) async {
+    initializePlayerBackend();
+    final fixtures = Platform.environment['BILI_TEST_MEDIA_DIR'];
+    expect(fixtures, isNotNull);
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      request.response.statusCode = 403;
+      await request.response.close();
+    });
+    final events = <PlayerDiagnosticEvent>[];
+    final failures = <PlayerFailure>[];
+    final engine = MediaKitEngine(onDiagnostic: events.add);
+    final subscription = engine.failures.listen(failures.add);
+    final policy = MediaRequestPolicy();
+    try {
+      await tester.pumpWidget(MaterialApp(home: VideoSurface(engine: engine)));
+      final watch = Stopwatch()..start();
+      await expectLater(
+        engine.open(
+          DashPairSource(
+            video: MediaTrack(
+              uri: Uri.parse('http://127.0.0.1:${server.port}/denied'),
+              requestPolicy: policy,
+            ),
+            audio: MediaTrack(
+              uri: File('$fixtures/audio.m4a').uri,
+              requestPolicy: policy,
+            ),
+          ),
+          const OpenOptions(play: false, openTimeout: Duration(seconds: 6)),
+        ),
+        throwsA(isA<PlayerFailure>()),
+      );
+      expect(watch.elapsed, lessThan(const Duration(seconds: 3)));
+      expect(failures, hasLength(1));
+      final terminal = events.singleWhere(
+        (event) => event.kind == PlayerDiagnosticKind.openTerminated,
+      );
+      expect(terminal.nativeErrorCode, lessThan(0));
+      final failedAt = events
+          .singleWhere((event) => event.kind == PlayerDiagnosticKind.failed)
+          .timestamp;
+      expect(
+        failedAt.difference(terminal.timestamp),
+        lessThan(const Duration(milliseconds: 500)),
+      );
+      debugPrint(
+        'NATIVE_TERMINAL earlyFailureMs=${watch.elapsedMilliseconds} '
+        'errorCode=${terminal.nativeErrorCode}',
+      );
+      await _withFrames(
+        tester,
+        engine.open(
+          DashPairSource(
+            video: MediaTrack(
+              uri: File('$fixtures/video.mp4').uri,
+              requestPolicy: policy,
+            ),
+            audio: MediaTrack(
+              uri: File('$fixtures/audio.m4a').uri,
+              requestPolicy: policy,
+            ),
+          ),
+          const OpenOptions(play: true, volume: 0),
+        ),
+      );
+      expect(engine.inspectDiagnostics().hasDecodedAudio, true);
+      expect(engine.inspectDiagnostics().hasDecodedVideo, true);
+      expect(failures, hasLength(1));
+      expect(tester.takeException(), isNull);
+    } finally {
+      await subscription.cancel();
+      await _withFrames(tester, engine.dispose());
+      await tester.pumpWidget(const SizedBox.shrink());
+      await server.close(force: true);
+    }
+  });
 
   for (final action in ['stop', 'replace', 'dispose', 'timeout']) {
     testWidgets(

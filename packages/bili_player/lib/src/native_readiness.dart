@@ -11,13 +11,14 @@ Future<void> waitForNativeSignal({
   required bool Function() superseded,
   required List<Stream<Object?>> changes,
   required Duration timeout,
+  Object? Function()? failure,
 }) async {
   var signalled = false;
-  (Object, StackTrace)? failure;
+  (Object, StackTrace)? signalFailure;
   final completion = signal.then<void>(
     (_) => signalled = true,
     onError: (Object error, StackTrace stack) {
-      failure = (error, stack);
+      signalFailure = (error, stack);
       signalled = true;
     },
   );
@@ -26,8 +27,9 @@ Future<void> waitForNativeSignal({
     superseded: superseded,
     changes: [Stream<void>.fromFuture(completion), ...changes],
     timeout: timeout,
+    failure: failure,
   );
-  if (failure case final error?) {
+  if (signalFailure case final error?) {
     Error.throwWithStackTrace(error.$1, error.$2);
   }
 }
@@ -40,14 +42,18 @@ Future<void> waitForNativeState({
   required bool Function() superseded,
   required List<Stream<Object?>> changes,
   required Duration timeout,
+  Object? Function()? failure,
 }) async {
   if (superseded()) throw const SourceSuperseded();
+  if (failure?.call() case final error?) throw error;
   if (ready()) return;
   final done = Completer<void>();
   void check() {
     if (done.isCompleted) return;
     if (superseded()) {
       done.completeError(const SourceSuperseded());
+    } else if (failure?.call() case final error?) {
+      done.completeError(error);
     } else if (ready()) {
       done.complete();
     }

@@ -10,6 +10,7 @@ import 'player_diagnostics.dart';
 import 'native_readiness.dart';
 import 'native_media_options.dart';
 import 'native_error_monitor.dart';
+import 'native_load_observer.dart';
 import 'native_audio_gain.dart';
 import 'video_dimensions.dart';
 
@@ -35,12 +36,14 @@ final class MediaKitEngine
 
   final void Function(PlayerDiagnosticEvent)? onDiagnostic;
   late final NativeErrorMonitor _nativeErrors;
+  NativeLoadObserver? _nativeLoad;
 
   void _diagnose(
     PlayerDiagnosticKind kind, {
     NativeErrorSummary? nativeError,
     PlayerFailureKind? failureKind,
     NativeLogSeverity? severity,
+    int? nativeErrorCode,
   }) => onDiagnostic?.call(
     PlayerDiagnosticEvent(
       kind: kind,
@@ -48,6 +51,7 @@ final class MediaKitEngine
       nativeError: nativeError,
       failureKind: failureKind,
       severity: severity,
+      nativeErrorCode: nativeErrorCode,
     ),
   );
 
@@ -326,8 +330,13 @@ final class MediaKitEngine
             generation != _generation ||
             _disposed ||
             !identical(_player, player),
-        changes: [...changes, _generationChanges.stream],
+        changes: [
+          ...changes,
+          _generationChanges.stream,
+          if (_nativeLoad case final load?) load.state.changes,
+        ],
         timeout: timeout,
+        failure: () => _loadFailure(generation),
       );
     } on TimeoutException {
       throw PlayerFailure(
@@ -336,6 +345,17 @@ final class MediaKitEngine
         generation,
       );
     }
+  }
+
+  PlayerFailure? _loadFailure(int generation) {
+    final code = _nativeLoad?.state.errorCode;
+    return code == null
+        ? null
+        : PlayerFailure(
+            PlayerFailureKind.nativePlayback,
+            'Native source loading terminated with an error.',
+            generation,
+          );
   }
 
   @override
@@ -417,6 +437,21 @@ final class MediaKitEngine
                 openBudget,
               );
         if (generation != _generation || _disposed) return;
+        if (platform is mk.NativePlayer) {
+          final load = await NativeLoadObserver.attach(
+            platform,
+            isCurrent: () =>
+                generation == _generation &&
+                !_disposed &&
+                identical(_player, player),
+            onFailure: (code) => _diagnose(
+              PlayerDiagnosticKind.openTerminated,
+              nativeErrorCode: code,
+            ),
+          ).timeout(_remaining(watch, openBudget));
+          _nativeLoad = load;
+        }
+        if (generation != _generation || _disposed) return;
         await player
             .open(
               mk.Media(
@@ -452,8 +487,12 @@ final class MediaKitEngine
                 generation != _generation ||
                 _disposed ||
                 !identical(_player, player),
-            changes: [_generationChanges.stream],
+            changes: [
+              _generationChanges.stream,
+              if (_nativeLoad case final load?) load.state.changes,
+            ],
             timeout: _remaining(watch, openBudget),
+            failure: () => _loadFailure(generation),
           );
           await (player.platform as mk.NativePlayer)
               .unobserveProperty(_externalAudioProperty)
@@ -495,6 +534,7 @@ final class MediaKitEngine
           }
         }
         if (generation != _generation || _disposed) return;
+        if (_loadFailure(generation) case final failure?) throw failure;
         _publish(_snapshot.copyWith(phase: PlaybackPhase.ready));
         _diagnose(PlayerDiagnosticKind.openReady);
         if (options.play) {
@@ -519,8 +559,12 @@ final class MediaKitEngine
                   generation != _generation ||
                   _disposed ||
                   !identical(_player, player),
-              changes: [_generationChanges.stream],
+              changes: [
+                _generationChanges.stream,
+                if (_nativeLoad case final load?) load.state.changes,
+              ],
               timeout: _remaining(watch, openBudget),
+              failure: () => _loadFailure(generation),
             );
           }
           if (_requiresDecodedAudio) {
@@ -539,6 +583,8 @@ final class MediaKitEngine
             _publish(_snapshot.copyWith(phase: PlaybackPhase.paused));
           }
         }
+        if (generation != _generation || _disposed) return;
+        if (_loadFailure(generation) case final failure?) throw failure;
       } on SourceSuperseded {
         await _releasePlayer();
       } on PlayerFailure catch (error) {
@@ -797,6 +843,9 @@ final class MediaKitEngine
   }
 
   Future<void> _releasePlayer() async {
+    final load = _nativeLoad;
+    _nativeLoad = null;
+    await load?.dispose();
     _audioGain?.cancel();
     _audioGain = null;
     _nativeErrors.reset();

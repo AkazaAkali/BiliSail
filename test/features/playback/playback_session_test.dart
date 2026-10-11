@@ -598,7 +598,7 @@ void main() {
       await _flush();
       repository.pendingResolves['one']!.complete(_backupMedia());
       await opening;
-      expect(engine.openOptions.first.openTimeout, const Duration(seconds: 8));
+      expect(engine.openOptions.first.openTimeout, const Duration(seconds: 6));
       if (failure == PlayerFailureKind.nativePlayback) {
         expect(engine.openedUris, [
           _backupMedia().video.urls.first,
@@ -614,7 +614,7 @@ void main() {
         );
         expect(
           engine.openOptions.last.openTimeout,
-          greaterThan(const Duration(seconds: 8)),
+          greaterThan(const Duration(seconds: 6)),
         );
         expect(engine.currentSnapshot.position, const Duration(seconds: 17));
         expect(engine.currentSnapshot.desiredPlaying, false);
@@ -649,6 +649,56 @@ void main() {
       expect(session.media, isNull);
     },
   );
+
+  for (final action in ['close', 'replace', 'account', 'epoch']) {
+    test(
+      'terminal failure cannot retry an obsolete source after $action',
+      () async {
+        var scope = 'user:old';
+        var epoch = 1;
+        final engine = _FakeEngine()
+          ..nextOpenFailure = PlayerFailureKind.nativePlayback;
+        final repository = _FakeRepository();
+        final session = PlaybackSession(
+          engine: engine,
+          repository: repository,
+          progress: _FakeProgress(),
+          accountScope: () => scope,
+          sessionEpoch: () => epoch,
+        );
+        addTearDown(session.close);
+        Future<void>? replacement;
+        engine.onOpenFailure = () {
+          switch (action) {
+            case 'close':
+              replacement = session.close();
+            case 'replace':
+              replacement = session.open(_detail('two'), _part('two'));
+            case 'account':
+              scope = 'user:new';
+            case 'epoch':
+              epoch++;
+          }
+        };
+        final opening = session.open(_detail('one'), _part('one'));
+        await _flush();
+        repository.pendingResolves['one']!.complete(_backupMedia());
+        await opening;
+        await _flush();
+        expect(engine.openOptions, hasLength(1));
+        if (action == 'replace') {
+          repository.completeResolve('two');
+          await replacement;
+          expect(engine.openedUris.last.toString(), contains('/two-video.m4s'));
+          expect(engine.openOptions, hasLength(2));
+          expect(session.error, isNull);
+        } else {
+          await replacement;
+          expect(session.media, isNull);
+        }
+      },
+    );
+  }
 
   test(
     'single URL retains the full startup budget and never repeats it',

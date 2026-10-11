@@ -713,8 +713,8 @@ class PlaybackSession extends ChangeNotifier {
             !isLive &&
                 hasBackup &&
                 attempt == 0 &&
-                remaining > const Duration(seconds: 8)
-            ? const Duration(seconds: 8)
+                remaining > const Duration(seconds: 6)
+            ? const Duration(seconds: 6)
             : remaining;
         final videoUri = attempt == 0
             ? resolved.video.urls.first
