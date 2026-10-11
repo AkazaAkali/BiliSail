@@ -996,83 +996,6 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                   ),
                                 ),
                               ),
-                            PlaybackSnapshotBuilder(
-                              snapshots: session.snapshots,
-                              select: (snapshot) =>
-                                  session.subtitleAt(snapshot.position),
-                              builder: (context, snapshot) {
-                                final cue = session.subtitleAt(
-                                  snapshot.position,
-                                );
-                                if (cue == null) return const SizedBox.shrink();
-                                return Positioned(
-                                  left: 20,
-                                  right: 20,
-                                  bottom:
-                                      (controls ? 104 : 0) +
-                                      settings.subtitleBottomPadding,
-                                  child: IgnorePointer(
-                                    child: Center(
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 4,
-                                        ),
-                                        color: Colors.black.withValues(
-                                          alpha: settings
-                                              .subtitleBackgroundOpacity,
-                                        ),
-                                        child: Text(
-                                          cue.text,
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize:
-                                                22 * settings.subtitleFontScale,
-                                            shadows: [
-                                              const Shadow(
-                                                color: Colors.black,
-                                                blurRadius: 4,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                            if (session.subtitleLoading ||
-                                session.subtitleMessage != null)
-                              Positioned(
-                                left: 20,
-                                right: 20,
-                                bottom:
-                                    (controls ? 104 : 12) +
-                                    settings.subtitleBottomPadding,
-                                child: IgnorePointer(
-                                  child: Center(
-                                    child: Text(
-                                      session.subtitleLoading
-                                          ? '字幕加载中…'
-                                          : session.subtitleMessage!,
-                                      textAlign: TextAlign.center,
-                                      maxLines: 2,
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                        shadows: [
-                                          Shadow(
-                                            color: Colors.black,
-                                            blurRadius: 4,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
                             if (session.error == null)
                               Positioned(
                                 key: const ValueKey(
@@ -1328,138 +1251,248 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                   ),
                                 ),
                               ),
-                            if (widget.active)
-                              Positioned(
-                                key: const ValueKey('player-control-bar-layer'),
-                                left: 0,
-                                right: 0,
-                                bottom: 0,
-                                child: _controlsVisibility(
-                                  visible: controls,
-                                  hoverRegion: 'bar',
-                                  retainDynamicPress: true,
-                                  child: Theme(
-                                    data: ThemeData.dark(useMaterial3: true)
-                                        .copyWith(
-                                          colorScheme: ColorScheme.fromSeed(
-                                            seedColor: const Color(0xffdf6589),
-                                            brightness: Brightness.dark,
-                                          ),
-                                        ),
-                                    child: Container(
-                                      key: const ValueKey('player-controls'),
-                                      padding: const EdgeInsets.only(
-                                        top: 12,
-                                        bottom: 6,
-                                      ),
-                                      decoration: const BoxDecoration(
-                                        gradient: LinearGradient(
-                                          begin: Alignment.topCenter,
-                                          end: Alignment.bottomCenter,
-                                          colors: [
-                                            Colors.transparent,
-                                            Color(0xe6000000),
-                                          ],
-                                        ),
-                                      ),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          if (session.auxiliaryMessage != null)
-                                            Padding(
+                            Positioned.fill(
+                              child: CustomMultiChildLayout(
+                                delegate: _BottomPlayerLayout(
+                                  controlsVisible: controls && widget.active,
+                                  subtitleBottomPadding:
+                                      settings.subtitleBottomPadding,
+                                ),
+                                children: [
+                                  PlaybackSnapshotBuilder(
+                                    snapshots: session.snapshots,
+                                    select: (snapshot) =>
+                                        session.subtitleAt(snapshot.position),
+                                    builder: (context, snapshot) {
+                                      final cue = session.subtitleAt(
+                                        snapshot.position,
+                                      );
+                                      if (cue == null) {
+                                        return LayoutId(
+                                          id: _BottomPlayerSlot.subtitle,
+                                          child: const SizedBox.shrink(),
+                                        );
+                                      }
+                                      return LayoutId(
+                                        id: _BottomPlayerSlot.subtitle,
+                                        child: IgnorePointer(
+                                          child: Center(
+                                            child: Container(
                                               padding:
                                                   const EdgeInsets.symmetric(
-                                                    horizontal: 10,
+                                                    horizontal: 12,
+                                                    vertical: 4,
                                                   ),
+                                              color: Colors.black.withValues(
+                                                alpha: settings
+                                                    .subtitleBackgroundOpacity,
+                                              ),
                                               child: Text(
-                                                session.auxiliaryMessage!,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                  color: Colors.white70,
-                                                  fontSize: 11,
+                                                cue.text,
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize:
+                                                      22 *
+                                                      settings
+                                                          .subtitleFontScale,
+                                                  shadows: [
+                                                    const Shadow(
+                                                      color: Colors.black,
+                                                      blurRadius: 4,
+                                                    ),
+                                                  ],
                                                 ),
                                               ),
                                             ),
-                                          if (!session.isLive)
-                                            PlaybackSnapshotBuilder(
-                                              snapshots: session.snapshots,
-                                              select: (snapshot) => (
-                                                snapshot.position,
-                                                snapshot.duration,
-                                                snapshot.buffered,
-                                              ),
-                                              builder: (context, snapshot) =>
-                                                  PlaybackTimelineBar(
-                                                    key: ValueKey(
-                                                      session.sourceGeneration,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  if (session.subtitleLoading ||
+                                      session.subtitleMessage != null)
+                                    LayoutId(
+                                      id: _BottomPlayerSlot.subtitleMessage,
+                                      child: IgnorePointer(
+                                        child: Center(
+                                          child: Text(
+                                            session.subtitleLoading
+                                                ? '字幕加载中…'
+                                                : session.subtitleMessage!,
+                                            textAlign: TextAlign.center,
+                                            maxLines: 2,
+                                            style: const TextStyle(
+                                              color: Colors.white70,
+                                              fontSize: 12,
+                                              shadows: [
+                                                Shadow(
+                                                  color: Colors.black,
+                                                  blurRadius: 4,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  if (widget.active)
+                                    LayoutId(
+                                      key: const ValueKey(
+                                        'player-control-bar-layer',
+                                      ),
+                                      id: _BottomPlayerSlot.controls,
+                                      child: _controlsVisibility(
+                                        visible: controls,
+                                        hoverRegion: 'bar',
+                                        retainDynamicPress: true,
+                                        child: Theme(
+                                          data:
+                                              ThemeData.dark(
+                                                useMaterial3: true,
+                                              ).copyWith(
+                                                colorScheme:
+                                                    ColorScheme.fromSeed(
+                                                      seedColor: const Color(
+                                                        0xffdf6589,
+                                                      ),
+                                                      brightness:
+                                                          Brightness.dark,
                                                     ),
-                                                    playerBoundsKey:
-                                                        _playerBoundsKey,
-                                                    position: snapshot.position,
-                                                    duration: snapshot.duration,
-                                                    buffered: snapshot.buffered,
-                                                    chapters: session.chapters,
-                                                    highEnergy:
-                                                        session.highEnergy,
-                                                    storyboard:
-                                                        session.storyboard,
-                                                    storyboardLoading: session
-                                                        .storyboardLoading,
-                                                    storyboardMessage: session
-                                                        .storyboardMessage,
-                                                    sourceGeneration: session
-                                                        .sourceGeneration,
-                                                    onPreviewRequest: () =>
-                                                        unawaited(
-                                                          session
-                                                              .ensureStoryboard(),
+                                              ),
+                                          child: Container(
+                                            key: const ValueKey(
+                                              'player-controls',
+                                            ),
+                                            padding: const EdgeInsets.only(
+                                              top: 12,
+                                              bottom: 6,
+                                            ),
+                                            decoration: const BoxDecoration(
+                                              gradient: LinearGradient(
+                                                begin: Alignment.topCenter,
+                                                end: Alignment.bottomCenter,
+                                                colors: [
+                                                  Colors.transparent,
+                                                  Color(0xe6000000),
+                                                ],
+                                              ),
+                                            ),
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (session.auxiliaryMessage !=
+                                                    null)
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 10,
                                                         ),
-                                                    onSeek: (position) =>
-                                                        unawaited(
-                                                          session.seek(
-                                                            position,
+                                                    child: Text(
+                                                      session.auxiliaryMessage!,
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: const TextStyle(
+                                                        color: Colors.white70,
+                                                        fontSize: 11,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                if (!session.isLive)
+                                                  PlaybackSnapshotBuilder(
+                                                    snapshots:
+                                                        session.snapshots,
+                                                    select: (snapshot) => (
+                                                      snapshot.position,
+                                                      snapshot.duration,
+                                                      snapshot.buffered,
+                                                    ),
+                                                    builder: (context, snapshot) => PlaybackTimelineBar(
+                                                      key: ValueKey(
+                                                        session
+                                                            .sourceGeneration,
+                                                      ),
+                                                      playerBoundsKey:
+                                                          _playerBoundsKey,
+                                                      position:
+                                                          snapshot.position,
+                                                      duration:
+                                                          snapshot.duration,
+                                                      buffered:
+                                                          snapshot.buffered,
+                                                      chapters:
+                                                          session.chapters,
+                                                      highEnergy:
+                                                          session.highEnergy,
+                                                      storyboard:
+                                                          session.storyboard,
+                                                      storyboardLoading: session
+                                                          .storyboardLoading,
+                                                      storyboardMessage: session
+                                                          .storyboardMessage,
+                                                      sourceGeneration: session
+                                                          .sourceGeneration,
+                                                      onPreviewRequest: () =>
+                                                          unawaited(
+                                                            session
+                                                                .ensureStoryboard(),
                                                           ),
+                                                      onSeek: (position) =>
+                                                          unawaited(
+                                                            session.seek(
+                                                              position,
+                                                            ),
+                                                          ),
+                                                      onMenuChanged:
+                                                          _onControlsMenuChanged,
+                                                    ),
+                                                  ),
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 10,
+                                                      ),
+                                                  child: _ControlBar(
+                                                    layout: layout,
+                                                    composerKey: _composerKey,
+                                                    composeExpanded:
+                                                        _composeExpanded,
+                                                    onToggleComposer: () =>
+                                                        setState(
+                                                          () => _composeExpanded =
+                                                              !_composeExpanded,
                                                         ),
+                                                    session: session,
+                                                    settings: settings,
+                                                    snapshot: snapshot,
+                                                    pageCommands: widget
+                                                        .pageCommands
+                                                        .value,
+                                                    onToggleComments:
+                                                        widget.onToggleComments,
+                                                    danmakuComposerBuilder: widget
+                                                        .danmakuComposerBuilder,
+                                                    onFullScreen:
+                                                        _toggleFullScreen,
+                                                    fullScreen:
+                                                        widget.fullScreen,
+                                                    onFocus:
+                                                        _focusNode.requestFocus,
+                                                    onSettings: _openSettings,
                                                     onMenuChanged:
                                                         _onControlsMenuChanged,
                                                   ),
-                                            ),
-                                          Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                            ),
-                                            child: _ControlBar(
-                                              layout: layout,
-                                              composerKey: _composerKey,
-                                              composeExpanded: _composeExpanded,
-                                              onToggleComposer: () => setState(
-                                                () => _composeExpanded =
-                                                    !_composeExpanded,
-                                              ),
-                                              session: session,
-                                              settings: settings,
-                                              snapshot: snapshot,
-                                              pageCommands:
-                                                  widget.pageCommands.value,
-                                              onToggleComments:
-                                                  widget.onToggleComments,
-                                              danmakuComposerBuilder:
-                                                  widget.danmakuComposerBuilder,
-                                              onFullScreen: _toggleFullScreen,
-                                              fullScreen: widget.fullScreen,
-                                              onFocus: _focusNode.requestFocus,
-                                              onSettings: _openSettings,
-                                              onMenuChanged:
-                                                  _onControlsMenuChanged,
+                                                ),
+                                              ],
                                             ),
                                           ),
-                                        ],
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ),
+                                ],
                               ),
+                            ),
                           ],
                         ),
                       );
@@ -1473,6 +1506,60 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
       ),
     );
   }
+}
+
+enum _BottomPlayerSlot { controls, subtitle, subtitleMessage }
+
+class _BottomPlayerLayout extends MultiChildLayoutDelegate {
+  _BottomPlayerLayout({
+    required this.controlsVisible,
+    required this.subtitleBottomPadding,
+  });
+
+  final bool controlsVisible;
+  final double subtitleBottomPadding;
+
+  @override
+  void performLayout(Size size) {
+    var controlsHeight = 0.0;
+    if (hasChild(_BottomPlayerSlot.controls)) {
+      controlsHeight = layoutChild(
+        _BottomPlayerSlot.controls,
+        BoxConstraints.tightFor(width: size.width),
+      ).height;
+      positionChild(
+        _BottomPlayerSlot.controls,
+        Offset(0, size.height - controlsHeight),
+      );
+    }
+    // The setting measures from the player edge. Lift only when needed to
+    // clear the actual bar, including wrapped time and the expanded editor.
+    final bottom = controlsVisible && controlsHeight + 8 > subtitleBottomPadding
+        ? controlsHeight + 8
+        : subtitleBottomPadding;
+    for (final slot in [
+      _BottomPlayerSlot.subtitle,
+      _BottomPlayerSlot.subtitleMessage,
+    ]) {
+      if (!hasChild(slot)) continue;
+      final childSize = layoutChild(
+        slot,
+        BoxConstraints.tightFor(width: (size.width - 40).clamp(0, size.width)),
+      );
+      positionChild(
+        slot,
+        Offset(
+          20,
+          (size.height - bottom - childSize.height).clamp(0, size.height),
+        ),
+      );
+    }
+  }
+
+  @override
+  bool shouldRelayout(_BottomPlayerLayout oldDelegate) =>
+      controlsVisible != oldDelegate.controlsVisible ||
+      subtitleBottomPadding != oldDelegate.subtitleBottomPadding;
 }
 
 // Keep the subtree alive until fade-out finishes, while immediately releasing

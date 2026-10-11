@@ -12,6 +12,57 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   for (final inPlayer in [false, true]) {
+    testWidgets('subtitle bottom distance saves 240 px (player: $inPlayer)', (
+      tester,
+    ) async {
+      final repository = _SettingsRepository();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [settingsRepositoryProvider.overrideWithValue(repository)],
+          child: MaterialApp(
+            home: Scaffold(
+              body: inPlayer
+                  ? Builder(
+                      builder: (context) => TextButton(
+                        onPressed: () => showPlayerSettings(context, tab: 2),
+                        child: const Text('字幕设置'),
+                      ),
+                    )
+                  : const SettingsScreen(category: SettingsCategory.subtitles),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      if (inPlayer) {
+        await tester.tap(find.text('字幕设置'));
+        await tester.pumpAndSettle();
+      }
+      final slider = find.byWidgetPredicate(
+        (widget) => widget is Slider && widget.max == 240,
+      );
+      await tester.scrollUntilVisible(
+        slider,
+        100,
+        scrollable: find
+            .descendant(
+              of: find.byType(ListView).last,
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await tester.ensureVisible(slider);
+      await tester.pumpAndSettle();
+      await tester.drag(slider, const Offset(800, 0));
+      await tester.pumpAndSettle();
+      expect(repository.settings.subtitleBottomPadding, 240);
+      final container = ProviderScope.containerOf(tester.element(slider));
+      container.invalidate(settingsControllerProvider);
+      await tester.pumpAndSettle();
+      expect(tester.widget<Slider>(slider).value, 240);
+    });
+  }
+  for (final inPlayer in [false, true]) {
     testWidgets(
       'high energy toggle persists in both settings entries: $inPlayer',
       (tester) async {

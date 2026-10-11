@@ -476,7 +476,7 @@ void main() {
       subtitlesEnabled: true,
       subtitleFontScale: 1.2,
       subtitleBackgroundOpacity: .7,
-      subtitleBottomPadding: 50,
+      subtitleBottomPadding: 240,
       sponsorBlockMode: SponsorBlockMode.automatic,
       sponsorBlockCategories: ['intro', 'sponsor'],
     );
@@ -486,6 +486,7 @@ void main() {
     await repository.save(reloaded);
     expect(await database.readSetting('preferences.v1'), first);
     expect(reloaded.defaultVolume, 35);
+    expect(reloaded.subtitleBottomPadding, 240);
     expect(reloaded.danmakuFontScale, .2);
     expect(reloaded.allowConcurrentPlayback, isFalse);
     expect(reloaded.danmakuTopMargin, 48);
@@ -564,7 +565,7 @@ void main() {
     expect(s.danmakuMinimumWeight, 10);
     expect(s.danmakuOffset, const Duration(seconds: -60));
     expect(s.danmakuBlockedWords, ['x']);
-    expect(s.subtitleBottomPadding, 120);
+    expect(s.subtitleBottomPadding, 240);
     expect(s.sponsorBlockMode, SponsorBlockMode.disabled);
     expect(s.sponsorBlockCategories, ['intro']);
     final nonFinite = AppSettings(

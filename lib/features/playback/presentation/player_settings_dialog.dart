@@ -328,7 +328,7 @@ class _PlayerSettingsDialogState extends ConsumerState<_PlayerSettingsDialog> {
                           '底部距离',
                           s.subtitleBottomPadding,
                           0,
-                          120,
+                          240,
                           (c, v) => c.copyWith(subtitleBottomPadding: v),
                           suffix: '${s.subtitleBottomPadding.round()} px',
                         ),

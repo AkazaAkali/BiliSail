@@ -396,7 +396,7 @@ final class AppSettings {
           .toList(),
       subtitleFontScale: bounded(subtitleFontScale, .5, 2, 1),
       subtitleBackgroundOpacity: bounded(subtitleBackgroundOpacity, 0, 1, .45),
-      subtitleBottomPadding: bounded(subtitleBottomPadding, 0, 120, 24),
+      subtitleBottomPadding: bounded(subtitleBottomPadding, 0, 240, 24),
       sponsorBlockCategories: sponsorBlockCategories
           .where(supportedSponsorCategories.contains)
           .toSet()

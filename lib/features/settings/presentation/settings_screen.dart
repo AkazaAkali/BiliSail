@@ -407,7 +407,7 @@ final class _SettingsCategoryPageState
                             '字幕底部距离',
                             s.subtitleBottomPadding,
                             0,
-                            120,
+                            240,
                             controller.setSubtitleBottomPadding,
                             ' px',
                           ),

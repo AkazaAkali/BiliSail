@@ -39,6 +39,104 @@ import 'package:flutter_test/flutter_test.dart';
 final _composerScopeProvider = Provider<String>((ref) => 'root');
 
 void main() {
+  for (final width in [400.0, 1280.0]) {
+    testWidgets('subtitles clear the actual control bar at width $width', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1440, 1000);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final engine = _FakeEngine();
+      final session = _session(engine, repository: _MenuRepository());
+      addTearDown(session.close);
+      final window = _FakeWindowService();
+      await tester.pumpWidget(
+        _app(
+          session,
+          window,
+          const AppSettings.defaults(),
+          width: width,
+          composer: (_) => const SizedBox(height: 54, child: Text('弹幕编辑器')),
+        ),
+      );
+      await _pumpFrames(tester);
+      await session.pause();
+      await session.selectSubtitle(0);
+      await tester.pump();
+      final subtitle = find.text('字幕回归');
+      final background = find
+          .ancestor(of: subtitle, matching: find.byType(Container))
+          .first;
+      final controls = find.byKey(const ValueKey('player-controls'));
+      void expectClearance() {
+        final gap =
+            tester.getRect(controls).top - tester.getRect(background).bottom;
+        expect(gap, inInclusiveRange(7, 9));
+        expect(tester.takeException(), isNull);
+      }
+
+      expectClearance();
+      if (width == 400) {
+        final oldBottom = tester.getRect(background).bottom;
+        await tester.tap(find.byTooltip('发送弹幕'));
+        await tester.pump();
+        expectClearance();
+        expect(tester.getRect(background).bottom, lessThan(oldBottom));
+      }
+      await tester.tap(find.byTooltip('全屏（F）'));
+      await _pumpFrames(tester);
+      expectClearance();
+      await tester.tap(find.byTooltip('退出全屏（Esc）'));
+      await _pumpFrames(tester);
+      await tester.tapAt(_surfacePoint(tester));
+      await _pumpSurfaceTap(tester);
+      expect(controls, findsNothing);
+      final player = tester.getRect(find.byType(PlaybackPanel));
+      expect(player.bottom - tester.getRect(background).bottom, closeTo(24, 1));
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+    });
+  }
+
+  testWidgets('large subtitle distance stays fixed and within the player', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1440, 1000);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final session = _session(_FakeEngine(), repository: _MenuRepository());
+    addTearDown(session.close);
+    final window = _FakeWindowService();
+    final settings = const AppSettings.defaults().copyWith(
+      subtitleBottomPadding: 240,
+    );
+    await tester.pumpWidget(_app(session, window, settings, width: 1280));
+    await _pumpFrames(tester);
+    await session.pause();
+    await session.selectSubtitle(0);
+    await tester.pump();
+    final background = find
+        .ancestor(of: find.text('字幕回归'), matching: find.byType(Container))
+        .first;
+    final player = tester.getRect(find.byType(PlaybackPanel));
+    final shownBottom = tester.getRect(background).bottom;
+    expect(player.bottom - shownBottom, closeTo(240, 1));
+    await tester.tapAt(_surfacePoint(tester));
+    await _pumpSurfaceTap(tester);
+    expect(tester.getRect(background).bottom, closeTo(shownBottom, 1));
+    await tester.pumpWidget(_app(session, window, settings, width: 400));
+    await _pumpFrames(tester);
+    final smallPlayer = tester.getRect(find.byType(PlaybackPanel));
+    final subtitle = tester.getRect(background);
+    expect(subtitle.top, greaterThanOrEqualTo(smallPlayer.top));
+    expect(subtitle.bottom, lessThanOrEqualTo(smallPlayer.bottom));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await _pumpFrames(tester);
+  });
+
   testWidgets(
     'subtitle cue stays mounted between boundaries and ignores buffer',
     (tester) async {
