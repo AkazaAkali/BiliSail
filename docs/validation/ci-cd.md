@@ -300,3 +300,5 @@ Windows x64、Flutter 3.47.6：修复后的定向用例和全部 53 项下载回
 版本解析、Android Gradle 与 Windows MSI 校验均接受非负构建号，保留禁止前导零及平台上界。`1.0.2+0` 直接映射为 MSIX／EXE `1.0.2.0`、MSI `1.0.2000`，Android versionName 为 `1.0.2`、versionCode 为 `10200`；不附加 ABI 偏移。macOS 继续传入 build name `1.0.2` 和 build number `0`。Android 编码高于上一版 `0.5.7+5` 的 `5705`，签名配置不变。MSIX 的四段映射不变；本版本首段非零、末段为零，不代表已提交或通过 Microsoft Store 验证。
 
 边界回归覆盖 `+0`、负数、前导零及既有上界拒绝。各平台打包时核验实际包／bundle 版本，并写入 build-info；CI 构建成功与 GitHub Release 创建／发布分别核验，不能相互替代。
+
+Flutter 3.47.6 会将 Android 的 `--build-number 0` 归一化为 `1`（[固定 SDK 实现](https://github.com/flutter/flutter/blob/5fc346839b/packages/flutter_tools/lib/src/build_info.dart)）。因此 Gradle 优先从打包脚本已有的 `--dart-define=BILISAIL_RELEASE_VERSION=x.y.z+N` 读取原始构建号，校验名称一致后按同一公式编码；没有该 define 时保持 Flutter 默认来源。自行执行 Flutter 构建 `+0` 时也必须传入这个完整版本 define。首次 `1.0.2+0` CI 的 APK 校验已拦截该归一化造成的错误，新增 `10201` 拒绝回归，禁止将偏一的包上传。

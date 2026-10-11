@@ -24,6 +24,23 @@ require(project.findProperty("force-version-code-ignoring-abi").toString() == "t
     "BiliSail requires force-version-code-ignoring-abi=true to preserve compact version codes."
 }
 
+// Flutter normalizes Android --build-number 0 to 1. Packaging already passes
+// the original version for the app's update checker; preserve that same value.
+val releaseVersion = (project.findProperty("dart-defines") as? String)
+    ?.split(",")
+    ?.map { String(java.util.Base64.getDecoder().decode(it), Charsets.UTF_8) }
+    ?.singleOrNull { it.startsWith("BILISAIL_RELEASE_VERSION=") }
+    ?.substringAfter("=")
+val originalBuildNumber = releaseVersion?.let {
+    require(Regex("(0|[1-9][0-9]*)\\.[0-9]\\.[0-9]\\+(0|[1-9][0-9]?)").matches(it)) {
+        "BILISAIL_RELEASE_VERSION must use the compact Android version bounds."
+    }
+    require(it.substringBefore("+") == flutter.versionName) {
+        "BILISAIL_RELEASE_VERSION must match Flutter's build name."
+    }
+    it.substringAfter("+").toInt()
+} ?: flutter.versionCode
+
 val releaseStorePath = System.getenv("ANDROID_KEYSTORE_PATH")
 val releaseStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
 val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
@@ -59,8 +76,8 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24
         targetSdk = flutter.targetSdkVersion
-        // Flutter still receives the raw +build number; encode exactly once here.
-        versionCode = compactAndroidVersionCode(flutter.versionName, flutter.versionCode)
+        // Encode the original +build number exactly once, including zero.
+        versionCode = compactAndroidVersionCode(flutter.versionName, originalBuildNumber)
         versionName = flutter.versionName
     }
 

@@ -17,7 +17,7 @@ function ConvertFrom-AndroidApkBadging([string]$Report, [string]$Version) {
   if (!$package.Success -or $package.Groups[1].Value -cne 'dev.bilisail.bilisail' -or
       $package.Groups[2].Value -cne [string]$expectedCode -or
       $package.Groups[3].Value -cne $expectedName) {
-    throw "APK manifest must contain dev.bilisail.bilisail, versionName=$expectedName, versionCode=$expectedCode."
+    throw "APK manifest must contain dev.bilisail.bilisail, versionName=$expectedName, versionCode=$expectedCode. Actual package entry: $($package.Value)"
   }
   return $expectedCode
 }

@@ -40,6 +40,7 @@ $checks++
 $zeroBuild = "package: name='dev.bilisail.bilisail' versionCode='10200' versionName='1.0.2'"
 if ((ConvertFrom-AndroidApkBadging $zeroBuild '1.0.2+0') -ne 10200) { throw 'Zero-build APK rejected.' }
 $checks++
+Assert-Rejected { ConvertFrom-AndroidApkBadging ($zeroBuild.Replace("'10200'", "'10201'")) '1.0.2+0' }
 
 $valid = "package: name='dev.bilisail.bilisail' versionCode='5502' versionName='0.5.5' platformBuildVersionName='16'"
 if ((ConvertFrom-AndroidApkBadging $valid '0.5.5+2') -ne 5502) { throw 'Valid APK rejected.' }
