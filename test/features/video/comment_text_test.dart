@@ -122,6 +122,56 @@ void main() {
   });
 
   test(
+    'supports full-width and mixed timestamp colons without rewriting text',
+    () {
+      const message = '0：09 123：45 1：02：03 1：02:03 1:02：03 00：00';
+      final parts = parseCommentText(message);
+      expect(parts.map((part) => part.text).join(), message);
+      expect(
+        parts.where((part) => part.position != null).map((part) => part.text),
+        ['0：09', '123：45', '1：02：03', '1：02:03', '1:02：03', '00：00'],
+      );
+      expect(
+        parts
+            .where((part) => part.position != null)
+            .map((part) => part.position),
+        [
+          const Duration(seconds: 9),
+          const Duration(minutes: 123, seconds: 45),
+          const Duration(hours: 1, minutes: 2, seconds: 3),
+          const Duration(hours: 1, minutes: 2, seconds: 3),
+          const Duration(hours: 1, minutes: 2, seconds: 3),
+          Duration.zero,
+        ],
+      );
+    },
+  );
+
+  test('full-width prose punctuation can surround either timestamp format', () {
+    const message = '片段：00:09；高能：00：34；00:52：结尾；1：02：03：回顾';
+    final parts = parseCommentText(message);
+    expect(parts.map((part) => part.text).join(), message);
+    expect(
+      parts.where((part) => part.position != null).map((part) => part.position),
+      [
+        const Duration(seconds: 9),
+        const Duration(seconds: 34),
+        const Duration(seconds: 52),
+        const Duration(hours: 1, minutes: 2, seconds: 3),
+      ],
+    );
+  });
+
+  test('invalid full-width and mixed timestamps never match partial times', () {
+    const message =
+        '12：60 1：99：09 1：99:09 1:99：09 1：02：99 1：02:99 1:02：99 '
+        '12345：09 a00：09 00：09z 12：34：56：78 12：34:56：78 12:34：56:78';
+    final parts = parseCommentText(message);
+    expect(parts.map((part) => part.text).join(), message);
+    expect(parts.where((part) => part.position != null), isEmpty);
+  });
+
+  test(
     'URLs own their query timestamps and decode escaped query separators',
     () {
       final parts = parseCommentText(

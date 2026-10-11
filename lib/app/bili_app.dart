@@ -368,6 +368,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
         builder: (context, child) => AppInputHost<Object>(
           dispatcher: _input,
           routes: _input.routes,
+          onEditingChanged: widget.dependencies.window.setTextInputActive,
           child: AppUpdateHost(
             navigatorKey: _router.routerDelegate.navigatorKey,
             child: AppNoticeHost(

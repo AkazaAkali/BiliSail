@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show ViewFocusEvent, ViewFocusState;
 
 import 'package:flutter/foundation.dart';
@@ -240,10 +241,12 @@ class AppInputHost<C> extends StatefulWidget {
     required this.dispatcher,
     required this.routes,
     required this.child,
+    this.onEditingChanged,
   });
   final ShortcutDispatcher<C> dispatcher;
   final InputRouteObserver routes;
   final Widget child;
+  final Future<void> Function(bool editing)? onEditingChanged;
   @override
   State<AppInputHost<C>> createState() => _AppInputHostState<C>();
 }
@@ -253,15 +256,71 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
   final _normalizer = InputNormalizer();
   bool _lifecycleActive = true;
   bool _viewFocused = true;
+  bool? _lastEditing;
+  bool _editingSyncScheduled = false;
   bool get _active => _lifecycleActive && _viewFocused;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     FocusManager.instance.addEarlyKeyEventHandler(_key);
-    FocusManager.instance.addListener(_cancel);
+    FocusManager.instance.addListener(_focusChanged);
     GestureBinding.instance.pointerRouter.addGlobalRoute(_pointer);
     widget.routes.onChanged = _routesChanged;
+    _scheduleEditingSync();
+  }
+
+  void _focusChanged() {
+    _cancel();
+    _scheduleEditingSync();
+  }
+
+  void _scheduleEditingSync() {
+    if (_editingSyncScheduled || widget.onEditingChanged == null) return;
+    _editingSyncScheduled = true;
+    // A host can be mounted while the previous focused element is being
+    // deactivated. Resolve its editing ancestors after focus/tree updates.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _editingSyncScheduled = false;
+      if (mounted) _syncEditing();
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _syncEditing() {
+    final editing = _context().editing;
+    if (_lastEditing == editing || widget.onEditingChanged == null) return;
+    _lastEditing = editing;
+    _notifyEditing(editing);
+  }
+
+  void _notifyEditing(bool editing) {
+    final callback = widget.onEditingChanged;
+    if (callback == null) return;
+    unawaited(
+      Future<void>.sync(() => callback(editing))
+          .catchError((Object error, StackTrace stack) {
+            FlutterError.reportError(
+              FlutterErrorDetails(
+                exception: error,
+                stack: stack,
+                library: 'BiliSail input',
+                context: ErrorDescription(
+                  'while updating the window IME association',
+                ),
+              ),
+            );
+          }),
+    );
+  }
+
+  @override
+  void didUpdateWidget(AppInputHost<C> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.onEditingChanged != widget.onEditingChanged) {
+      _lastEditing = null;
+    }
+    _scheduleEditingSync();
   }
 
   void _cancel() => widget.dispatcher.cancel(keepWorkspace: true);
@@ -338,9 +397,10 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
     _cancel();
     widget.routes.onChanged = null;
     FocusManager.instance.removeEarlyKeyEventHandler(_key);
-    FocusManager.instance.removeListener(_cancel);
+    FocusManager.instance.removeListener(_focusChanged);
     GestureBinding.instance.pointerRouter.removeGlobalRoute(_pointer);
     WidgetsBinding.instance.removeObserver(this);
+    _notifyEditing(true);
     super.dispose();
   }
 

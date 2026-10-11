@@ -1,9 +1,30 @@
+import 'dart:io';
+
 import 'package:bilisail/core/platform/window_service.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('Windows sends ordered IME policies to the native view', () async {
+    const channel = MethodChannel('bilisail/text_input');
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+    final window = WindowService();
+    await window.setTextInputActive(false);
+    await window.setTextInputActive(true);
+    expect(calls.map((call) => call.method), ['setActive', 'setActive']);
+    expect(calls.map((call) => call.arguments), [false, true]);
+  }, skip: !Platform.isWindows);
 
   for (final orientation in FullScreenOrientation.values) {
     test(

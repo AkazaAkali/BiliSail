@@ -78,7 +78,7 @@ void main() {
       const timestampReply = CommentEntry(
         id: '11',
         author: '乙',
-        message: '$url $videoUrl 00:12',
+        message: '$url $videoUrl 00：12',
         rootId: '10',
         parentId: '10',
       );
@@ -86,7 +86,7 @@ void main() {
         const CommentEntry(
           id: '10',
           author: '甲',
-          message: '$url $videoUrl 00:09 00:34',
+          message: '$url $videoUrl 00：09 00:34',
           replyCount: 3,
           replies: [timestampReply],
         ),
@@ -130,8 +130,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       for (final (index, time, seconds) in [
-        (0, '00:09', 9),
-        (1, '00:12', 12),
+        (0, '00：09', 9),
+        (1, '00：12', 12),
       ]) {
         final richContent = find.byType(CommentRichContent).at(index);
         await tester.tapOnText(
@@ -156,7 +156,7 @@ void main() {
           descendentOf: find.byType(CommentRichContent).at(1),
         ),
       );
-      await tester.tapOnText(find.textRange.ofSubstring('00:12'));
+      await tester.tapOnText(find.textRange.ofSubstring('00：12'));
       await tester.tapOnText(
         find.textRange.ofSubstring(
           videoUrl,

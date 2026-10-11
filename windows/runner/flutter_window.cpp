@@ -27,6 +27,9 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   system_fonts_channel_ =
       RegisterSystemFonts(flutter_controller_->engine()->messenger());
+  text_input_channel_ = std::make_unique<TextInputChannel>(
+      flutter_controller_->engine()->messenger(),
+      flutter_controller_->view()->GetNativeWindow());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -42,6 +45,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  text_input_channel_.reset();
   system_fonts_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

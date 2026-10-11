@@ -52,6 +52,23 @@
 
 滚轮补充修复后，`tool/check.ps1 -SkipPub` 完整通过：根应用 1,397、bili_api 325、bili_player 32、bili_danmaku 65 项，共 1,819 项测试；根应用及三个包的格式和分析通过。新增六项滚轮／图片组合键回归包含在根应用检查中。验证日志位于 `build/input-investigation/wheel-modifier-check.log`；真实 Windows 鼠标与焦点切换体验由用户自行构建后验收。
 
+## Windows 输入法与标点快捷键（2026-10-11）
+
+中英文输入法切换后 `;`／`'` 调整倍速失效，存在原生事件交付边界。固定 Flutter 3.47.6 的 [KeyboardKeyEmbedderHandler](https://github.com/flutter/flutter/blob/3.47.6/engine/src/flutter/shell/platform/windows/keyboard_key_embedder_handler.cc#L177) 会把 IME 接管的 `VK_PROCESSKEY` 视为已处理，不向 Dart 发送对应硬件按键；[TextInputPlugin](https://github.com/flutter/flutter/blob/3.47.6/engine/src/flutter/shell/platform/windows/text_input_plugin.cc#L217) 的 hide 是空操作，clearClient 只清理编辑模型／组合状态，没有解除窗口的输入法上下文。仅增加全角标点、扩大物理键回退或清空 Dart 按下记录不能恢复未交付的事件。
+
+AppInputHost 使用已有的编辑焦点判定，通过 app 注入的 WindowService 在进入可编辑输入框时恢复 IME、离开时解除 Flutter view 的 IME 关联；只读文本与播放器／侧栏焦点不启用 IME。搜索、评论、弹幕、弹窗内编辑框及显式 InputProtection 共用该判定，编辑时仍由原分发器保护，不执行播放命令。普通／全屏及各播放内容共用根宿主，不增加页面键盘监听。
+
+Windows runner 的 `bilisail/text_input` 通道调用 [ImmAssociateContext](https://learn.microsoft.com/en-us/windows/win32/api/imm/nf-imm-immassociatecontext)，保存并恢复该 view 原来的 HIMC。上下文归窗口所有，适配器不创建／销毁它；重复解除关联不覆盖保存值，宿主移除和原生适配器销毁时恢复。只操作 Flutter view，保留输入语言与中英文转换模式，不递归影响原生 WebView 或其他窗口。其他平台为无操作，没有新增依赖或设置。
+
+回归入口：
+
+- [宿主测试](../../test/core/presentation/app_input_host_test.dart)覆盖编辑／只读／播放焦点反复切换、弹窗中文标点输入和宿主移除恢复。
+- [原生测试](../../tool/native_tests/window_ime_context_test.cpp)使用实际隐藏 Win32 窗口和 IMM，覆盖精确恢复、重复操作、原本无 HIMC、其他窗口／语言／转换模式隔离及窗口销毁。
+- [Windows 集成测试](../../integration_test/windows_ime_shortcuts_test.dart)在真实 Flutter view 检查 HIMC 关联，并向本测试进程投递原生键消息，验证 `VK_PROCESSKEY` 不到达快捷键层、恢复普通标点消息后命令执行、进入编辑器后保护及离开后重新响应。原生消息注入不等于真实 Microsoft Pinyin／第三方 IME 的实键切换验收。
+- 运行 `tool/test-windows-ime.ps1` 完成原生及 Windows 集成验证；`-NativeOnly` 只运行 IMM 测试。
+
+本次 `tool/check.ps1 -SkipPub` 通过根应用及四个包的格式、静态分析与 2,367 项测试（根应用 1,848、bili_api 390、bili_player 41、bili_danmaku 86、bili_mux 2）；7 项既有原生合流测试因未配置 `BILI_MUX_LIBRARY` 跳过。IMM 原生回归与 1 项 Windows 集成测试通过，`flutter build windows --release --no-pub -t lib/main.dart` 通过，普通应用产物为 `build/windows/x64/runner/Release/bilisail.exe`。日志在 `build/ime-test/`。Microsoft Pinyin／第三方 IME 的真实实键切换、原生 WebView 内输入与 Android／macOS 本轮未验收。
+
 ## 页面刷新
 
 刷新只归活动页面，进行中重复触发合并；播放器不再独立解释 F5／侧键为 retry。首页保留频道，搜索使用 refresh 保留当前筛选，历史、消息、下载、用户页调用各自刷新。UGC 复用相关推荐／标签刷新与本页播放重试组合；PGC 先重新加载剧集，同一选择与源代次稳定才重试，变更选集由原激活路径开源；直播由房间 controller.load 驱动目标，不另发 retry。离线保留本地源 retry；设置等无能力页不注册空回调。页面销毁／账号和 source generation 继续由已有控制器及会话隔离。

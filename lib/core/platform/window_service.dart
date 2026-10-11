@@ -6,6 +6,15 @@ import 'package:window_manager/window_manager.dart';
 enum FullScreenOrientation { portrait, landscape }
 
 class WindowService {
+  static const _textInputChannel = MethodChannel('bilisail/text_input');
+
+  /// Keep IME composition attached only while a Flutter editor needs it.
+  /// Otherwise Windows can consume punctuation before Flutter sees a key event.
+  Future<void> setTextInputActive(bool active) async {
+    if (!Platform.isWindows) return;
+    await _textInputChannel.invokeMethod<void>('setActive', active);
+  }
+
   bool get hasDesktopWindow =>
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 

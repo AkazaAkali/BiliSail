@@ -73,7 +73,9 @@ List<CommentTextPart> parseCommentText(
       if (mentionTokens.isNotEmpty)
         '(?<![0-9A-Za-z_@])(?:${mentionTokens.map(RegExp.escape).join('|')})'
             r'(?=$|[\s:：,，.。!?！？;；、()（）\[\]【】「」『』《》@])',
-      r'(?<![0-9A-Za-z_:])(?:[0-9]{1,3}:[0-5][0-9]:[0-5][0-9]|[0-9]{1,4}:[0-5][0-9])(?![0-9A-Za-z_:])',
+      // A full-width colon can also punctuate Chinese prose beside a timecode.
+      // Reject digit-colon chains without losing labels such as "高能：00：09".
+      r'(?<![0-9A-Za-z_:])(?<![0-9]：)(?:[0-9]{1,3}[:：][0-5][0-9][:：][0-5][0-9]|[0-9]{1,4}[:：][0-5][0-9])(?![0-9A-Za-z_:]|：[0-9])',
     ].join('|'),
   );
   final parts = <CommentTextPart>[];
@@ -114,7 +116,11 @@ List<CommentTextPart> parseCommentText(
       // Keep punctuation in the comment, outside the clickable link.
       cursor = match.start + link.length;
     } else {
-      final fields = token.split(':').map(int.parse).toList();
+      final fields = token
+          .replaceAll('：', ':')
+          .split(':')
+          .map(int.parse)
+          .toList();
       final seconds = fields.length == 3
           ? fields[0] * 3600 + fields[1] * 60 + fields[2]
           : fields[0] * 60 + fields[1];

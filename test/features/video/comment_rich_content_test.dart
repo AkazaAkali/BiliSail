@@ -61,7 +61,8 @@ void main() {
     (tester) async {
       final opened = <Uri>[], sought = <Duration>[];
       final message =
-          '30tps -&gt; 50tps没有\nhttps://daily.juya.uk/issues/2026-10-06/\n00:09  内容\n00:34  内容\n00:52  内容';
+          '30tps -&gt; 50tps没有\nhttps://daily.juya.uk/issues/2026-10-06/\n'
+          '00:09  内容\n00：34  内容\n00：52  内容\n0：01:02  内容\n0:01：03  内容';
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -87,7 +88,7 @@ void main() {
       final interactive = children
           .where((span) => span.recognizer != null)
           .toList();
-      expect(interactive, hasLength(4));
+      expect(interactive, hasLength(6));
       expect(interactive.map((span) => span.style).toSet(), hasLength(1));
       expect(find.byType(SelectionArea), findsOneWidget);
       expect(opened, isEmpty);
@@ -95,7 +96,7 @@ void main() {
       await tester.tapOnText(
         find.textRange.ofSubstring('https://daily.juya.uk/issues/2026-10-06/'),
       );
-      for (final time in ['00:09', '00:34', '00:52']) {
+      for (final time in ['00:09', '00：34', '00：52', '0：01:02', '0:01：03']) {
         await tester.tapOnText(find.textRange.ofSubstring(time));
       }
       expect(opened, [Uri.parse('https://daily.juya.uk/issues/2026-10-06/')]);
@@ -103,6 +104,8 @@ void main() {
         const Duration(seconds: 9),
         const Duration(seconds: 34),
         const Duration(seconds: 52),
+        const Duration(minutes: 1, seconds: 2),
+        const Duration(minutes: 1, seconds: 3),
       ]);
     },
   );
