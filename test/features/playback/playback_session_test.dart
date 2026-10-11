@@ -37,7 +37,7 @@ void main() {
           ..complete(
             PlaybackMedia(
               video: PlaybackTrack(
-                urls: [Uri.file('C:/offline/media.mp4')],
+                urls: [Uri.file('C:/offline/media.mp4', windows: true)],
                 codec: 'avc1',
                 bandwidth: 1000,
               ),
