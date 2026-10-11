@@ -23,6 +23,7 @@ import '../domain/content_playback.dart';
 import 'player_settings_dialog.dart';
 import 'playback_timeline_bar.dart';
 import 'playback_snapshot_builder.dart';
+import 'live_stream_menu.dart';
 import '../../../shared/ui/app_notice.dart';
 import '../../../shared/ui/bili_icons.dart';
 import '../../../shared/ui/shortcut_hint.dart';
@@ -771,8 +772,11 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
           ? '直播中'
           : '${_time(snapshot.duration)} / ${_time(snapshot.duration)}',
       rateLabel: session.isLive ? null : '${snapshot.rate}x',
-      qualityLabel: media != null && media.qualities.length > 1
-          ? media.qualityLabels[media.quality] ?? _quality(media.quality)
+      qualityLabel:
+          media != null && (session.isLive || media.qualities.length > 1)
+          ? session.isLive
+                ? liveQualityLabel(session, media)
+                : media.qualityLabels[media.quality] ?? _quality(media.quality)
           : null,
       hasComposer: widget.danmakuComposerBuilder != null,
       hasSubtitles: session.subtitleTracks.isNotEmpty,
@@ -1681,7 +1685,16 @@ class _ControlBar extends StatelessWidget {
           ),
         ),
       slot(danmakuButton),
-      if (media != null && media.qualities.length > 1)
+      if (media != null && session.isLive)
+        slot(
+          LiveStreamMenuButton(
+            session: session,
+            media: media,
+            onMenuChanged: onMenuChanged,
+          ),
+          layout.qualityWidth,
+        ),
+      if (media != null && !session.isLive && media.qualities.length > 1)
         slot(
           PopupMenuButton<int>(
             tooltip: '清晰度',
@@ -1923,16 +1936,43 @@ class _ControlBar extends StatelessWidget {
             child: Text(title),
           ),
       if (session.media case final media?) ...[
-        if (media.qualities.length > 1) const PopupMenuDivider(),
-        if (media.qualities.length > 1)
+        if (session.isLive || media.qualities.length > 1)
+          const PopupMenuDivider(),
+        if (session.isLive || media.qualities.length > 1)
           for (final quality in media.qualities)
             CheckedPopupMenuItem(
-              checked: quality == media.quality,
-              value: () => unawaited(session.changeQuality(quality)),
+              checked:
+                  quality == media.quality &&
+                  (!session.isLive || session.requestedQuality != 0),
+              value: () {
+                if (session.media == media) {
+                  unawaited(session.changeQuality(quality));
+                }
+              },
               child: Text(
                 '清晰度 ${media.qualityLabels[quality] ?? _quality(quality)}',
               ),
             ),
+        if (session.isLive) ...[
+          CheckedPopupMenuItem(
+            checked: session.requestedQuality == 0,
+            value: () {
+              if (session.media == media) unawaited(session.changeQuality(0));
+            },
+            child: const Text('清晰度 自动'),
+          ),
+          const PopupMenuDivider(),
+          for (var line = 0; line < media.video.urls.length; line++)
+            CheckedPopupMenuItem(
+              checked: line == session.liveLine,
+              value: () {
+                if (session.media == media) {
+                  unawaited(session.changeLiveLine(line));
+                }
+              },
+              child: Text('直播线路 ${liveLineLabel(line)}'),
+            ),
+        ],
       ],
       if (!session.isLive) const PopupMenuDivider(),
       for (final rate in session.isLive ? <double>[] : PlaybackRates.values)

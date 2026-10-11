@@ -283,7 +283,8 @@ final class LiveClient {
     ApiRequestContext? context,
   }) async {
     _validateId(roomId);
-    if (qn < 1 || qn > 30000) throw ArgumentError.value(qn, 'qn');
+    // qn=0 asks the live service to choose a quality automatically.
+    if (qn < 0 || qn > 30000) throw ArgumentError.value(qn, 'qn');
     const endpoint = 'live_playurl';
     final data = await api.requestJson(
       Uri.https(
@@ -293,7 +294,7 @@ final class LiveClient {
           'room_id': roomId,
           'qn': '$qn',
           'protocol': '0,1',
-          'format': '0,2',
+          'format': '0,1,2',
           'codec': '0,1',
           'platform': 'web',
         },
@@ -315,7 +316,11 @@ final class LiveClient {
       final entry = _map(value, endpoint);
       final quality = _int(entry['qn']);
       if (quality != null) {
-        labels[quality] = _text(entry['desc']) ?? '$quality';
+        final detail = _mapOrEmpty(
+          _mapOrEmpty(entry['media_base_desc'])['detail_desc'],
+        );
+        labels[quality] =
+            _text(detail['desc']) ?? _text(entry['desc']) ?? '$quality';
       }
     }
     final streams = <ApiLiveStream>[];
@@ -338,12 +343,16 @@ final class LiveClient {
           final quality = _int(codec['current_qn']);
           final base = _text(codec['base_url']);
           if (quality == null || base == null) continue;
+          final accepted = <int>{quality};
           available.add(quality);
           for (final allowed in _list(
             codec['accept_qn'] ?? const [],
             endpoint,
-          ).map(_int).whereType<int>()) {
-            available.add(allowed);
+          ).take(30).map(_int).whereType<int>()) {
+            if (allowed > 0 && allowed <= 30000) {
+              available.add(allowed);
+              accepted.add(allowed);
+            }
           }
           final urls = <Uri>[];
           for (final urlValue in _list(
@@ -365,6 +374,10 @@ final class LiveClient {
                 qualityLabel: labels[quality] ?? '$quality',
                 format: name,
                 codec: _text(codec['codec_name']) ?? '',
+                protocol: _text(protocol['protocol_name']) ?? '',
+                qualities: List.unmodifiable(
+                  accepted.toList()..sort((a, b) => b.compareTo(a)),
+                ),
               ),
             );
           }

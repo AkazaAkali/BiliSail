@@ -68,6 +68,8 @@ final class ApiLiveStream {
     required this.qualityLabel,
     required this.format,
     required this.codec,
+    this.protocol = '',
+    this.qualities = const [],
   });
 
   /// Signed, short-lived CDN URLs. Do not persist or log these values.
@@ -76,6 +78,10 @@ final class ApiLiveStream {
   final String qualityLabel;
   final String format;
   final String codec;
+  final String protocol;
+
+  /// Qualities accepted by this protocol/format/codec, not the room-wide union.
+  final List<int> qualities;
 }
 
 final class ApiLiveChatMessage {

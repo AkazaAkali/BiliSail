@@ -2020,6 +2020,105 @@ void main() {
 
   for (final compact in [false, true]) {
     for (final fullscreen in [false, true]) {
+      testWidgets(
+        'live quality, auto and line choices work compact=$compact fullscreen=$fullscreen',
+        (tester) async {
+          tester.view.devicePixelRatio = 1;
+          tester.view.physicalSize = Size(compact ? 390 : 1400, 900);
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final engine = _FakeEngine();
+          final session = _session(
+            engine,
+            contentRepository: _LiveMenuRepository(),
+          );
+          addTearDown(session.close);
+          await tester.pumpWidget(
+            _app(
+              session,
+              _FakeWindowService(),
+              AppSettings(playerControlsMode: PlayerControlsMode.dynamic),
+              width: compact ? 320 : 1200,
+              target: const LivePlaybackTarget('12'),
+            ),
+          );
+          await _pumpFrames(tester);
+          await session.pause();
+          await session.setVolume(32);
+          if (fullscreen) {
+            await tester.tap(find.byTooltip('全屏（F）'));
+            await _pumpFrames(tester);
+          }
+          Future<void> openMenu() async {
+            final mouse = await tester.createGesture(
+              kind: PointerDeviceKind.mouse,
+            );
+            await mouse.addPointer(location: _surfacePoint(tester));
+            await tester.pump();
+            await tester.tap(find.byTooltip(compact ? '更多播放选项' : '直播清晰度与线路'));
+            await tester.pump(const Duration(milliseconds: 300));
+            await mouse.moveTo(const Offset(-10, -10));
+            await tester.pump(const Duration(seconds: 3));
+            await mouse.removePointer();
+          }
+
+          await openMenu();
+          if (!compact) {
+            expect(find.text('主线'), findsOneWidget);
+            await tester.tap(
+              find.byKey(const ValueKey('live-stream-line-header')),
+            );
+            await tester.pump();
+            expect(find.text('备线2'), findsOneWidget);
+            await tester.tap(find.text('备线1'));
+          } else {
+            final line = find.widgetWithText(
+              CheckedPopupMenuItem<VoidCallback>,
+              '直播线路 备线1',
+            );
+            await tester.ensureVisible(line);
+            await tester.tap(line);
+          }
+          await tester.pumpAndSettle();
+          expect(session.liveLine, 1);
+          expect(engine.opens, 2);
+          expect(engine.currentSnapshot.desiredPlaying, isFalse);
+          expect(engine.currentSnapshot.volume, 32);
+          await openMenu();
+          final quality = compact
+              ? find.widgetWithText(
+                  CheckedPopupMenuItem<VoidCallback>,
+                  '清晰度 720P 超清',
+                )
+              : find.text('720P 超清');
+          await tester.ensureVisible(quality);
+          await tester.tap(quality);
+          await tester.pumpAndSettle();
+          expect(session.media?.quality, 250);
+          expect(session.liveLine, 1);
+          await openMenu();
+          final auto = compact
+              ? find.widgetWithText(
+                  CheckedPopupMenuItem<VoidCallback>,
+                  '清晰度 自动',
+                )
+              : find.text('自动');
+          await tester.ensureVisible(auto);
+          await tester.tap(auto);
+          await tester.pumpAndSettle();
+          expect(session.requestedQuality, 0);
+          expect(session.liveLine, 1);
+          expect(engine.opens, 4);
+          expect(engine.maxSurfaces, 1);
+          await tester.pumpWidget(const SizedBox());
+          await _pumpFrames(tester);
+        },
+      );
+    }
+  }
+
+  for (final compact in [false, true]) {
+    for (final fullscreen in [false, true]) {
       for (final menu in ['quality', 'rate', 'subtitle', 'voice']) {
         testWidgets(
           'dynamic $menu menu applies after idle compact=$compact fullscreen=$fullscreen',
@@ -4297,11 +4396,12 @@ void _resumeApp(WidgetTester tester) {
 PlaybackSession _session(
   PlayerEngine engine, {
   PlaybackRepository? repository,
+  ContentPlaybackRepository? contentRepository,
   Duration Function()? danmakuNow,
 }) => PlaybackSession(
   engine: engine,
   repository: repository ?? _FakePlaybackRepository(),
-  contentRepository: _FakeContentPlaybackRepository(),
+  contentRepository: contentRepository ?? _FakeContentPlaybackRepository(),
   progress: _FakeProgressStore(),
   accountScope: () => 'guest',
   danmakuNow: danmakuNow,
@@ -4652,6 +4752,32 @@ final class _FakeContentPlaybackRepository
     quality: quality,
     preferredCodec: preferredCodec,
     cancellation: cancellation,
+  );
+}
+
+final class _LiveMenuRepository implements ContentPlaybackRepository {
+  @override
+  Future<PlaybackMedia> resolve(
+    ContentPlaybackTarget target, {
+    required int quality,
+    VideoCodecPreference preferredCodec = VideoCodecPreference.h264,
+    required RequestCancellation cancellation,
+  }) async => PlaybackMedia(
+    video: PlaybackTrack(
+      urls: List.generate(
+        3,
+        (line) => Uri.https('live.example', '/$line.m3u8'),
+      ),
+      codec: 'avc',
+      bandwidth: 0,
+    ),
+    audio: null,
+    quality: quality == 0 ? 400 : quality,
+    qualities: const [10000, 400, 250],
+    qualityLabels: const {10000: '1080P 原画', 400: '1080P 蓝光', 250: '720P 超清'},
+    duration: Duration.zero,
+    headers: const {},
+    kind: PlaybackMediaKind.liveHls,
   );
 }
 

@@ -33,6 +33,7 @@
 | [首页子频道协议](validation/home-subtabs.md) | 各首页列表的端点、游标与前序接入记录 |
 | [排行榜分区参数](validation/ranking-regions.md) | 官网配置动态目录、新分区 ID、刷新撤下处理与风控验证边界 |
 | [影视与直播内置播放](validation/content-playback.md) | 四频道内置入口、三类播放页、影视选集、直播线路与原生验证 |
+| [直播清晰度与线路选择](validation/live-playback-options.md) | 官网与参考协议、两层菜单、自动档、主备线路和换源隔离 |
 | [影视侧栏与直播 SC](validation/pgc-live-sidebar.md) | 官方桌面式影视简介/选集/系列、直播聊天与 SC 气泡、读取边界 |
 | [影视性能分析与选集滚动](validation/pgc-page-performance-scroll.md) | 系列全量构建与简介重建热点、Windows Profile 证据、选集／分 P 边界触摸衔接 |
 | [直播 SC 时长与倒计时](validation/live-sc-lifetime.md) | HTTP／实时秒数语义、到期移除、气泡和卡片倒计时、生命周期及验证 |

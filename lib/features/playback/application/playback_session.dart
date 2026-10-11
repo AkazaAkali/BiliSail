@@ -138,6 +138,11 @@ class PlaybackSession extends ChangeNotifier {
   double _openingRate = 1;
   double _openingVolume = 100;
   int _quality = 80;
+  int _liveLine = 0;
+  int get requestedQuality => _quality;
+
+  /// Index in the selected live stream's server-ordered url_info list.
+  int get liveLine => _liveLine;
   String? _subtitlePreference;
   PlaybackVoice _voice = const PlaybackVoice.original();
   List<PlaybackVoice> _voices = const [];
@@ -296,6 +301,7 @@ class PlaybackSession extends ChangeNotifier {
           _temporaryRateOriginal ?? (preparing ? _openingRate : snapshot.rate),
       volume: preparing ? _openingVolume : snapshot.volume,
       quality: _quality,
+      liveLine: _liveLine,
       desiredPlaying: _desiredPlaying,
       subtitleLabel: _subtitlePreference,
       voice: _voice,
@@ -363,6 +369,7 @@ class PlaybackSession extends ChangeNotifier {
           restored?.quality ??
           (sameOwner && sameKind ? _quality : null) ??
           (target is LivePlaybackTarget ? 10000 : _settings.preferredQuality),
+      liveLine: restored?.liveLine,
       position: nextPlaying != null ? nextIntent?.position : restored?.position,
       desiredPlaying:
           nextPlaying ??
@@ -471,6 +478,7 @@ class PlaybackSession extends ChangeNotifier {
     ContentPlaybackTarget? target,
     String? title,
     PlaybackVoice? voice,
+    int? liveLine,
   }) async {
     if (_disposed || _closing) return;
     if (target == null && (video == null || selected == null)) return;
@@ -521,6 +529,9 @@ class PlaybackSession extends ChangeNotifier {
         detail?.summary.id == video?.summary.id &&
         part?.cid == selected?.cid &&
         contentTarget == target;
+    final requestedLiveLine = target is LivePlaybackTarget
+        ? liveLine ?? (samePart ? _liveLine : 0)
+        : 0;
     _voice = target == null
         ? voice ?? (samePart ? _voice : const PlaybackVoice.original())
         : const PlaybackVoice.original();
@@ -548,6 +559,7 @@ class PlaybackSession extends ChangeNotifier {
     _openingRate = oldRate;
     _openingVolume = oldVolume;
     _quality = quality;
+    _liveLine = requestedLiveLine;
     detail = video;
     part = selected;
     contentTarget = target;
@@ -691,8 +703,19 @@ class PlaybackSession extends ChangeNotifier {
       if (resolved.kind == PlaybackMediaKind.dash && audio == null) {
         throw const AppFailure(AppFailureKind.playback, '未取得点播音频轨道');
       }
+      // Live lines follow url_info order, independently of VOD CDN preferences.
+      final liveLineIndex =
+          isLive &&
+              requestedLiveLine >= 0 &&
+              requestedLiveLine < resolved.video.urls.length
+          ? requestedLiveLine
+          : 0;
+      final videoPrimary = resolved.video.urls[isLive ? liveLineIndex : 0];
       final videoBackup = isLive
-          ? resolved.video.urls.skip(1).firstOrNull
+          ? resolved.video.urls.length > 1
+                ? resolved.video.urls[(liveLineIndex + 1) %
+                      resolved.video.urls.length]
+                : null
           : backupMediaCdnUrl(resolved.video.urls, mediaCdn);
       final audioBackup = audio == null
           ? null
@@ -700,6 +723,7 @@ class PlaybackSession extends ChangeNotifier {
       final hasBackup = videoBackup != null || audioBackup != null;
       final openingWatch = Stopwatch()..start();
       const totalOpenBudget = Duration(seconds: 35);
+      var openedLiveLine = liveLineIndex;
       // At most two opens in one resolution, using only server-provided backups.
       for (var attempt = 0; attempt < 2; attempt++) {
         if (!isCurrent()) return;
@@ -717,8 +741,8 @@ class PlaybackSession extends ChangeNotifier {
             ? const Duration(seconds: 6)
             : remaining;
         final videoUri = attempt == 0
-            ? resolved.video.urls.first
-            : videoBackup ?? resolved.video.urls.first;
+            ? videoPrimary
+            : videoBackup ?? videoPrimary;
         final audioUri = audio == null
             ? null
             : attempt == 0
@@ -766,6 +790,7 @@ class PlaybackSession extends ChangeNotifier {
             ),
           );
           lastFailure = null;
+          if (isLive) openedLiveLine = resolved.video.urls.indexOf(videoUri);
           break;
         } on PlayerFailure catch (failure) {
           lastFailure = failure;
@@ -777,6 +802,15 @@ class PlaybackSession extends ChangeNotifier {
       if (lastFailure != null) throw lastFailure;
       if (!isCurrent()) return;
       media = resolved;
+      if (isLive) {
+        _liveLine = openedLiveLine;
+        if (samePart && quality != 0 && resolved.quality != quality) {
+          auxiliaryMessage =
+              '该清晰度当前不可用，已切换到${resolved.qualityLabels[resolved.quality] ?? resolved.quality}';
+        } else if (requestedLiveLine != openedLiveLine) {
+          auxiliaryMessage = '所选直播线路不可用，已切换到${liveLineLabel(openedLiveLine)}';
+        }
+      }
       if (target == null) {
         _voice = resolved.voice;
         _voices = resolved.voices;
@@ -1939,6 +1973,28 @@ class PlaybackSession extends ChangeNotifier {
     );
   }
 
+  Future<void> changeLiveLine(int line) async {
+    final current = media;
+    if (!isLive ||
+        current == null ||
+        line < 0 ||
+        line >= current.video.urls.length ||
+        (line == _liveLine && error == null)) {
+      return;
+    }
+    await open(
+      null,
+      null,
+      quality: _quality,
+      liveLine: line,
+      force: true,
+      desiredPlaying: _desiredPlaying,
+      volume: snapshots.value.volume,
+      target: contentTarget,
+      title: contentTitle,
+    );
+  }
+
   Future<void> changeVoice(PlaybackVoice voice) async {
     final video = detail;
     final selected = part;
@@ -2085,6 +2141,7 @@ final class _PlaybackCheckpoint {
     required this.rate,
     required this.volume,
     required this.quality,
+    this.liveLine = 0,
     required this.desiredPlaying,
     this.subtitleLabel,
     this.target,
@@ -2098,6 +2155,7 @@ final class _PlaybackCheckpoint {
   final double rate;
   final double volume;
   final int quality;
+  final int liveLine;
   final bool desiredPlaying;
   final String? subtitleLabel;
   final PlaybackVoice voice;

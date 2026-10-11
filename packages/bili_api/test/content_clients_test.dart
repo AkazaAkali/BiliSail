@@ -274,7 +274,13 @@ void main() {
             'playurl': {
               'g_qn_desc': [
                 {'qn': 250, 'desc': '超清'},
-                {'qn': 400, 'desc': '蓝光'},
+                {
+                  'qn': 400,
+                  'desc': '蓝光',
+                  'media_base_desc': {
+                    'detail_desc': {'desc': '1080P 蓝光'},
+                  },
+                },
               ],
               'stream': [
                 {
@@ -311,14 +317,17 @@ void main() {
     );
     final play = await LiveClient(
       BiliApiClient(transport: transport),
-    ).getPlayInfo('6');
+    ).getPlayInfo('6', qn: 0);
     expect(play.roomId, '7734200');
+    expect(transport.requests.single.queryParameters['qn'], '0');
+    expect(play.streams.single.protocol, 'http_stream');
+    expect(play.streams.single.qualities, [400, 250]);
     expect(play.streams.single.format, 'flv');
     expect(play.streams.single.codec, 'avc');
     expect(play.streams.single.qualityLabel, '超清');
     expect(play.streams.single.urls.length, 2);
     expect(play.qualities, [400, 250]);
-    expect(play.qualityLabels[400], '蓝光');
+    expect(play.qualityLabels[400], '1080P 蓝光');
     expect(play.streams.single.urls.last.queryParameters['sign'], 'two');
   });
 

@@ -21,6 +21,8 @@ final class PlaybackTrack {
 
 enum PlaybackMediaKind { dash, liveHls, liveFlv }
 
+String liveLineLabel(int line) => line == 0 ? '主线' : '备线$line';
+
 final class PlaybackMedia {
   const PlaybackMedia({
     required this.video,

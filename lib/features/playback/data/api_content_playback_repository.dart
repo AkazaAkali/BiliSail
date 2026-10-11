@@ -70,9 +70,9 @@ final class ApiContentPlaybackRepository implements ContentPlaybackRepository {
                 )
                 .toList()
               ..sort(
-                (a, b) => (a.format == 'flv' ? 1 : 0).compareTo(
-                  b.format == 'flv' ? 1 : 0,
-                ),
+                (a, b) =>
+                    _liveFormatPriority(a.format)
+                        .compareTo(_liveFormatPriority(b.format)),
               );
         if (streams.isEmpty) {
           throw const AppFailure(AppFailureKind.playback, '未取得可用的 H.264 直播线路');
@@ -86,7 +86,7 @@ final class ApiContentPlaybackRepository implements ContentPlaybackRepository {
           ),
           audio: null,
           quality: stream.quality,
-          qualities: info.qualities,
+          qualities: stream.qualities,
           qualityLabels: info.qualityLabels,
           duration: Duration.zero,
           headers: {..._headers, 'Referer': 'https://live.bilibili.com/'},
@@ -96,4 +96,11 @@ final class ApiContentPlaybackRepository implements ContentPlaybackRepository {
         );
     }
   }, cancellation: cancellation);
+
+  // Keep the established fMP4 HLS default when also requesting TS candidates.
+  static int _liveFormatPriority(String format) => switch (format) {
+    'fmp4' => 0,
+    'ts' => 1,
+    _ => 2,
+  };
 }

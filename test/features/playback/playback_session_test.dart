@@ -27,6 +27,139 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test(
+    'live line and quality switches preserve pause, volume and server order',
+    () async {
+      final engine = _FakeEngine();
+      final content = _FakeContentRepository()..liveLineCount = 3;
+      final progress = _FakeProgress();
+      final session = PlaybackSession(
+        engine: engine,
+        repository: _FakeRepository(),
+        contentRepository: content,
+        progress: progress,
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      session.configureSettings(
+        AppSettings(mediaCdn: MediaCdnPreference.tencent),
+      );
+      await session.open(
+        null,
+        null,
+        quality: 10000,
+        target: const LivePlaybackTarget('8'),
+      );
+      await session.pause();
+      await session.setVolume(37);
+      engine.emit(
+        engine.currentSnapshot.copyWith(position: const Duration(seconds: 45)),
+      );
+      await session.changeLiveLine(2);
+      expect(session.liveLine, 2);
+      expect(engine.openedUris.last.path, '/live-2.m3u8');
+      expect(engine.openOptions.last.startPosition, Duration.zero);
+      expect(engine.currentSnapshot.phase, PlaybackPhase.paused);
+      expect(engine.currentSnapshot.volume, 37);
+      expect(engine.currentSnapshot.rate, 1);
+      await session.changeQuality(400);
+      expect(content.qualities.last, 400);
+      expect(session.media?.quality, 400);
+      expect(session.liveLine, 2);
+      await session.changeQuality(0);
+      expect(content.qualities.last, 0);
+      expect(session.requestedQuality, 0);
+      expect(session.media?.quality, 400);
+      expect(session.liveLine, 2);
+      final opens = engine.openOptions.length;
+      await session.changeLiveLine(-1);
+      await session.changeLiveLine(3);
+      await session.changeLiveLine(2);
+      expect(engine.openOptions.length, opens);
+      content.liveLineCount = 1;
+      await session.retry();
+      expect(session.liveLine, 0);
+      expect(session.auxiliaryMessage, contains('主线'));
+      expect(engine.currentSnapshot.phase, PlaybackPhase.paused);
+      await session.open(null, null, target: const LivePlaybackTarget('9'));
+      expect(session.liveLine, 0);
+      expect(progress.writes, isEmpty);
+      expect(engine.seekTargets, isEmpty);
+      expect(engine.maxSimultaneousPlayers, 1);
+    },
+  );
+
+  test(
+    'live failed line falls back in server order and reports actual selection',
+    () async {
+      final engine = _FakeEngine();
+      final content = _FakeContentRepository()..liveLineCount = 3;
+      final session = PlaybackSession(
+        engine: engine,
+        repository: _FakeRepository(),
+        contentRepository: content,
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      await session.open(
+        null,
+        null,
+        quality: 400,
+        target: const LivePlaybackTarget('8'),
+      );
+      engine.nextOpenFailure = PlayerFailureKind.nativePlayback;
+      await session.changeLiveLine(1);
+      expect(engine.openedUris.map((uri) => uri.path), [
+        '/live-0.m3u8',
+        '/live-1.m3u8',
+        '/live-2.m3u8',
+      ]);
+      expect(session.liveLine, 2);
+      expect(session.auxiliaryMessage, contains('备线2'));
+      expect(session.error, isNull);
+    },
+  );
+
+  for (final invalidation in ['new-room', 'account', 'close']) {
+    test('pending live switch cannot outlive $invalidation', () async {
+      final engine = _FakeEngine();
+      final content = _FakeContentRepository()..liveLineCount = 2;
+      var epoch = 0;
+      final session = PlaybackSession(
+        engine: engine,
+        repository: _FakeRepository(),
+        contentRepository: content,
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+        sessionEpoch: () => epoch,
+      );
+      addTearDown(session.close);
+      await session.open(null, null, target: const LivePlaybackTarget('8'));
+      final gate = Completer<PlaybackMedia>();
+      content.pending = gate;
+      final switching = session.changeLiveLine(1);
+      await _flush();
+      final cancellation = content.cancellations.last;
+      if (invalidation == 'new-room') {
+        await session.open(null, null, target: const LivePlaybackTarget('9'));
+      } else if (invalidation == 'account') {
+        epoch++;
+      } else {
+        await session.close();
+      }
+      final opens = engine.openOptions.length;
+      gate.complete(_media('stale', 400, Duration.zero));
+      await switching;
+      expect(engine.openOptions.length, opens);
+      if (invalidation != 'account') expect(cancellation.isCancelled, isTrue);
+      if (invalidation == 'new-room') {
+        expect(session.contentTarget, const LivePlaybackTarget('9'));
+        expect(session.liveLine, 0);
+      }
+    });
+  }
+
   const loudness = AudioLoudness(
     measuredI: -16.7,
     normalTargetI: -14,
@@ -4764,6 +4897,7 @@ final class _FakeContentRepository implements ContentPlaybackRepository {
   _FakeContentRepository({this.duration = const Duration(minutes: 2)});
   final Duration duration;
   AudioLoudness? loudness;
+  int liveLineCount = 1;
   final targets = <ContentPlaybackTarget>[];
   final qualities = <int>[];
   final codecs = <VideoCodecPreference>[];
@@ -4794,12 +4928,15 @@ final class _FakeContentRepository implements ContentPlaybackRepository {
     return Future.value(
       PlaybackMedia(
         video: PlaybackTrack(
-          urls: [Uri.parse('https://example.test/live.m3u8')],
+          urls: List.generate(
+            liveLineCount,
+            (line) => Uri.parse('https://example.test/live-$line.m3u8'),
+          ),
           codec: 'avc',
           bandwidth: 0,
         ),
         audio: null,
-        quality: quality,
+        quality: quality == 0 ? 400 : quality,
         qualities: const [400, 10000],
         duration: Duration.zero,
         headers: const {},
