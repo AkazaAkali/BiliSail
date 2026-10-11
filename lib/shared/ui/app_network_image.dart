@@ -72,6 +72,7 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
   AppImageCache? _waitingCache;
   bool _active = true;
   bool _visible = false;
+  ImageLoadPriority _priority = ImageLoadPriority.prefetch;
   bool _visibilityChecked = false;
   bool _checkScheduled = false;
   bool _retryScheduled = false;
@@ -95,6 +96,7 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
     if (!_active) {
       _visible = false;
       _stopWaiting();
+      _source?.releaseDemand();
     }
     _scheduleVisibilityCheck();
   }
@@ -151,10 +153,12 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
     _scheduleVisibilityCheck();
   }
 
-  ({bool visible, bool visibleInPage}) _readVisibility() {
+  ({bool visible, bool visibleInPage, ImageLoadPriority priority})
+  _readVisibility() {
     final box = context.findRenderObject();
     var visible = _active && box is RenderBox && box.hasSize;
     var visibleInPage = visible;
+    var inViewport = visible;
     if (visible) {
       // Check every ancestor viewport, including nested lists, with the same
       // 160 logical-pixel prefetch range used for new requests.
@@ -172,6 +176,7 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
           );
           final viewport = ancestor.paintBounds.inflate(160);
           if (!bounds.overlaps(viewport)) visible = false;
+          if (!bounds.overlaps(ancestor.paintBounds)) inViewport = false;
           // Keep a ready frame during page swipes, but release it for inner
           // scrolling or outer vertical clipping.
           if (insidePage
@@ -184,7 +189,13 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
         ancestor = ancestor.parent;
       }
     }
-    return (visible: visible, visibleInPage: visibleInPage);
+    return (
+      visible: visible,
+      visibleInPage: visibleInPage,
+      priority: inViewport
+          ? ImageLoadPriority.visible
+          : ImageLoadPriority.prefetch,
+    );
   }
 
   void _scheduleVisibilityCheck() {
@@ -193,7 +204,15 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkScheduled = false;
       if (!mounted) return;
-      final (:visible, :visibleInPage) = _readVisibility();
+      final (:visible, :visibleInPage, :priority) = _readVisibility();
+      _priority = priority;
+      _source?.setPriority(priority);
+      if (!visible) {
+        _source?.releaseDemand();
+        if (!_hasFrame && _source?.hasCachedFrame != true) {
+          _releaseSource();
+        }
+      }
       _visibilityChecked = true;
       // A cached animation can report an error before frameBuilder runs.
       // Release its admitted stream too, even when only the error is painted.
@@ -317,7 +336,7 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
         provider.hasDecodedFrame;
     final showImage = (_visible && _active) || _hasFrame || cachedFirstFrame;
     final retained = showImage
-        ? (_source ??= _RetainedImageProvider(provider))
+        ? (_source ??= _RetainedImageProvider(provider, _priority))
         : null;
     if (!showImage) _releaseSource();
     return _ImageViewportProbe(
@@ -346,6 +365,7 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
       excludeFromSemantics: widget.excludeFromSemantics,
       semanticLabel: widget.semanticLabel,
       errorBuilder: (context, error, stack) {
+        if (error is ImageLoadCancelled) return _placeholder(context);
         if (error is ImageQueueFull && cache != null) {
           _waitForCapacity(cache);
           return _placeholder(context);
@@ -357,6 +377,7 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
       loadingBuilder: widget.loadingBuilder,
       frameBuilder: (context, child, frame, synchronous) {
         _hasFrame = frame != null;
+        if (_hasFrame) retained.releaseDemand();
         return widget.frameBuilder?.call(context, child, frame, synchronous) ??
             child;
       },
@@ -382,8 +403,11 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
 /// stream even with caching disabled, so hiding a ready frame cannot initiate
 /// another transfer. The lease ends with the image's viewport/source lifetime.
 final class _RetainedImageProvider extends ImageProvider<Object> {
-  _RetainedImageProvider(this.provider) {
+  _RetainedImageProvider(this.provider, ImageLoadPriority priority) {
     final source = provider;
+    if (source is AppImageProvider) {
+      _consumer = source.acquireConsumer(priority);
+    }
     if (source is AppImageProvider && source.hasDecodedFrame) {
       final stream = source.createStream(ImageConfiguration.empty);
       final completer = stream.completer;
@@ -396,6 +420,8 @@ final class _RetainedImageProvider extends ImageProvider<Object> {
 
   final ImageProvider<Object> provider;
   final _lease = _ImageStreamLease();
+  AppImageConsumer? _consumer;
+  bool _released = false;
   bool _hasCachedFrame = false;
   bool get hasCachedFrame => _hasCachedFrame;
 
@@ -410,6 +436,7 @@ final class _RetainedImageProvider extends ImageProvider<Object> {
 
   @override
   ImageStream createStream(ImageConfiguration configuration) {
+    if (_released) return ImageStream();
     final retained = _lease.completer;
     final stream = retained == null
         ? provider.createStream(configuration)
@@ -426,6 +453,7 @@ final class _RetainedImageProvider extends ImageProvider<Object> {
     Object key,
     ImageErrorListener handleError,
   ) {
+    if (_released) return;
     if (stream.completer != null) return;
     final completer = _lease.completer;
     if (completer != null) {
@@ -438,13 +466,30 @@ final class _RetainedImageProvider extends ImageProvider<Object> {
   }
 
   void _retain(ImageStreamCompleter completer) {
+    if (_released) return;
     if (identical(completer, _lease.completer)) return;
-    release();
+    _releaseStream();
     _lease.completer = completer;
     _lease.handle = completer.keepAlive();
   }
 
   void release() {
+    // ScrollAwareImageProvider may still have a deferred resolution callback
+    // until the old Image is unmounted on the next frame.
+    _released = true;
+    releaseDemand();
+    _releaseStream();
+  }
+
+  void setPriority(ImageLoadPriority priority) =>
+      _consumer?.setPriority(priority);
+
+  void releaseDemand() {
+    _consumer?.release();
+    _consumer = null;
+  }
+
+  void _releaseStream() {
     _lease.handle?.dispose();
     _lease.handle = null;
     _lease.completer = null;

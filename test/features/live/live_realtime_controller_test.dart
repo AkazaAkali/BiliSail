@@ -54,6 +54,132 @@ void main() {
   });
   LiveState state() => container.read(liveControllerProvider(requested));
 
+  test(
+    'ignored and unchanged events publish nothing and retain both windows',
+    () {
+      repository.events.add([
+        LiveChatReceived(chat('one')),
+        LiveSuperChatReceived(sc('one')),
+        const LiveViewerCountChanged('42'),
+        const LiveWatchedCountChanged('84'),
+        const LiveConnectionChanged(LiveConnectionPhase.connected),
+      ]);
+      final before = state();
+      var notifications = 0;
+      final subscription = container.listen(
+        liveControllerProvider(requested),
+        (_, _) => notifications++,
+      );
+      for (var index = 0; index < 20; index++) {
+        repository.events.add(const [
+          LivePopularityChanged(1),
+          LiveViewerCountChanged('42'),
+          LiveWatchedCountChanged('84'),
+          LiveConnectionChanged(LiveConnectionPhase.connected),
+          LiveRoomStatusChanged(true),
+        ]);
+      }
+      repository.events.add([LiveChatReceived(chat('one'))]);
+      repository.events.add([LiveSuperChatReceived(sc('one'))]);
+      repository.events.add([
+        LiveSuperChatDeleted(['missing']),
+      ]);
+      expect(notifications, 0);
+      expect(state(), same(before));
+      expect(state().messages, same(before.messages));
+      expect(state().superChats, same(before.superChats));
+      subscription.close();
+    },
+  );
+
+  test('each realtime field replaces only its own immutable window', () {
+    final initial = state();
+    repository.events.add(const [LiveViewerCountChanged('42')]);
+    expect(state().messages, same(initial.messages));
+    expect(state().superChats, same(initial.superChats));
+    repository.events.add([LiveChatReceived(chat('one'))]);
+    final withChat = state();
+    expect(withChat.superChats, same(initial.superChats));
+    expect(() => withChat.messages.clear(), throwsUnsupportedError);
+    repository.events.add([LiveSuperChatReceived(sc('one'))]);
+    expect(state().messages, same(withChat.messages));
+    expect(() => state().superChats.clear(), throwsUnsupportedError);
+    final withSc = state();
+    repository.events.add(const [
+      LiveConnectionChanged(LiveConnectionPhase.failed),
+    ]);
+    expect(state().messages, same(withChat.messages));
+    expect(state().superChats, same(withSc.superChats));
+  });
+
+  test('SC batching preserves delete order and the newest 100 entries', () {
+    repository.events.add([
+      for (var index = 0; index < 120; index++)
+        LiveSuperChatReceived(sc('$index')),
+    ]);
+    expect(state().superChats, hasLength(100));
+    expect(state().superChats.first.id, '20');
+    repository.events.add([
+      LiveSuperChatReceived(sc('insert-delete')),
+      LiveSuperChatDeleted(['insert-delete', 'delete-insert']),
+      LiveSuperChatReceived(sc('delete-insert')),
+    ]);
+    expect(
+      state().superChats.any((message) => message.id.contains('-')),
+      false,
+    );
+    expect(state().superChats, hasLength(100));
+    final previous = state();
+    repository.events.add(const [LiveRoomStatusChanged(false)]);
+    expect(state().room?.isLive, false);
+    expect(state().connectionPhase, LiveConnectionPhase.offline);
+    expect(repository.cancellation?.isCancelled, true);
+    expect(state().messages, same(previous.messages));
+    expect(state().superChats, same(previous.superChats));
+  });
+
+  testWidgets('unchanged expiry keeps its timer and earlier SC reschedules it', (
+    tester,
+  ) async {
+    controller.setActive(false);
+    controller.setActive(true);
+    await tester.pump();
+    LiveSuperChatMessage timed(String id, int seconds) => LiveSuperChatMessage(
+      id: id,
+      userName: '观众',
+      text: 'SC',
+      price: 30,
+      expiresAt: now.add(Duration(seconds: seconds)),
+    );
+    var timers = 0;
+    runZoned(
+      () {
+        // Register the stream listener here so timer creation stays observable.
+        controller.retryRealtime();
+        repository.events.add([LiveSuperChatReceived(timed('first', 5))]);
+        repository.events.add([LiveSuperChatReceived(timed('later', 8))]);
+        repository.events.add(const [LiveViewerCountChanged('42')]);
+        repository.events.add([LiveChatReceived(chat('one'))]);
+        expect(timers, 1);
+        repository.events.add([LiveSuperChatReceived(timed('earlier', 2))]);
+        expect(timers, 2);
+      },
+      zoneSpecification: ZoneSpecification(
+        createTimer: (self, parent, zone, duration, callback) {
+          timers++;
+          return parent.createTimer(zone, duration, callback);
+        },
+      ),
+    );
+    now = now.add(const Duration(seconds: 2));
+    await tester.pump(const Duration(seconds: 2));
+    expect(state().superChats.map((message) => message.id), ['first', 'later']);
+    now = now.add(const Duration(seconds: 3));
+    await tester.pump(const Duration(seconds: 3));
+    expect(state().superChats.single.id, 'later');
+    controller.setActive(false);
+  });
+
   testWidgets('socket duration expires without waiting for HTTP polling', (
     tester,
   ) async {

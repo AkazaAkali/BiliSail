@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:bili_danmaku/bili_danmaku.dart';
 import 'package:bili_player/bili_player.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -13,6 +14,7 @@ import '../../../domain/request_cancellation.dart';
 import '../../../domain/video.dart';
 import '../domain/playback_repository.dart';
 import '../domain/content_playback.dart';
+import '../domain/comment_window.dart';
 import '../domain/sponsor_repository.dart';
 import '../domain/playback_history_repository.dart';
 import 'playback_history_reporter.dart';
@@ -134,7 +136,9 @@ class PlaybackSession extends ChangeNotifier {
     const PlaybackSnapshot(phase: PlaybackPhase.idle, generation: 0),
   );
   late final DanmakuController danmaku;
-  final _segments = <int, List<TimedComment>>{};
+  final _segments = <int, CommentSegment>{};
+  bool _commentsConfigured = false;
+  Object? _commentRefreshRequest;
   final _segmentRequests = <int, RequestCancellation>{};
   final _failedSegments = <int>{};
   final _prefetchFailedSegments = <int>{};
@@ -161,7 +165,7 @@ class PlaybackSession extends ChangeNotifier {
   bool _playbackAllowed = true;
   Future<void>? _playbackCommands;
   Duration _lastSaved = const Duration(seconds: -10);
-  int _lastCommentWindow = -1;
+  int? _lastCommentWindow;
   String _scope = 'guest';
   VideoDetail? detail;
   VideoPart? part;
@@ -284,6 +288,7 @@ class PlaybackSession extends ChangeNotifier {
     VideoPart? selected, {
     ContentPlaybackTarget? target,
     String? title,
+    bool visible = true,
   }) async {
     if (_disposed || !_owners.contains(owner)) return;
     if (identical(_activeOwner, owner) &&
@@ -292,7 +297,10 @@ class PlaybackSession extends ChangeNotifier {
         contentTarget == target &&
         _scope == accountScope() &&
         (media != null || _resolving)) {
-      _ownerVisible = true;
+      final wasVisible = _ownerVisible;
+      _ownerVisible = visible;
+      if (!wasVisible && visible) _resumeCommentPresentation();
+      if (wasVisible && !visible) _suspendCommentPresentation();
       return;
     }
     final sameOwner = identical(_activeOwner, owner);
@@ -308,7 +316,10 @@ class PlaybackSession extends ChangeNotifier {
         ? saved
         : null;
     _activeOwner = owner;
-    _ownerVisible = true;
+    // Retained pages can advance to another part/episode while hidden. Updating
+    // their source must not imply that a surface is being presented again.
+    _ownerVisible = visible;
+    if (!visible) _suspendCommentPresentation();
     _subtitlePreference = restored?.subtitleLabel;
     final nextIntent = _nextSourceIntent;
     final validIntent =
@@ -354,6 +365,7 @@ class PlaybackSession extends ChangeNotifier {
     // active source running while browsing an ordinary workspace tab.
     _captureOwner();
     _ownerVisible = false;
+    _suspendCommentPresentation();
     final generation = _generation;
     await endTemporaryRate();
     if (!identical(_activeOwner, owner) ||
@@ -387,6 +399,45 @@ class PlaybackSession extends ChangeNotifier {
 
   void _notify() {
     if (!_disposed) notifyListeners();
+  }
+
+  void _suspendCommentPresentation() {
+    for (final token in _segmentRequests.values) {
+      token.cancel();
+    }
+    _segmentRequests.clear();
+    _commentRefreshRequest = null;
+    _lastCommentWindow = null;
+    final snapshot = snapshots.value;
+    danmaku.sync(
+      confirmedPosition: snapshot.position,
+      playing: false,
+      buffering: snapshot.isBuffering,
+      seeking: snapshot.isSeeking,
+      rate: snapshot.rate,
+    );
+    danmaku.releaseRasterCache();
+  }
+
+  void _resumeCommentPresentation() {
+    if (!_ownerVisible || !commentsEnabled) return;
+    final snapshot = snapshots.value;
+    // Hidden time is not a paused animation. Rebuild only the current media
+    // window so comments seen before hiding cannot resume with a stale age.
+    danmaku.seekConfirmed(snapshot.position);
+    _syncDanmaku(snapshot);
+    _lastCommentWindow = null;
+    _ensureComments(snapshot.position);
+  }
+
+  void _syncDanmaku(PlaybackSnapshot snapshot) {
+    danmaku.sync(
+      confirmedPosition: snapshot.position,
+      playing: snapshot.phase == PlaybackPhase.playing,
+      buffering: snapshot.isBuffering,
+      seeking: snapshot.isSeeking,
+      rate: snapshot.rate,
+    );
   }
 
   Future<void> open(
@@ -433,9 +484,10 @@ class PlaybackSession extends ChangeNotifier {
     }
     _segmentRequests.clear();
     _segments.clear();
+    _commentRefreshRequest = null;
     _failedSegments.clear();
     _prefetchFailedSegments.clear();
-    _lastCommentWindow = -1;
+    _lastCommentWindow = null;
     final savedProgress = _saveProgress();
     _cancelCloudResume();
     final resumeRevision = _resumeRevision;
@@ -690,7 +742,8 @@ class PlaybackSession extends ChangeNotifier {
     if (_disposed || value.generation != engine.currentSnapshot.generation) {
       return;
     }
-    final previousPhase = snapshots.value.phase;
+    final previous = snapshots.value;
+    final previousPhase = previous.phase;
     final enteredEnded =
         value.phase == PlaybackPhase.ended &&
         snapshots.value.phase != PlaybackPhase.ended;
@@ -698,13 +751,16 @@ class PlaybackSession extends ChangeNotifier {
     if (enteredEnded && !_resolving) {
       _desiredPlaying = false;
     }
-    danmaku.sync(
-      confirmedPosition: value.position,
-      playing: value.phase == PlaybackPhase.playing,
-      buffering: value.isBuffering,
-      seeking: value.isSeeking,
-      rate: value.rate,
-    );
+    if (_ownerVisible &&
+        commentsEnabled &&
+        (previous.position != value.position ||
+            previous.phase != value.phase ||
+            previous.isBuffering != value.isBuffering ||
+            previous.isSeeking != value.isSeeking ||
+            previous.rate != value.rate ||
+            previous.generation != value.generation)) {
+      _syncDanmaku(value);
+    }
     if (!_resolving && media != null) {
       if (value.phase == PlaybackPhase.playing ||
           enteredEnded ||
@@ -916,7 +972,7 @@ class PlaybackSession extends ChangeNotifier {
       await engine.seek(remote);
       if (!current()) return;
       danmaku.seekConfirmed(engine.currentSnapshot.position);
-      _lastCommentWindow = -1;
+      _lastCommentWindow = null;
       _ensureComments(engine.currentSnapshot.position);
     } on AppFailure catch (failure) {
       if (current() && failure.kind != AppFailureKind.cancelled) {
@@ -974,31 +1030,52 @@ class PlaybackSession extends ChangeNotifier {
     final previous = _settings;
     _settings = settings.normalized();
     if (!_settings.resumePlayback) _cancelCloudResume();
-    danmaku.configure(
-      area: _settings.danmakuArea,
-      speed: _settings.danmakuSpeed,
-      topInset: _settings.danmakuTopMargin,
-      lineSpacing: _settings.danmakuLineSpacing,
-      offset: _settings.danmakuOffset,
-      mergeDuplicates: _settings.danmakuMergeDuplicates,
-      maxOnScreen: _settings.danmakuMaxOnScreen,
-      textStyle: DanmakuTextStyle(
-        fontFamily: _settings.danmakuFontFamily,
-        bold: _settings.danmakuBold,
-        effect: switch (_settings.danmakuStyle) {
-          DanmakuStylePreference.shadow => DanmakuTextEffect.shadow,
-          DanmakuStylePreference.stroke => DanmakuTextEffect.stroke,
-          DanmakuStylePreference.plain => DanmakuTextEffect.plain,
-        },
-      ),
-    );
+    final presentationChanged =
+        !_commentsConfigured ||
+        _commentPresentationSettings(previous) !=
+            _commentPresentationSettings(_settings);
+    final windowChanged =
+        !_commentsConfigured ||
+        previous.danmakuOffset != _settings.danmakuOffset ||
+        previous.danmakuSpeed != _settings.danmakuSpeed ||
+        previous.danmakuFontScale != _settings.danmakuFontScale ||
+        previous.danmakuScrollEnabled != _settings.danmakuScrollEnabled ||
+        previous.danmakuTopEnabled != _settings.danmakuTopEnabled ||
+        previous.danmakuBottomEnabled != _settings.danmakuBottomEnabled ||
+        previous.danmakuBlockColored != _settings.danmakuBlockColored ||
+        previous.danmakuMinimumWeight != _settings.danmakuMinimumWeight ||
+        previous.danmakuMaxPerSecond != _settings.danmakuMaxPerSecond ||
+        !listEquals(
+          previous.danmakuBlockedWords,
+          _settings.danmakuBlockedWords,
+        );
+    _commentsConfigured = true;
+    if (presentationChanged) {
+      danmaku.configure(
+        area: _settings.danmakuArea,
+        speed: _settings.danmakuSpeed,
+        topInset: _settings.danmakuTopMargin,
+        lineSpacing: _settings.danmakuLineSpacing,
+        offset: _settings.danmakuOffset,
+        mergeDuplicates: _settings.danmakuMergeDuplicates,
+        maxOnScreen: _settings.danmakuMaxOnScreen,
+        textStyle: DanmakuTextStyle(
+          fontFamily: _settings.danmakuFontFamily,
+          bold: _settings.danmakuBold,
+          effect: switch (_settings.danmakuStyle) {
+            DanmakuStylePreference.shadow => DanmakuTextEffect.shadow,
+            DanmakuStylePreference.stroke => DanmakuTextEffect.stroke,
+            DanmakuStylePreference.plain => DanmakuTextEffect.plain,
+          },
+        ),
+      );
+    }
+    if (windowChanged) _lastCommentWindow = null;
     configureComments(
       enabled: _settings.danmakuEnabled,
       fontScale: _settings.danmakuFontScale,
     );
-    _refreshCommentWindow(snapshots.value.position);
-    if (previous.danmakuOffset != _settings.danmakuOffset) {
-      _lastCommentWindow = -1;
+    if (windowChanged) {
       _ensureComments(snapshots.value.position);
     }
     if (media != null) {
@@ -1024,6 +1101,19 @@ class PlaybackSession extends ChangeNotifier {
       }
     }
   }
+
+  Object _commentPresentationSettings(AppSettings settings) => (
+    settings.danmakuArea,
+    settings.danmakuSpeed,
+    settings.danmakuTopMargin,
+    settings.danmakuLineSpacing,
+    settings.danmakuOffset,
+    settings.danmakuMergeDuplicates,
+    settings.danmakuMaxOnScreen,
+    settings.danmakuFontFamily,
+    settings.danmakuBold,
+    settings.danmakuStyle,
+  );
 
   Future<void> _loadSponsorSegments() async {
     _sponsorCancellation?.cancel();
@@ -1093,7 +1183,7 @@ class PlaybackSession extends ChangeNotifier {
       await engine.seek(segment.end);
       if (_disposed || generation != _generation) return;
       danmaku.seekConfirmed(engine.currentSnapshot.position);
-      _lastCommentWindow = -1;
+      _lastCommentWindow = null;
       _ensureComments(engine.currentSnapshot.position);
       sponsorMessage = '已跳过${sponsorCategoryLabel(segment.category)}';
       _notify();
@@ -1108,18 +1198,29 @@ class PlaybackSession extends ChangeNotifier {
   }
 
   void configureComments({required bool enabled, required double fontScale}) {
+    final wasEnabled = commentsEnabled;
     final changed = commentsEnabled != enabled || commentFontScale != fontScale;
     commentsEnabled = enabled;
     commentFontScale = fontScale;
     if (changed) {
-      _lastCommentWindow = -1;
-      if (enabled) _ensureComments(snapshots.value.position);
+      _lastCommentWindow = null;
+      if (!enabled) {
+        _suspendCommentPresentation();
+      } else if (!wasEnabled) {
+        _resumeCommentPresentation();
+      } else {
+        _ensureComments(snapshots.value.position);
+      }
     }
   }
 
   void _ensureComments(Duration position) {
     final cid = danmakuCid;
-    if (!commentsEnabled || cid == null || _resolving || media == null) {
+    if (!_ownerVisible ||
+        !commentsEnabled ||
+        cid == null ||
+        _resolving ||
+        media == null) {
       return;
     }
     final displayPosition = position - _settings.danmakuOffset;
@@ -1177,9 +1278,9 @@ class PlaybackSession extends ChangeNotifier {
         cancellation: token,
       );
       if (generation != _generation || token.isCancelled) return;
-      _segments[segment] = events.take(6000).toList(growable: false);
+      _segments[segment] = CommentSegment(events);
       _prefetchFailedSegments.remove(segment);
-      _refreshCommentWindow(snapshots.value.position);
+      _scheduleCommentRefresh();
     } catch (failure) {
       if (generation == _generation && !token.isCancelled) {
         final current = _commentSegmentAt(snapshots.value.position);
@@ -1198,23 +1299,35 @@ class PlaybackSession extends ChangeNotifier {
     }
   }
 
+  void _scheduleCommentRefresh() {
+    if (_commentRefreshRequest != null) return;
+    final request = Object();
+    _commentRefreshRequest = request;
+    final generation = _generation;
+    scheduleMicrotask(() {
+      if (!identical(_commentRefreshRequest, request)) return;
+      _commentRefreshRequest = null;
+      if (generation == _generation) {
+        _refreshCommentWindow(snapshots.value.position);
+      }
+    });
+  }
+
   void _refreshCommentWindow(Duration position) {
-    if (_disposed) return;
+    if (_disposed || !_ownerVisible || !commentsEnabled) return;
     final displayPosition = position - _settings.danmakuOffset;
     final requiredHistory = danmaku.requiredHistory;
     final history = requiredHistory > const Duration(seconds: 16)
         ? requiredHistory
         : const Duration(seconds: 16);
-    final events = _segments.values.expand((events) => events).toList()
-      ..sort((a, b) => a.position.compareTo(b.position));
+    final events = mergeCommentWindow(
+      _segments.values,
+      displayPosition - history,
+      displayPosition + const Duration(seconds: 60),
+    );
     final density = <int, int>{};
     danmaku.replaceEvents(
       events
-          .where(
-            (event) =>
-                event.position >= displayPosition - history &&
-                event.position <= displayPosition + const Duration(seconds: 60),
-          )
           .where((event) {
             final modeEnabled = switch (event.mode) {
               4 => _settings.danmakuBottomEnabled,
@@ -1251,6 +1364,7 @@ class PlaybackSession extends ChangeNotifier {
               fontSize: event.fontSize.clamp(12, 36) * commentFontScale,
             ),
           ),
+      sorted: true,
     );
   }
 
@@ -1460,7 +1574,7 @@ class PlaybackSession extends ChangeNotifier {
         await engine.seek(Duration.zero);
         if (_disposed || generation != _generation) return;
         danmaku.seekConfirmed(engine.currentSnapshot.position);
-        _lastCommentWindow = -1;
+        _lastCommentWindow = null;
         _ensureComments(engine.currentSnapshot.position);
         await _syncPlayback();
         if (_disposed || generation != _generation) return;
@@ -1536,7 +1650,7 @@ class PlaybackSession extends ChangeNotifier {
     _cancelCloudResume();
     await _command(() => engine.seek(target));
     danmaku.seekConfirmed(engine.currentSnapshot.position);
-    _lastCommentWindow = -1;
+    _lastCommentWindow = null;
     _ensureComments(engine.currentSnapshot.position);
     await _saveProgress();
   }
@@ -1776,6 +1890,7 @@ class PlaybackSession extends ChangeNotifier {
       token.cancel();
     }
     _segmentRequests.clear();
+    _commentRefreshRequest = null;
     // Capture the old progress before invalidating the source. A same-source
     // reopen during the write must advance generation instead of reusing it.
     final savedProgress = _saveProgress();

@@ -241,7 +241,8 @@ void main() {
     'hidden PGC page continues once and starts next episode at zero',
     (tester) async {
       final engine = _Engine();
-      final session = _session(engine);
+      final repository = _PlaybackRepo();
+      final session = _session(engine, repository: repository);
       addTearDown(session.close);
       final visible = ValueNotifier(true);
       addTearDown(visible.dispose);
@@ -275,7 +276,7 @@ void main() {
                           ),
                           settings: AppSettings(
                             continuousPlayback: true,
-                            danmakuEnabled: false,
+                            danmakuEnabled: true,
                           ),
                           onToggleComments: () {},
                           window: _Window(),
@@ -291,14 +292,31 @@ void main() {
       );
       await _frames(tester);
       expect(session.contentTarget, const PgcPlaybackTarget('1', cid: '101'));
+      expect(repository.commentRequests, isNotEmpty);
       visible.value = false;
       await _frames(tester);
+      final requests = repository.commentRequests.length;
       engine.end();
       engine.end();
       await _frames(tester);
       expect(session.contentTarget, const PgcPlaybackTarget('2', cid: '102'));
       expect(engine.options?.startPosition, Duration.zero);
       expect(session.snapshots.value.desiredPlaying, isTrue);
+      expect(repository.commentRequests, hasLength(requests));
+      var commentNotifications = 0;
+      session.danmaku.addListener(() => commentNotifications++);
+      engine.publish(
+        engine.snapshot.copyWith(position: const Duration(seconds: 10)),
+      );
+      await _frames(tester);
+      expect(commentNotifications, 0);
+      expect(repository.commentRequests, hasLength(requests));
+      expect(session.snapshots.value.position, const Duration(seconds: 10));
+      visible.value = true;
+      await _frames(tester);
+      expect(repository.commentRequests, contains('102:1'));
+      expect(session.danmaku.frame().map((item) => item.event.id), ['current']);
+      expect(engine.opens, 2);
       engine.end();
       await _frames(tester);
       expect(engine.opens, 2);
@@ -341,15 +359,19 @@ Future<void> _frames(WidgetTester tester) async {
   }
 }
 
-PlaybackSession _session(_Engine engine, {int Function()? epoch}) =>
-    PlaybackSession(
-      engine: engine,
-      repository: _PlaybackRepo(),
-      contentRepository: _ContentRepo(),
-      progress: _Progress(),
-      accountScope: () => 'guest',
-      sessionEpoch: epoch,
-    );
+PlaybackSession _session(
+  _Engine engine, {
+  int Function()? epoch,
+  _PlaybackRepo? repository,
+}) => PlaybackSession(
+  engine: engine,
+  repository: repository ?? _PlaybackRepo(),
+  contentRepository: _ContentRepo(),
+  progress: _Progress(),
+  accountScope: () => 'guest',
+  sessionEpoch: epoch,
+  danmakuNow: () => Duration.zero,
+);
 
 class _Engine extends CardFakeEngine {
   void end() => publish(
@@ -376,6 +398,7 @@ class _Engine extends CardFakeEngine {
 }
 
 class _PlaybackRepo extends Fake implements PlaybackRepository {
+  final commentRequests = <String>[];
   @override
   Future<PlaybackMedia> resolve(
     VideoId video,
@@ -389,7 +412,21 @@ class _PlaybackRepo extends Fake implements PlaybackRepository {
     String cid,
     int segment, {
     required RequestCancellation cancellation,
-  }) async => [];
+  }) async {
+    commentRequests.add('$cid:$segment');
+    return [
+      for (final (id, second) in [('expired', 0), ('current', 9)])
+        TimedComment(
+          id: id,
+          position: Duration(seconds: second),
+          text: id,
+          mode: 1,
+          color: 0xffffff,
+          fontSize: 24,
+        ),
+    ];
+  }
+
   @override
   Future<List<SubtitleTrack>> subtitles(
     VideoId video,

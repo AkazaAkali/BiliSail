@@ -46,15 +46,34 @@ void main() {
         if (bytes == null) throw StateError('Missing PNG');
         final gate = Completer<Uint8List>();
         var calls = 0;
+        var active = 0;
+        var maximumActive = 0;
+        final requests = <({Uri uri, ImageLoadRequest request})>[];
         final cache = AppImageCache(
           ImageByteCache(
             enabled: enabled,
             directory: () async => throw const FileSystemException('optional'),
             maxPending: 3,
             maxConcurrent: 1,
-            loader: (_, _) {
+            loader: (uri, request) {
               calls++;
-              return gate.future;
+              requests.add((uri: uri, request: request));
+              active++;
+              if (active > maximumActive) maximumActive = active;
+              final response = Completer<Uint8List>();
+              request.onCancel(() {
+                if (response.isCompleted) return;
+                active--;
+                response.completeError(const ImageLoadCancelled());
+              });
+              unawaited(
+                gate.future.then((bytes) {
+                  if (response.isCompleted) return;
+                  active--;
+                  response.complete(bytes);
+                }),
+              );
+              return response.future;
             },
           ),
         );
@@ -76,6 +95,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(home.calls, ['推荐:1']);
         expect(calls, 1);
+        final initialRequest = requests.single.request;
         expect(cache.bytes.hasCapacity, isFalse);
 
         ScrollPosition position() => tester
@@ -95,14 +115,28 @@ void main() {
 
         await nextPage();
         expect(home.calls, ['推荐:1', '推荐:2']);
+        expect(initialRequest.cancelled, isTrue);
         final savedOffset = position().pixels;
+        final departingRequest = requests.last.request;
         await tester.tap(find.text('番剧索引'));
         await tester.pumpAndSettle();
         expect(home.calls.last, '番剧索引:1');
+        expect(departingRequest.cancelled, isTrue);
         await nextPage();
         expect(home.calls.last, '番剧索引:2');
         expect(find.byIcon(Icons.image_not_supported_outlined), findsNothing);
-        expect(calls, 1);
+        // Offscreen demand releases the old slot before the shared response
+        // gate opens; only the current viewport's transfer may remain active.
+        final currentRequests = requests
+            .where((entry) => !entry.request.cancelled)
+            .toList();
+        expect(currentRequests, hasLength(1));
+        expect(
+          Uri.decodeComponent(currentRequests.single.uri.path),
+          startsWith('/番剧索引-'),
+        );
+        expect(active, 1);
+        expect(maximumActive, 1);
 
         gate.complete(bytes);
         Future<void> loaded() async {

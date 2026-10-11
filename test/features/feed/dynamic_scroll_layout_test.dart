@@ -104,7 +104,9 @@ void main() {
           expect(slot.height, lessThanOrEqualTo(360));
           expect(slot.width / slot.height, closeTo(ratio ?? 1, .001));
           if (fails) {
-            loaded.completeError(const ImageLoadCancelled());
+            loaded.completeError(
+              const HttpException('Image response rejected'),
+            );
           } else {
             loaded.complete(bytes);
           }

@@ -6,6 +6,39 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('hidden raster reclamation keeps layouts and scheduling reusable', () {
+    final controller = DanmakuController(monotonicNow: () => Duration.zero);
+    addTearDown(controller.dispose);
+    controller.setViewport(width: 800, height: 450);
+    controller.replaceEvents(const [
+      DanmakuEvent(id: 'visible', at: Duration.zero, text: 'visible'),
+      DanmakuEvent(id: 'future', at: Duration(seconds: 20), text: 'future'),
+    ], sorted: true);
+    final placement = controller.frame().single;
+    void paint() {
+      final recorder = ui.PictureRecorder();
+      controller.paintText(
+        placement.event,
+        ui.Canvas(recorder),
+        ui.Offset.zero,
+      );
+      recorder.endRecording().dispose();
+    }
+
+    paint();
+    final builds = controller.textLayoutBuildCount;
+    expect(controller.textRasterBytes, greaterThan(0));
+    controller.releaseRasterCache();
+    expect(controller.textRasterBytes, 0);
+    expect(controller.textLayoutBuildCount, builds);
+    expect(controller.textLayoutCount, 1);
+    expect(controller.pendingCount, 1);
+    expect(controller.frame().single.event.id, placement.event.id);
+    paint();
+    expect(controller.textRasterBytes, greaterThan(0));
+    expect(controller.textLayoutBuildCount, builds);
+  });
+
   for (final isLive in [false, true]) {
     testWidgets(
       '${isLive ? 'live' : 'VOD'} retained overlay updates raster DPR at the same logical size',

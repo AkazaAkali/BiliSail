@@ -126,6 +126,7 @@ class LiveController extends Notifier<LiveState> {
   RequestCancellation? _viewerRead;
   RequestCancellation? _roomRead, _chatRead, _superChatRead;
   Timer? _chatTimer, _superChatExpiryTimer;
+  DateTime? _superChatExpiryAt;
   RequestCancellation? _realtimeRead;
   StreamSubscription<List<LiveRealtimeEvent>>? _realtimeSubscription;
   StreamController<List<LiveChatMessage>>? _danmakuEmitter;
@@ -340,7 +341,9 @@ class LiveController extends Notifier<LiveState> {
               count >= lowerBound)) {
         _viewerSnapshotCount = count;
         _viewerSnapshotAt = ref.read(liveClockProvider)();
-        state = state.copyWith(viewerCountText: '$count');
+        if (state.viewerCountText != '$count') {
+          state = state.copyWith(viewerCountText: '$count');
+        }
       }
     } on AppFailure catch (error) {
       if (current() &&
@@ -568,12 +571,10 @@ class LiveController extends Notifier<LiveState> {
 
   void _acceptRealtime(List<LiveRealtimeEvent> batch) {
     var next = state;
-    final chats = <String, LiveChatMessage>{
-      for (final message in state.messages) message.deduplicationKey: message,
-    };
-    final superChats = <String, LiveSuperChatMessage>{
-      for (final message in state.superChats) message.id: message,
-    };
+    Map<String, LiveChatMessage>? chats;
+    Map<String, LiveSuperChatMessage>? superChats;
+    var chatsChanged = false;
+    var superChatsChanged = false;
     final danmaku = <LiveChatMessage>[];
     final now = ref.read(liveClockProvider)();
     var offline = false;
@@ -581,15 +582,25 @@ class LiveController extends Notifier<LiveState> {
       ++_liveSequence;
       switch (event) {
         case LiveConnectionChanged(:final phase, :final message):
-          next = next.copyWith(
-            connectionPhase: phase,
-            connectionMessage: message,
-            clearConnectionMessage: message == null,
-          );
+          if (next.connectionPhase != phase ||
+              next.connectionMessage != message) {
+            next = next.copyWith(
+              connectionPhase: phase,
+              connectionMessage: message,
+              clearConnectionMessage: message == null,
+            );
+          }
         case LiveChatReceived(:final message):
-          chats[message.deduplicationKey] = message.withFallbackMetadata(
-            chats[message.deduplicationKey],
-          );
+          final messages = chats ??= {
+            for (final item in state.messages) item.deduplicationKey: item,
+          };
+          final key = message.deduplicationKey;
+          final previous = messages[key];
+          final merged = message.withFallbackMetadata(previous);
+          if (!_sameChat(previous, merged)) {
+            messages[key] = merged;
+            chatsChanged = true;
+          }
           if (_receivedChatKeys.add(message.id ?? message.deduplicationKey)) {
             danmaku.add(message);
           }
@@ -599,25 +610,37 @@ class LiveController extends Notifier<LiveState> {
               !(timed.expiresAt?.isAfter(now) ?? true)) {
             continue;
           }
-          superChats[message.id] = timed;
+          final messages = superChats ??= {
+            for (final item in state.superChats) item.id: item,
+          };
+          if (!_sameSuperChat(messages[message.id], timed)) {
+            messages[message.id] = timed;
+            superChatsChanged = true;
+          }
           _realtimeSuperChats[message.id] = _liveSequence;
         case LiveSuperChatDeleted(:final ids):
           for (final id in ids.take(maxSuperChats)) {
-            superChats.remove(id);
+            final messages = superChats ??= {
+              for (final item in state.superChats) item.id: item,
+            };
+            if (messages.remove(id) != null) superChatsChanged = true;
             _realtimeSuperChats.remove(id);
             _deletedSuperChats[id] = _liveSequence;
           }
         case LiveRoomStatusChanged(:final isLive):
           final room = next.room;
-          if (room != null) {
+          if (room != null && room.isLive != isLive) {
             next = next.copyWith(room: _withRoomStatus(room, isLive: isLive));
           }
           if (!isLive) {
             offline = true;
-            next = next.copyWith(
-              connectionPhase: LiveConnectionPhase.offline,
-              clearConnectionMessage: true,
-            );
+            if (next.connectionPhase != LiveConnectionPhase.offline ||
+                next.connectionMessage != null) {
+              next = next.copyWith(
+                connectionPhase: LiveConnectionPhase.offline,
+                clearConnectionMessage: true,
+              );
+            }
           }
         case LivePopularityChanged():
           // Heartbeats may report a placeholder 1. Keep the room-load snapshot;
@@ -636,7 +659,8 @@ class LiveController extends Notifier<LiveState> {
               (_viewerSnapshotCount ?? 0) >= lowerBound &&
               snapshotAt != null &&
               now.difference(snapshotAt) <= chatRefreshInterval * 2;
-          if (!capped || !preciseSnapshot) {
+          if ((!capped || !preciseSnapshot) &&
+              next.viewerCountText != countText) {
             next = next.copyWith(viewerCountText: countText);
           }
           if (!capped) {
@@ -648,26 +672,32 @@ class LiveController extends Notifier<LiveState> {
             _viewerSnapshotAt = null;
           }
         case LiveWatchedCountChanged(:final countText):
-          next = next.copyWith(watchedCountText: countText);
+          if (next.watchedCountText != countText) {
+            next = next.copyWith(watchedCountText: countText);
+          }
       }
     }
-    final allChats = chats.values.toList();
-    final allSuperChats = superChats.values
-        .where((message) => message.expiresAt?.isAfter(now) ?? true)
-        .toList();
-    state = next.copyWith(
-      messages: List.unmodifiable(
-        allChats.skip(
-          (allChats.length - maxChatMessages).clamp(0, allChats.length),
+    if (chatsChanged && chats != null) {
+      next = next.copyWith(
+        messages: List.unmodifiable(
+          chats.values.skip(
+            (chats.length - maxChatMessages).clamp(0, chats.length),
+          ),
         ),
-      ),
-      superChats: List.unmodifiable(
-        allSuperChats.skip(
-          (allSuperChats.length - maxSuperChats).clamp(0, allSuperChats.length),
+      );
+    }
+    if (superChatsChanged && superChats != null) {
+      final live = superChats.values
+          .where((message) => message.expiresAt?.isAfter(now) ?? true)
+          .toList();
+      next = next.copyWith(
+        superChats: List.unmodifiable(
+          live.skip((live.length - maxSuperChats).clamp(0, live.length)),
         ),
-      ),
-      chatUpdatedAt: danmaku.isEmpty ? null : now,
-    );
+      );
+    }
+    if (danmaku.isNotEmpty) next = next.copyWith(chatUpdatedAt: now);
+    if (!identical(next, state)) state = next;
     while (_realtimeSuperChats.length > maxSuperChats) {
       _realtimeSuperChats.remove(_realtimeSuperChats.keys.first);
     }
@@ -680,12 +710,54 @@ class LiveController extends Notifier<LiveState> {
     if (danmaku.isNotEmpty && !(_danmakuEmitter?.isClosed ?? true)) {
       _danmakuEmitter?.add(List.unmodifiable(danmaku));
     }
-    _scheduleSuperChatExpiry();
+    if (superChatsChanged) _scheduleSuperChatExpiry();
     if (offline) {
       _stopRealtime();
       _cancelViewerRead();
     }
   }
+
+  static bool _sameImage(LiveChatImage? a, LiveChatImage? b) =>
+      identical(a, b) ||
+      (a != null &&
+          b != null &&
+          a.url == b.url &&
+          a.width == b.width &&
+          a.height == b.height);
+
+  static bool _sameChat(LiveChatMessage? a, LiveChatMessage b) =>
+      identical(a, b) ||
+      (a != null &&
+          a.id == b.id &&
+          a.userName == b.userName &&
+          a.text == b.text &&
+          a.timestamp == b.timestamp &&
+          a.userId == b.userId &&
+          a.color == b.color &&
+          a.mode == b.mode &&
+          a.fontSize == b.fontSize &&
+          _sameImage(a.sticker, b.sticker) &&
+          a.emotes.length == b.emotes.length &&
+          a.emotes.entries.every(
+            (entry) => _sameImage(entry.value, b.emotes[entry.key]),
+          ));
+
+  static bool _sameSuperChat(LiveSuperChatMessage? a, LiveSuperChatMessage b) =>
+      identical(a, b) ||
+      (a != null &&
+          a.id == b.id &&
+          a.userName == b.userName &&
+          a.text == b.text &&
+          a.userId == b.userId &&
+          a.price == b.price &&
+          a.avatarUrl == b.avatarUrl &&
+          a.startedAt == b.startedAt &&
+          a.expiresAt == b.expiresAt &&
+          a.displayDuration == b.displayDuration &&
+          a.remainingDuration == b.remainingDuration &&
+          a.backgroundColor == b.backgroundColor &&
+          a.backgroundBottomColor == b.backgroundBottomColor &&
+          a.textColor == b.textColor);
 
   static LiveRoom _withRoomStatus(LiveRoom room, {bool? isLive}) => LiveRoom(
     id: room.id,
@@ -742,8 +814,6 @@ class LiveController extends Notifier<LiveState> {
   }
 
   void _scheduleSuperChatExpiry() {
-    _superChatExpiryTimer?.cancel();
-    _superChatExpiryTimer = null;
     if (!_active || !ref.mounted) return;
     final now = ref.read(liveClockProvider)();
     DateTime? earliest;
@@ -753,11 +823,22 @@ class LiveController extends Notifier<LiveState> {
         earliest = expiry;
       }
     }
+    if (_superChatExpiryAt == earliest &&
+        (_superChatExpiryTimer?.isActive ?? false)) {
+      return;
+    }
+    _superChatExpiryTimer?.cancel();
+    _superChatExpiryTimer = null;
+    _superChatExpiryAt = earliest;
     if (earliest != null) {
       final delay = earliest.difference(now);
       _superChatExpiryTimer = Timer(
         delay > Duration.zero ? delay : Duration.zero,
-        _pruneExpiredSuperChats,
+        () {
+          _superChatExpiryTimer = null;
+          _superChatExpiryAt = null;
+          _pruneExpiredSuperChats();
+        },
       );
     }
   }

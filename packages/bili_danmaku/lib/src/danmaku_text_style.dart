@@ -197,6 +197,13 @@ final class DanmakuTextLayouts {
     entry.image = null;
   }
 
+  void releaseRasters() {
+    for (final entry in _rasters.keys.toList(growable: false)) {
+      _releaseRaster(entry);
+    }
+    _protectedKeys.clear();
+  }
+
   void clear() {
     for (final entry in _cache.values) {
       _releaseRaster(entry);

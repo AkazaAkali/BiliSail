@@ -832,4 +832,171 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  for (final enabled in [false, true]) {
+    testWidgets(
+      'hiding one shared consumer does not cancel its visible peer with cache=$enabled',
+      (tester) async {
+        final bytes = await tester.runAsync(_png);
+        if (bytes == null) throw StateError('Missing PNG');
+        final response = Completer<Uint8List>();
+        var calls = 0;
+        var aborts = 0;
+        final cache = AppImageCache(
+          ImageByteCache(
+            enabled: enabled,
+            directory: () async => throw const FileSystemException('optional'),
+            loader: (_, request) {
+              calls++;
+              request.onCancel(() => aborts++);
+              return response.future;
+            },
+          ),
+        );
+        Widget page(bool firstActive) => _app(
+          cache,
+          Row(
+            children: [
+              WorkspaceActivity(active: firstActive, child: _image(1)),
+              _image(1),
+            ],
+          ),
+        );
+        await tester.pumpWidget(page(true));
+        await tester.pumpAndSettle();
+        expect(calls, 1);
+        await tester.pumpWidget(page(false));
+        await tester.pumpAndSettle();
+        expect(aborts, 0);
+        response.complete(bytes);
+        await _until(
+          tester,
+          () => tester
+              .widgetList<RawImage>(find.byType(RawImage))
+              .any((image) => image.image != null),
+        );
+        expect(calls, 1);
+        expect(aborts, 0);
+        expect(find.text('failed'), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+        await cache.close();
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets(
+    'a new viewport cancels old active and queued demand before any stale decode',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final bytes = await tester.runAsync(_png);
+      if (bytes == null) throw StateError('Missing PNG');
+      final gates = <String, Completer<Uint8List>>{};
+      final aborted = <String>[];
+      final cache = AppImageCache(
+        ImageByteCache(
+          enabled: false,
+          directory: () async => throw const FileSystemException('optional'),
+          maxConcurrent: 1,
+          loader: (uri, request) {
+            final response = Completer<Uint8List>();
+            gates[uri.path] = response;
+            request.onCancel(() => aborted.add(uri.path));
+            return response.future;
+          },
+        ),
+      );
+      final scroll = ScrollController();
+      await tester.pumpWidget(
+        _app(
+          cache,
+          SingleChildScrollView(
+            controller: scroll,
+            child: Column(
+              children: [
+                for (var index = 0; index < 12; index++)
+                  SizedBox(height: 300, child: _image(index)),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(gates.keys, ['/visibility-0.jpg']);
+      final before = binding.decodes;
+      scroll.jumpTo(2400);
+      await tester.pumpAndSettle();
+      expect(aborted, ['/visibility-0.jpg']);
+      expect(gates.keys, ['/visibility-0.jpg', '/visibility-8.jpg']);
+      gates['/visibility-0.jpg']!.complete(bytes);
+      await tester.pumpAndSettle();
+      expect(binding.decodes, before);
+      gates['/visibility-8.jpg']!.complete(bytes);
+      await _until(
+        tester,
+        () => tester
+            .widgetList<RawImage>(find.byType(RawImage))
+            .any((image) => image.image != null),
+      );
+      expect(binding.decodes, before + 1);
+      expect(gates.keys, isNot(contains('/visibility-1.jpg')));
+      expect(gates.keys, isNot(contains('/visibility-2.jpg')));
+      expect(find.text('failed'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await cache.close();
+      scroll.dispose();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'a released scroll-deferred source cannot restart after leaving the viewport',
+    (tester) async {
+      var calls = 0;
+      final cache = AppImageCache(
+        ImageByteCache(
+          enabled: false,
+          directory: () async => throw const FileSystemException('optional'),
+          loader: (_, _) async {
+            calls++;
+            throw const HttpException('A released image must not load');
+          },
+        ),
+      );
+      final scroll = ScrollController();
+      await tester.pumpWidget(
+        _app(
+          cache,
+          SingleChildScrollView(
+            controller: scroll,
+            child: Column(children: [_image(1), const SizedBox(height: 3000)]),
+          ),
+        ),
+      );
+      final position = scroll.position as ScrollPositionWithSingleContext;
+      position.beginActivity(_FastScrollActivity(position));
+      for (var frame = 0; frame < 3; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(calls, 0);
+      final deferred = tester.widget<Image>(find.byType(Image)).image;
+      scroll.jumpTo(2000);
+      position.beginActivity(_FastScrollActivity(position));
+      await tester.pump();
+      // Replay the old provider callback between viewport release and the
+      // following frame that removes its Image widget.
+      deferred.resolve(ImageConfiguration.empty);
+      position.goIdle();
+      await tester.pumpAndSettle();
+      expect(calls, 0);
+      expect(find.byType(RawImage), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await cache.close();
+      scroll.dispose();
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

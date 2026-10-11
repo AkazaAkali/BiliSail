@@ -62,6 +62,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
   bool _adjustingChatScroll = false;
   bool _chatFollowScheduled = false;
   String? _chatStatusAfterMessageKey;
+  LiveRoom? _playerRoom;
+  String? _playerRequestedId;
+  LivePlayerBuilder? _playerBuilder;
+  Widget? _playerWidget;
 
   bool get _foreground => !const {
     AppLifecycleState.hidden,
@@ -190,11 +194,20 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
         icon: Icons.live_tv_outlined,
       );
     }
-    final state = ref.watch(liveControllerProvider(id));
+    final page = ref.watch(
+      liveControllerProvider(id).select(
+        (state) => (
+          room: state.room,
+          loading: state.loading,
+          message: state.roomMessage,
+        ),
+      ),
+    );
     ref.listen(liveControllerProvider(id), (previous, next) {
-      if (!next.superChats.any(
-        (message) => message.id == _selectedSuperChatId,
-      )) {
+      if (!identical(previous?.superChats, next.superChats) &&
+          !next.superChats.any(
+            (message) => message.id == _selectedSuperChatId,
+          )) {
         _selectedSuperChatId = null;
       }
       if (next.room == null || next.messages.isEmpty) {
@@ -221,16 +234,26 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
       });
     }
 
-    final room = state.room;
+    final room = page.room;
     if (room == null) {
-      if (state.roomMessage case final message?) {
+      if (page.message case final message?) {
         return StateView.error(message: message, onAction: controller.load);
       }
       return const StateView.loading(message: '正在加载直播间…');
     }
 
-    final player = _player(context, room);
-    final sidebar = _sidebar(context, room, state, controller);
+    // Keep the actual builder below the room scope so inherited dependencies
+    // still rebuild it, while chat, audience and sidebar updates reuse its tree.
+    if (!identical(_playerRoom, room) ||
+        _playerRequestedId != widget.roomId ||
+        _playerBuilder != widget.playerBuilder) {
+      _playerRoom = room;
+      _playerRequestedId = widget.roomId;
+      _playerBuilder = widget.playerBuilder;
+      _playerWidget = _player(context, room);
+    }
+    final player = _playerWidget ??= _player(context, room);
+    final sidebar = _sidebar(context, room, controller);
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 900;
@@ -301,11 +324,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
               builder: (context) => widget.playerBuilder(context, room),
             ),
           )
-        : Center(
-            child: Text(
-              '主播尚未开播',
-              style: Theme.of(context).textTheme.titleMedium
-                  ?.copyWith(color: Colors.white),
+        : Builder(
+            builder: (context) => Center(
+              child: Text(
+                '主播尚未开播',
+                style: Theme.of(context).textTheme.titleMedium
+                    ?.copyWith(color: Colors.white),
+              ),
             ),
           ),
   );
@@ -313,12 +338,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
   Widget _sidebar(
     BuildContext context,
     LiveRoom room,
-    LiveState state,
     LiveController controller,
   ) {
-    final roomInfo = SingleChildScrollView(
-      child: _roomInfo(context, room, state),
-    );
+    final provider = liveControllerProvider(RoomId(widget.roomId));
+    final roomInfo = SingleChildScrollView(child: _roomInfo(context, room));
     final content = Expanded(
       child: WorkspaceActivity(
         active: _lastActive == true && _infoVisible,
@@ -327,32 +350,73 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
           value: _tab,
           onChanged: (tab) => setState(() => _tab = tab),
           viewKey: const ValueKey('live-info-swipe'),
-          labels: [const Text('聊天'), Text('SC (${state.superChats.length})')],
+          labels: [
+            const Text('聊天'),
+            Consumer(
+              builder: (context, ref, _) {
+                final count = ref.watch(
+                  provider.select((state) => state.superChats.length),
+                );
+                return Text('SC ($count)');
+              },
+            ),
+          ],
           itemKey: (tab) => ValueKey('live-tab-$tab'),
           compact: true,
           preloadPages: true,
-          trailing: IconButton(
-            tooltip: _tab == 0
-                ? (state.connectionPhase == LiveConnectionPhase.failed
-                      ? '重新连接弹幕'
-                      : '刷新消息')
-                : '刷新 SC',
-            onPressed: _tab == 0
-                ? (state.connectionPhase == LiveConnectionPhase.failed
-                      ? controller.retryRealtime
-                      : state.chatLoading
-                      ? null
-                      : controller.refreshChat)
-                : (state.superChatLoading
-                      ? null
-                      : controller.refreshSuperChats),
-            icon: const Icon(Icons.refresh_rounded, size: 20),
+          trailing: Consumer(
+            builder: (context, ref, _) {
+              ref.watch(
+                provider.select(
+                  (state) => (
+                    state.connectionPhase,
+                    state.chatLoading,
+                    state.superChatLoading,
+                  ),
+                ),
+              );
+              final state = ref.read(provider);
+              return IconButton(
+                tooltip: _tab == 0
+                    ? (state.connectionPhase == LiveConnectionPhase.failed
+                          ? '重新连接弹幕'
+                          : '刷新消息')
+                    : '刷新 SC',
+                onPressed: _tab == 0
+                    ? (state.connectionPhase == LiveConnectionPhase.failed
+                          ? controller.retryRealtime
+                          : state.chatLoading
+                          ? null
+                          : controller.refreshChat)
+                    : (state.superChatLoading
+                          ? null
+                          : controller.refreshSuperChats),
+                icon: const Icon(Icons.refresh_rounded, size: 20),
+              );
+            },
           ),
           pageBuilder: (context, tab, active) => TickerMode(
             enabled: _lastActive == true && _infoVisible && active,
             child: tab == 0
-                ? _chat(context, state, controller)
-                : _superChats(context, state, controller),
+                ? _chat(context, controller)
+                : Consumer(
+                    builder: (context, ref, _) {
+                      ref.watch(
+                        provider.select(
+                          (state) => (
+                            state.superChats,
+                            state.superChatLoading,
+                            state.superChatMessage,
+                          ),
+                        ),
+                      );
+                      return _superChats(
+                        context,
+                        ref.read(provider),
+                        controller,
+                      );
+                    },
+                  ),
           ),
         ),
       ),
@@ -387,7 +451,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
     );
   }
 
-  Widget _roomInfo(BuildContext context, LiveRoom room, LiveState state) {
+  Widget _roomInfo(BuildContext context, LiveRoom room) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final anchorId = room.anchorId;
@@ -437,24 +501,36 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
                       ) ??
                       TextStyle(color: colors.onSurfaceVariant),
                   textAlign: TextAlign.right,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        state.viewerCountText == null
-                            ? '在看人数暂无数据'
-                            : '当前${state.viewerCountText}人在看',
-                        key: const ValueKey('live-viewer-count'),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        state.watchedCountText == null
-                            ? '看过人数暂无数据'
-                            : '${state.watchedCountText}人看过',
-                        key: const ValueKey('live-watched-count'),
-                      ),
-                    ],
+                  child: Consumer(
+                    builder: (context, ref, _) {
+                      final counts = ref.watch(
+                        liveControllerProvider(RoomId(widget.roomId)).select(
+                          (state) => (
+                            viewer: state.viewerCountText,
+                            watched: state.watchedCountText,
+                          ),
+                        ),
+                      );
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            counts.viewer == null
+                                ? '在看人数暂无数据'
+                                : '当前${counts.viewer}人在看',
+                            key: const ValueKey('live-viewer-count'),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            counts.watched == null
+                                ? '看过人数暂无数据'
+                                : '${counts.watched}人看过',
+                            key: const ValueKey('live-watched-count'),
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ),
@@ -488,7 +564,105 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
     );
   }
 
-  Widget _chat(
+  Widget _chat(BuildContext context, LiveController controller) {
+    final provider = liveControllerProvider(RoomId(widget.roomId));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Consumer(
+          builder: (context, ref, _) {
+            ref.watch(
+              provider.select(
+                (state) => (state.superChats, state.superChatMessage),
+              ),
+            );
+            final state = ref.read(provider);
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (state.superChats.isNotEmpty)
+                  SizedBox(
+                    height: 54,
+                    child: ScrollConfiguration(
+                      behavior: const SmoothScrollBehavior(
+                        horizontalMouseWheel: true,
+                      ).copyWith(scrollbars: false),
+                      child: Scrollbar(
+                        key: const ValueKey('live-sc-scrollbar'),
+                        controller: _superChatScrollController,
+                        thumbVisibility: true,
+                        interactive: true,
+                        thickness: 3,
+                        radius: const Radius.circular(2),
+                        scrollbarOrientation: ScrollbarOrientation.bottom,
+                        child: ListView.separated(
+                          controller: _superChatScrollController,
+                          primary: false,
+                          padding: const EdgeInsets.fromLTRB(10, 3, 10, 10),
+                          scrollDirection: Axis.horizontal,
+                          itemCount: state.superChats.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 7),
+                          itemBuilder: (context, index) =>
+                              _superChatBubble(state.superChats[index]),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (state.superChatMessage case final message?)
+                  _errorBanner(context, message, controller.refreshSuperChats),
+              ],
+            );
+          },
+        ),
+        Consumer(
+          builder: (context, ref, _) {
+            ref.watch(
+              provider.select(
+                (state) => (
+                  state.connectionMessage,
+                  state.chatMessage,
+                  state.messages.isEmpty,
+                ),
+              ),
+            );
+            final state = ref.read(provider);
+            return Column(
+              children: [
+                if (state.connectionMessage case final message?)
+                  _errorBanner(context, message, controller.retryRealtime),
+                if (state.chatMessage case final message?)
+                  if (state.messages.isNotEmpty)
+                    _errorBanner(context, message, controller.refreshChat),
+              ],
+            );
+          },
+        ),
+        Expanded(
+          child: Consumer(
+            builder: (context, ref, _) {
+              ref.watch(
+                provider.select(
+                  (state) => (
+                    state.messages,
+                    state.chatMessage,
+                    state.chatLoading,
+                    state.connectionPhase,
+                    state.superChatLoading,
+                    state.superChats
+                        .where((message) => message.id == _selectedSuperChatId)
+                        .firstOrNull,
+                  ),
+                ),
+              );
+              return _chatMessages(context, ref.read(provider), controller);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _chatMessages(
     BuildContext context,
     LiveState state,
     LiveController controller,
@@ -513,40 +687,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (state.superChats.isNotEmpty)
-          SizedBox(
-            height: 54,
-            child: ScrollConfiguration(
-              behavior: const SmoothScrollBehavior(horizontalMouseWheel: true)
-                  .copyWith(scrollbars: false),
-              child: Scrollbar(
-                key: const ValueKey('live-sc-scrollbar'),
-                controller: _superChatScrollController,
-                thumbVisibility: true,
-                interactive: true,
-                thickness: 3,
-                radius: const Radius.circular(2),
-                scrollbarOrientation: ScrollbarOrientation.bottom,
-                child: ListView.separated(
-                  controller: _superChatScrollController,
-                  primary: false,
-                  padding: const EdgeInsets.fromLTRB(10, 3, 10, 10),
-                  scrollDirection: Axis.horizontal,
-                  itemCount: state.superChats.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 7),
-                  itemBuilder: (context, index) =>
-                      _superChatBubble(state.superChats[index]),
-                ),
-              ),
-            ),
-          ),
-        if (state.superChatMessage case final message?)
-          _errorBanner(context, message, controller.refreshSuperChats),
-        if (state.connectionMessage case final message?)
-          _errorBanner(context, message, controller.retryRealtime),
-        if (state.chatMessage case final message?)
-          if (state.messages.isNotEmpty)
-            _errorBanner(context, message, controller.refreshChat),
         const Divider(height: 1),
         Expanded(
           child: Listener(

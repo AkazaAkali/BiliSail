@@ -39,6 +39,65 @@ import 'package:flutter_test/flutter_test.dart';
 final _composerScopeProvider = Provider<String>((ref) => 'root');
 
 void main() {
+  testWidgets('snapshot ticks only rebuild their displayed values', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1280, 900);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(() => debugOnRebuildDirtyWidget = null);
+    final engine = _FakeEngine();
+    final session = _session(engine);
+    addTearDown(session.close);
+    await tester.pumpWidget(
+      _app(
+        session,
+        _FakeWindowService(),
+        const AppSettings.defaults(),
+        width: 1200,
+      ),
+    );
+    await _pumpFrames(tester);
+    await session.pause();
+    await _pumpFrames(tester);
+    final opens = engine.opens;
+    for (final kind in ['position', 'buffer', 'same']) {
+      final counts = <String, int>{};
+      debugOnRebuildDirtyWidget = (element, builtOnce) {
+        final name = element.widget.runtimeType.toString();
+        counts[name] = (counts[name] ?? 0) + 1;
+      };
+      for (var i = 1; i <= 20; i++) {
+        final snapshot = engine.currentSnapshot;
+        engine._emit(switch (kind) {
+          'position' => snapshot.copyWith(
+            position: Duration(milliseconds: i * 100),
+          ),
+          'buffer' => snapshot.copyWith(buffered: Duration(seconds: i)),
+          _ => snapshot.copyWith(),
+        });
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      debugOnRebuildDirtyWidget = null;
+      for (final stable in [
+        'VideoSurface',
+        'DanmakuOverlay',
+        'RawGestureDetector',
+        '_ControlBar',
+        '_PlayerView',
+        'PlaybackPanel',
+      ]) {
+        expect(counts[stable] ?? 0, 0, reason: '$kind rebuilt $stable');
+      }
+      if (kind == 'same') expect(counts, isEmpty);
+      expect(engine.opens, opens);
+      expect(engine.maxSurfaces, 1);
+    }
+    expect(find.text('00:02 / 03:00'), findsOneWidget);
+    expect(session.danmaku.position, const Duration(seconds: 2));
+  });
+
   for (final fullScreen in [false, true]) {
     testWidgets(
       'keyboard resize retains video content, draft, focus and one source fullscreen=$fullScreen',

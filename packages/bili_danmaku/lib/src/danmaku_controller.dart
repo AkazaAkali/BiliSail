@@ -226,35 +226,41 @@ final class DanmakuController extends ChangeNotifier {
   }
 
   /// Holds only a bounded, sorted window supplied by the application layer.
-  void replaceEvents(Iterable<DanmakuEvent> events) {
+  /// Set [sorted] only when the input is already in ascending media-time order.
+  void replaceEvents(Iterable<DanmakuEvent> events, {bool sorted = false}) {
     final previous = {for (final event in _events) event.id: event};
     final ids = <String>{};
-    final sorted =
-        events
-            .where(
-              (e) =>
-                  e.at >= Duration.zero &&
-                  e.text.isNotEmpty &&
-                  e.text.length <= 300 &&
-                  e.fontSize.isFinite &&
-                  e.fontSize > 0 &&
-                  ids.add(e.id),
-            )
-            .toList()
-          ..sort((a, b) => a.at.compareTo(b.at));
+    final ordered = events
+        .where(
+          (e) =>
+              e.at >= Duration.zero &&
+              e.text.isNotEmpty &&
+              e.text.length <= 300 &&
+              e.fontSize.isFinite &&
+              e.fontSize > 0 &&
+              ids.add(e.id),
+        )
+        .toList();
+    if (!sorted) ordered.sort((a, b) => a.at.compareTo(b.at));
+    assert(
+      !sorted ||
+          Iterable<int>.generate(ordered.length - (ordered.isEmpty ? 0 : 1))
+              .every((i) => ordered[i].at <= ordered[i + 1].at),
+      'sorted events must be in media-time order',
+    );
     // Queue capacity limits future admission, not the lifetime of items that
     // already have a lane. Still honor authoritative filtering/content changes.
-    final supplied = {for (final event in sorted) event.id: event};
-    if (sorted.length > maxPending) {
-      final pivot = _lowerBound(sorted, _displayPosition);
+    final supplied = {for (final event in ordered) event.id: event};
+    if (ordered.length > maxPending) {
+      final pivot = _lowerBound(ordered, _displayPosition);
       final from = (pivot - maxPending ~/ 4).clamp(
         0,
-        sorted.length - maxPending,
+        ordered.length - maxPending,
       );
-      _events = List.unmodifiable(sorted.sublist(from, from + maxPending));
-      dropped += sorted.length - maxPending;
+      _events = List.unmodifiable(ordered.sublist(from, from + maxPending));
+      dropped += ordered.length - maxPending;
     } else {
-      _events = List.unmodifiable(sorted);
+      _events = List.unmodifiable(ordered);
     }
     final available = {for (final event in _events) event.id: event};
     _consumedIds.removeWhere((id) {
@@ -274,6 +280,10 @@ final class DanmakuController extends ChangeNotifier {
     _rewindTo(_displayPosition);
     notifyListeners();
   }
+
+  /// Release rebuildable pixels while retaining bounded text layout and media
+  /// scheduling state. The owner reanchors to confirmed time before presenting.
+  void releaseRasterCache() => _layouts.releaseRasters();
 
   bool _sameEvent(DanmakuEvent a, DanmakuEvent b) =>
       a.text == b.text &&

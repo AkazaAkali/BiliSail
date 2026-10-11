@@ -15,7 +15,30 @@ final class AppImageCache extends ChangeNotifier {
 
   final ImageByteCache bytes;
   final ImageCache decoded;
+  final Map<AppImageProvider, _ImageDemand> _demands = {};
   bool get enabled => bytes.enabled;
+
+  AppImageConsumer _acquireConsumer(
+    AppImageProvider provider,
+    ImageLoadPriority priority,
+  ) {
+    final demand = _demands.putIfAbsent(provider, _ImageDemand.new);
+    final consumer = AppImageConsumer._(demand, priority, () {
+      if (demand.consumers.isNotEmpty) return;
+      if (identical(_demands[provider], demand)) {
+        _demands.remove(provider);
+        // Flutter's pending cache listener is not visible widget demand.
+        // Remove it before a returning viewport can resolve the cancelled task.
+        if (decoded.statusForKey(provider).pending) decoded.evict(provider);
+      }
+      for (final lease in demand.loads) {
+        lease.release();
+      }
+    });
+    demand.consumers.add(consumer);
+    demand.updatePriority();
+    return consumer;
+  }
 
   /// Reads the original sheet size without allocating its full decoded pixels.
   /// The later thumbnail resolution shares the same bounded byte cache.
@@ -84,6 +107,52 @@ final class AppImageCache extends ChangeNotifier {
   }
 }
 
+/// Widget demand is separate from a decoded stream's keepAlive handle. A ready
+/// frame can survive a page swipe without retaining unfinished transport.
+final class AppImageConsumer {
+  AppImageConsumer._(this._demand, this._priority, this._onRelease);
+  final _ImageDemand _demand;
+  final VoidCallback _onRelease;
+  ImageLoadPriority _priority;
+  bool _released = false;
+
+  void setPriority(ImageLoadPriority priority) {
+    if (_released || _priority == priority) return;
+    _priority = priority;
+    _demand.updatePriority();
+  }
+
+  void release() {
+    if (_released) return;
+    _released = true;
+    _demand.consumers.remove(this);
+    _demand.updatePriority();
+    _onRelease();
+  }
+}
+
+final class _ImageDemand {
+  final consumers = <AppImageConsumer>{};
+  final loads = <ImageByteLease>{};
+  bool get cancelled => consumers.isEmpty;
+  ImageLoadPriority get priority =>
+      consumers.any(
+        (consumer) => consumer._priority == ImageLoadPriority.visible,
+      )
+      ? ImageLoadPriority.visible
+      : ImageLoadPriority.prefetch;
+
+  void check() {
+    if (cancelled) throw const ImageLoadCancelled();
+  }
+
+  void updatePriority() {
+    for (final load in loads) {
+      load.setPriority(priority);
+    }
+  }
+}
+
 @immutable
 final class AppImageProvider extends ImageProvider<AppImageProvider> {
   AppImageProvider({
@@ -96,6 +165,9 @@ final class AppImageProvider extends ImageProvider<AppImageProvider> {
   final String url;
   final int generation;
   final int? cacheWidth, cacheHeight;
+
+  AppImageConsumer acquireConsumer(ImageLoadPriority priority) =>
+      cache._acquireConsumer(this, priority);
 
   /// Only a completed frame may bypass viewport admission or scroll deferral.
   /// Pending streams still need the usual visibility and loading policy.
@@ -155,29 +227,53 @@ final class AppImageProvider extends ImageProvider<AppImageProvider> {
   ImageStreamCompleter loadImage(
     AppImageProvider key,
     ImageDecoderCallback decode,
-  ) => MultiFrameImageStreamCompleter(codec: _codec(decode), scale: 1);
+  ) => MultiFrameImageStreamCompleter(
+    codec: _codec(decode, cache._demands[this]),
+    scale: 1,
+  );
 
-  Future<ui.Codec> _codec(ImageDecoderCallback decode) async {
+  Future<ui.Codec> _codec(
+    ImageDecoderCallback decode,
+    _ImageDemand? demand,
+  ) async {
+    Future<CachedImageBytes> load(Uri uri, {bool skipDisk = false}) async {
+      demand?.check();
+      final lease = cache.bytes.acquire(
+        uri,
+        skipDisk: skipDisk,
+        priority: demand?.priority ?? ImageLoadPriority.visible,
+      );
+      demand?.loads.add(lease);
+      try {
+        final result = await lease.result;
+        demand?.check();
+        return result;
+      } finally {
+        demand?.loads.remove(lease);
+        lease.release();
+      }
+    }
+
     try {
       if (generation != cache.bytes.generation) {
         throw const ImageLoadCancelled();
       }
       final uri = Uri.parse(url);
-      final result = await cache.bytes.load(uri);
+      final result = await load(uri);
       try {
-        return await _decode(result, decode);
+        return await _decode(result, decode, demand);
       } on Exception {
+        demand?.check();
         if (generation != cache.bytes.generation) rethrow;
         if (cache.enabled) await cache.bytes.invalidate(uri);
         if (!result.fromDisk) rethrow;
-        return await _decode(
-          await cache.bytes.load(uri, skipDisk: true),
-          decode,
-        );
+        return await _decode(await load(uri, skipDisk: true), decode, demand);
       }
     } catch (_) {
       // Failed pending completers must not poison future mounts of this URL.
-      cache.decoded.evict(this);
+      if (demand == null || identical(cache._demands[this], demand)) {
+        cache.decoded.evict(this);
+      }
       rethrow;
     }
   }
@@ -185,9 +281,16 @@ final class AppImageProvider extends ImageProvider<AppImageProvider> {
   Future<ui.Codec> _decode(
     CachedImageBytes result,
     ImageDecoderCallback decode,
+    _ImageDemand? demand,
   ) async {
+    demand?.check();
+    final buffer = await ui.ImmutableBuffer.fromUint8List(result.bytes);
+    if (generation != cache.bytes.generation || demand?.cancelled == true) {
+      buffer.dispose();
+      throw const ImageLoadCancelled();
+    }
     final codec = await decode(
-      await ui.ImmutableBuffer.fromUint8List(result.bytes),
+      buffer,
       getTargetSize: (width, height) {
         // Prevent large public images from retaining full-resolution decoded
         // surfaces. A stable size also gives identical URLs identical keys.
@@ -203,7 +306,7 @@ final class AppImageProvider extends ImageProvider<AppImageProvider> {
         );
       },
     );
-    if (generation != cache.bytes.generation) {
+    if (generation != cache.bytes.generation || demand?.cancelled == true) {
       codec.dispose();
       throw const ImageLoadCancelled();
     }

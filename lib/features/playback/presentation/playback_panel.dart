@@ -22,6 +22,7 @@ import '../domain/playback_repository.dart';
 import '../domain/content_playback.dart';
 import 'player_settings_dialog.dart';
 import 'playback_timeline_bar.dart';
+import 'playback_snapshot_builder.dart';
 import '../../../shared/ui/app_notice.dart';
 import '../../../shared/ui/bili_icons.dart';
 import '../../../shared/ui/shortcut_hint.dart';
@@ -130,6 +131,7 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
             widget.part,
             target: widget.target,
             title: widget.title,
+            visible: _active,
           ),
         );
         // Give an outgoing inline or fullscreen surface a frame to unmount.
@@ -197,10 +199,11 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
             widget.part,
             target: widget.target,
             title: widget.title,
+            visible: _active,
           ),
         );
       }
-      _configure();
+      if (!identical(widget.settings, oldWidget.settings)) _configure();
     });
     if (sourceChanged ||
         widget.settings.shortcuts != oldWidget.settings.shortcuts) {
@@ -813,21 +816,20 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                 widget.shortcuts,
                 widget.pageCommands,
               ]),
-              builder: (context, _) => ValueListenableBuilder<PlaybackSnapshot>(
-                valueListenable: session.snapshots,
-                builder: (context, snapshot, _) {
+              builder: (context, _) => PlaybackSnapshotBuilder(
+                snapshots: session.snapshots,
+                select: (snapshot) => (
+                  session.isLive,
+                  snapshot.phase,
+                  snapshot.duration,
+                  snapshot.desiredPlaying,
+                  snapshot.isBuffering,
+                  snapshot.isSeeking,
+                  snapshot.rate,
+                  snapshot.volume,
+                ),
+                builder: (context, snapshot) {
                   final settings = widget.settings.value;
-                  final durationMs = snapshot.duration.inMilliseconds
-                      .toDouble();
-                  final positionMs = snapshot.position.inMilliseconds
-                      .toDouble();
-                  final cue = session.subtitleCues
-                      .where(
-                        (cue) =>
-                            snapshot.position >= cue.start &&
-                            snapshot.position < cue.end,
-                      )
-                      .firstOrNull;
                   final controls =
                       widget.controlsVisible.value || session.error != null;
                   return WidthLayoutBuilder(
@@ -975,43 +977,56 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                   ),
                                 ),
                               ),
-                            if (cue != null)
-                              Positioned(
-                                left: 20,
-                                right: 20,
-                                bottom:
-                                    (controls ? 104 : 0) +
-                                    settings.subtitleBottomPadding,
-                                child: IgnorePointer(
-                                  child: Center(
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 4,
-                                      ),
-                                      color: Colors.black.withValues(
-                                        alpha:
-                                            settings.subtitleBackgroundOpacity,
-                                      ),
-                                      child: Text(
-                                        cue.text,
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize:
-                                              22 * settings.subtitleFontScale,
-                                          shadows: [
-                                            const Shadow(
-                                              color: Colors.black,
-                                              blurRadius: 4,
-                                            ),
-                                          ],
+                            PlaybackSnapshotBuilder(
+                              snapshots: session.snapshots,
+                              select: (snapshot) => snapshot.position,
+                              builder: (context, snapshot) {
+                                final cue = session.subtitleCues
+                                    .where(
+                                      (cue) =>
+                                          snapshot.position >= cue.start &&
+                                          snapshot.position < cue.end,
+                                    )
+                                    .firstOrNull;
+                                if (cue == null) return const SizedBox.shrink();
+                                return Positioned(
+                                  left: 20,
+                                  right: 20,
+                                  bottom:
+                                      (controls ? 104 : 0) +
+                                      settings.subtitleBottomPadding,
+                                  child: IgnorePointer(
+                                    child: Center(
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 4,
+                                        ),
+                                        color: Colors.black.withValues(
+                                          alpha: settings
+                                              .subtitleBackgroundOpacity,
+                                        ),
+                                        child: Text(
+                                          cue.text,
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize:
+                                                22 * settings.subtitleFontScale,
+                                            shadows: [
+                                              const Shadow(
+                                                color: Colors.black,
+                                                blurRadius: 4,
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ),
+                                );
+                              },
+                            ),
                             if (session.subtitleLoading ||
                                 session.subtitleMessage != null)
                               Positioned(
@@ -1116,26 +1131,35 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                   ),
                                 ),
                               ),
-                            if (session.currentSponsor case final segment?)
-                              Positioned(
-                                right: 16,
-                                bottom: controls ? 120 : 40,
-                                child: FilledButton.icon(
-                                  style: FilledButton.styleFrom(
-                                    visualDensity: VisualDensity.compact,
-                                    minimumSize: const Size(0, 32),
+                            PlaybackSnapshotBuilder(
+                              snapshots: session.snapshots,
+                              select: (_) => session.currentSponsor,
+                              builder: (context, _) {
+                                final segment = session.currentSponsor;
+                                if (segment == null) {
+                                  return const SizedBox.shrink();
+                                }
+                                return Positioned(
+                                  right: 16,
+                                  bottom: controls ? 120 : 40,
+                                  child: FilledButton.icon(
+                                    style: FilledButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      minimumSize: const Size(0, 32),
+                                    ),
+                                    onPressed: () =>
+                                        unawaited(session.skipSponsor(segment)),
+                                    icon: const Icon(
+                                      Icons.fast_forward,
+                                      size: 18,
+                                    ),
+                                    label: Text(
+                                      '跳过${sponsorCategoryLabel(segment.category)}',
+                                    ),
                                   ),
-                                  onPressed: () =>
-                                      unawaited(session.skipSponsor(segment)),
-                                  icon: const Icon(
-                                    Icons.fast_forward,
-                                    size: 18,
-                                  ),
-                                  label: Text(
-                                    '跳过${sponsorCategoryLabel(segment.category)}',
-                                  ),
-                                ),
-                              ),
+                                );
+                              },
+                            ),
                             if (session.error == null &&
                                 (session.isResolving ||
                                     snapshot.phase != PlaybackPhase.ended &&
@@ -1220,30 +1244,39 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                             if (!controls &&
                                 settings.showCollapsedProgress &&
                                 !session.isLive &&
-                                durationMs > 0)
-                              Positioned(
-                                left: 0,
-                                right: 0,
-                                bottom: 0,
-                                child: IgnorePointer(
-                                  child: CustomPaint(
-                                    foregroundPainter: ChapterBoundaryPainter(
-                                      chapters: session.chapters,
-                                      duration: snapshot.duration,
-                                      textDirection: Directionality.of(context),
-                                    ),
-                                    child: LinearProgressIndicator(
-                                      key: const ValueKey(
-                                        'player-collapsed-progress',
+                                snapshot.duration.inMilliseconds > 0)
+                              PlaybackSnapshotBuilder(
+                                snapshots: session.snapshots,
+                                select: (snapshot) =>
+                                    (snapshot.position, snapshot.duration),
+                                builder: (context, snapshot) => Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  child: IgnorePointer(
+                                    child: CustomPaint(
+                                      foregroundPainter: ChapterBoundaryPainter(
+                                        chapters: session.chapters,
+                                        duration: snapshot.duration,
+                                        textDirection: Directionality.of(
+                                          context,
+                                        ),
                                       ),
-                                      minHeight: 2,
-                                      borderRadius: BorderRadius.zero,
-                                      value: (positionMs / durationMs).clamp(
-                                        0,
-                                        1,
+                                      child: LinearProgressIndicator(
+                                        key: const ValueKey(
+                                          'player-collapsed-progress',
+                                        ),
+                                        minHeight: 2,
+                                        borderRadius: BorderRadius.zero,
+                                        value:
+                                            (snapshot.position.inMilliseconds /
+                                                    snapshot
+                                                        .duration
+                                                        .inMilliseconds)
+                                                .clamp(0, 1),
+                                        color: const Color(0xffdf6589),
+                                        backgroundColor: Colors.white24,
                                       ),
-                                      color: const Color(0xffdf6589),
-                                      backgroundColor: Colors.white24,
                                     ),
                                   ),
                                 ),
@@ -1302,30 +1335,46 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                               ),
                                             ),
                                           if (!session.isLive)
-                                            PlaybackTimelineBar(
-                                              key: ValueKey(
-                                                session.sourceGeneration,
+                                            PlaybackSnapshotBuilder(
+                                              snapshots: session.snapshots,
+                                              select: (snapshot) => (
+                                                snapshot.position,
+                                                snapshot.duration,
+                                                snapshot.buffered,
                                               ),
-                                              playerBoundsKey: _playerBoundsKey,
-                                              position: snapshot.position,
-                                              duration: snapshot.duration,
-                                              buffered: snapshot.buffered,
-                                              chapters: session.chapters,
-                                              storyboard: session.storyboard,
-                                              storyboardLoading:
-                                                  session.storyboardLoading,
-                                              storyboardMessage:
-                                                  session.storyboardMessage,
-                                              sourceGeneration:
-                                                  session.sourceGeneration,
-                                              onPreviewRequest: () => unawaited(
-                                                session.ensureStoryboard(),
-                                              ),
-                                              onSeek: (position) => unawaited(
-                                                session.seek(position),
-                                              ),
-                                              onMenuChanged:
-                                                  _onControlsMenuChanged,
+                                              builder: (context, snapshot) =>
+                                                  PlaybackTimelineBar(
+                                                    key: ValueKey(
+                                                      session.sourceGeneration,
+                                                    ),
+                                                    playerBoundsKey:
+                                                        _playerBoundsKey,
+                                                    position: snapshot.position,
+                                                    duration: snapshot.duration,
+                                                    buffered: snapshot.buffered,
+                                                    chapters: session.chapters,
+                                                    storyboard:
+                                                        session.storyboard,
+                                                    storyboardLoading: session
+                                                        .storyboardLoading,
+                                                    storyboardMessage: session
+                                                        .storyboardMessage,
+                                                    sourceGeneration: session
+                                                        .sourceGeneration,
+                                                    onPreviewRequest: () =>
+                                                        unawaited(
+                                                          session
+                                                              .ensureStoryboard(),
+                                                        ),
+                                                    onSeek: (position) =>
+                                                        unawaited(
+                                                          session.seek(
+                                                            position,
+                                                          ),
+                                                        ),
+                                                    onMenuChanged:
+                                                        _onControlsMenuChanged,
+                                                  ),
                                             ),
                                           Padding(
                                             padding: const EdgeInsets.symmetric(
@@ -1512,13 +1561,18 @@ class _ControlBar extends StatelessWidget {
       onFocus: onFocus,
       shortcuts: settings.shortcuts,
     );
-    final time = Text(
-      session.isLive
-          ? '直播中'
-          : '${_time(snapshot.position)} / ${_time(snapshot.duration)}',
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: const TextStyle(color: Colors.white70, fontSize: 11),
+    final time = PlaybackSnapshotBuilder(
+      snapshots: session.snapshots,
+      select: (snapshot) =>
+          (snapshot.position.inSeconds, snapshot.duration.inSeconds),
+      builder: (context, snapshot) => Text(
+        session.isLive
+            ? '直播中'
+            : '${_time(snapshot.position)} / ${_time(snapshot.duration)}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Colors.white70, fontSize: 11),
+      ),
     );
     final fullscreenButton = IconButton(
       tooltip: shortcutHint(
@@ -1921,46 +1975,46 @@ class _VolumeSliderEntryState extends State<_VolumeSliderEntry> {
   int _dragRevision = 0;
 
   @override
-  Widget build(BuildContext context) =>
-      ValueListenableBuilder<PlaybackSnapshot>(
-        valueListenable: widget.session.snapshots,
-        builder: (context, snapshot, _) {
-          final volume = (_draft ?? snapshot.volume).clamp(0.0, 100.0);
-          return SizedBox(
-            width: 216,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text('音量 ${volume.round()}%'),
-                ),
-                Semantics(
-                  label: '音量',
-                  child: Slider(
-                    key: const ValueKey('player-volume-slider'),
-                    value: volume,
-                    max: 100,
-                    semanticFormatterCallback: (value) => '${value.round()}%',
-                    onChangeStart: (_) => _dragRevision++,
-                    onChanged: (value) {
-                      setState(() => _draft = value);
-                      unawaited(widget.session.setVolume(value));
-                    },
-                    onChangeEnd: (value) async {
-                      final revision = _dragRevision;
-                      await widget.session.setVolume(value);
-                      if (mounted && revision == _dragRevision) {
-                        setState(() => _draft = null);
-                      }
-                    },
-                  ),
-                ),
-              ],
+  Widget build(BuildContext context) => PlaybackSnapshotBuilder(
+    snapshots: widget.session.snapshots,
+    select: (snapshot) => snapshot.volume,
+    builder: (context, snapshot) {
+      final volume = (_draft ?? snapshot.volume).clamp(0.0, 100.0);
+      return SizedBox(
+        width: 216,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('音量 ${volume.round()}%'),
             ),
-          );
-        },
+            Semantics(
+              label: '音量',
+              child: Slider(
+                key: const ValueKey('player-volume-slider'),
+                value: volume,
+                max: 100,
+                semanticFormatterCallback: (value) => '${value.round()}%',
+                onChangeStart: (_) => _dragRevision++,
+                onChanged: (value) {
+                  setState(() => _draft = value);
+                  unawaited(widget.session.setVolume(value));
+                },
+                onChangeEnd: (value) async {
+                  final revision = _dragRevision;
+                  await widget.session.setVolume(value);
+                  if (mounted && revision == _dragRevision) {
+                    setState(() => _draft = null);
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
       );
+    },
+  );
 }
 
 typedef _ControlsLayoutInputs = ({

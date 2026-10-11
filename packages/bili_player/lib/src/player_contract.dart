@@ -107,6 +107,15 @@ final class VideoDimensions {
 
   final int width;
   final int height;
+
+  @override
+  bool operator ==(Object other) =>
+      other is VideoDimensions &&
+      width == other.width &&
+      height == other.height;
+
+  @override
+  int get hashCode => Object.hash(width, height);
 }
 
 final class PlaybackSnapshot {
@@ -139,6 +148,36 @@ final class PlaybackSnapshot {
 
   /// Null until this source reports valid decoded video dimensions.
   final VideoDimensions? videoDimensions;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PlaybackSnapshot &&
+      phase == other.phase &&
+      generation == other.generation &&
+      position == other.position &&
+      duration == other.duration &&
+      buffered == other.buffered &&
+      desiredPlaying == other.desiredPlaying &&
+      isBuffering == other.isBuffering &&
+      isSeeking == other.isSeeking &&
+      rate == other.rate &&
+      volume == other.volume &&
+      videoDimensions == other.videoDimensions;
+
+  @override
+  int get hashCode => Object.hash(
+    phase,
+    generation,
+    position,
+    duration,
+    buffered,
+    desiredPlaying,
+    isBuffering,
+    isSeeking,
+    rate,
+    volume,
+    videoDimensions,
+  );
 
   PlaybackSnapshot copyWith({
     PlaybackPhase? phase,

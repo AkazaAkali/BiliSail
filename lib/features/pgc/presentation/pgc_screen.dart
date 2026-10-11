@@ -63,9 +63,12 @@ final class PgcScreen extends ConsumerStatefulWidget {
 final class _PgcScreenState extends ConsumerState<PgcScreen> {
   late PgcLocator _locator;
   int _tab = 0;
-  bool _descriptionExpanded = false;
   bool? _infoVisible;
   final ScrollController _introScroll = ScrollController();
+  PgcSeason? _playerSeason;
+  PgcEpisode? _playerEpisode;
+  PgcPlayerBuilder? _playerBuilder;
+  Widget? _playerContent;
 
   @override
   void dispose() {
@@ -99,7 +102,6 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
     if (oldWidget.seasonId != widget.seasonId) {
       _locator = next;
       _tab = 0;
-      _descriptionExpanded = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _introScroll.hasClients) _introScroll.jumpTo(0);
       });
@@ -186,6 +188,7 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
       );
     }
     final selected = state.selectedEpisode;
+    final player = _player(season, selected);
     return PlaybackPageCommands(
       previousPart: () => _stepEpisode(season, selected, -1),
       nextPart: () => _stepEpisode(season, selected, 1),
@@ -202,21 +205,6 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
           final showInfo = _infoVisible ?? width >= 700;
           void toggleInfo() =>
               setState(() => _infoVisible = !(_infoVisible ?? width >= 700));
-          final player = ColoredBox(
-            key: const ValueKey('pgc-player'),
-            color: Colors.black,
-            child: selected == null
-                ? const StateView.empty(
-                    message: '这个作品暂无可选择的剧集',
-                    icon: Icons.movie_outlined,
-                  )
-                : selected.playable
-                ? widget.playerBuilder(context, season, selected)
-                : StateView.empty(
-                    message: selected.unavailableReason,
-                    icon: Icons.lock_outline,
-                  ),
-          );
           final info = Material(
             color: Theme.of(context).colorScheme.surface,
             child: Column(
@@ -267,11 +255,29 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
                             season,
                             episode,
                           ),
-                          _ => SingleChildScrollView(
+                          _ => CustomScrollView(
                             key: const ValueKey('pgc-intro'),
                             controller: _introScroll,
-                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                            child: _details(context, season, selected),
+                            slivers: [
+                              SliverPadding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  16,
+                                  16,
+                                  0,
+                                ),
+                                sliver: SliverToBoxAdapter(
+                                  child: _details(context, season, selected),
+                                ),
+                              ),
+                              _PgcRelatedSeasons(
+                                season: season,
+                                onOpen: widget.onOpenSeason,
+                              ),
+                              const SliverToBoxAdapter(
+                                child: SizedBox(height: 24),
+                              ),
+                            ],
                           ),
                         },
                       ),
@@ -350,6 +356,38 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
         },
       ),
     );
+  }
+
+  Widget _player(PgcSeason season, PgcEpisode? episode) {
+    final cached = _playerContent;
+    if (cached == null ||
+        !identical(_playerSeason, season) ||
+        !identical(_playerEpisode, episode) ||
+        _playerBuilder != widget.playerBuilder) {
+      _playerSeason = season;
+      _playerEpisode = episode;
+      final builder = _playerBuilder = widget.playerBuilder;
+      final content = ColoredBox(
+        key: const ValueKey('pgc-player'),
+        color: Colors.black,
+        child: episode == null
+            ? const StateView.empty(
+                message: '这个作品暂无可选择的剧集',
+                icon: Icons.movie_outlined,
+              )
+            : episode.playable
+            // Keep inherited dependencies on this element, so settings/theme
+            // updates still reach the injected player without sidebar rebuilds.
+            ? Builder(builder: (context) => builder(context, season, episode))
+            : StateView.empty(
+                message: episode.unavailableReason,
+                icon: Icons.lock_outline,
+              ),
+      );
+      _playerContent = content;
+      return content;
+    }
+    return cached;
   }
 
   void _stepEpisode(
@@ -439,12 +477,6 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
   ) {
     final text = Theme.of(context).textTheme;
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-    final relatedSeasons = season.relatedSeasons
-        .where(
-          (related) =>
-              related.id != season.id && related.title.trim().isNotEmpty,
-        )
-        .toList(growable: false);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -491,30 +523,7 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
               ),
           ],
         ),
-        if (season.description.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          SelectionArea(
-            child: Text(
-              season.description,
-              maxLines: _descriptionExpanded ? null : 2,
-              overflow: _descriptionExpanded ? null : TextOverflow.ellipsis,
-              style: text.bodySmall?.copyWith(height: 1.4, color: muted),
-            ),
-          ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: () =>
-                  setState(() => _descriptionExpanded = !_descriptionExpanded),
-              icon: Icon(
-                _descriptionExpanded ? Icons.expand_less : Icons.expand_more,
-                size: 16,
-              ),
-              label: Text(_descriptionExpanded ? '收起' : '展开'),
-            ),
-          ),
-        ] else
-          const Padding(padding: EdgeInsets.only(top: 8), child: Text('暂无简介')),
+        _PgcDescription(key: ValueKey(season.id), text: season.description),
         if (selected != null && !selected.playable) ...[
           const SizedBox(height: 4),
           Text(
@@ -536,15 +545,6 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
             if (changed) widget.onEpisodeChanged?.call(episode);
           },
         ),
-        if (relatedSeasons.isNotEmpty) ...[
-          const SizedBox(height: 20),
-          const Divider(height: 1),
-          const SizedBox(height: 18),
-          Text('${season.title}系列', style: text.titleSmall),
-          const SizedBox(height: 12),
-          for (final related in relatedSeasons)
-            _relatedSeason(context, related),
-        ],
       ],
     );
   }
@@ -561,51 +561,192 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
       Text(label, style: Theme.of(context).textTheme.bodySmall),
     ],
   );
+}
 
-  Widget _relatedSeason(BuildContext context, PgcSeasonSummary related) =>
-      Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: InkWell(
-          key: ValueKey('pgc-related-${related.seasonId}'),
-          borderRadius: BorderRadius.circular(6),
-          onTap: widget.onOpenSeason == null
-              ? null
-              : () => widget.onOpenSeason?.call(related),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(5),
-                child: related.coverUrl == null
-                    ? const SizedBox(
-                        width: 96,
-                        height: 54,
-                        child: ColoredBox(
-                          color: Colors.black12,
-                          child: Icon(Icons.movie_outlined),
-                        ),
-                      )
-                    : AppCoverImage(
-                        url: related.coverUrl.toString(),
-                        width: 96,
-                        height: 54,
-                        fit: BoxFit.cover,
-                      ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    related.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
+final class _PgcDescription extends StatefulWidget {
+  const _PgcDescription({super.key, required this.text});
+  final String text;
+
+  @override
+  State<_PgcDescription> createState() => _PgcDescriptionState();
+}
+
+final class _PgcDescriptionState extends State<_PgcDescription> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.text.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 8),
+        child: Text('暂无简介'),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 8),
+        SelectionArea(
+          child: Text(
+            widget.text,
+            maxLines: _expanded ? null : 2,
+            overflow: _expanded ? null : TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              height: 1.4,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: () => setState(() => _expanded = !_expanded),
+            icon: Icon(
+              _expanded ? Icons.expand_less : Icons.expand_more,
+              size: 16,
+            ),
+            label: Text(_expanded ? '收起' : '展开'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+final class _PgcRelatedSeasons extends StatefulWidget {
+  const _PgcRelatedSeasons({required this.season, required this.onOpen});
+  final PgcSeason season;
+  final ValueChanged<PgcSeasonSummary>? onOpen;
+
+  @override
+  State<_PgcRelatedSeasons> createState() => _PgcRelatedSeasonsState();
+}
+
+final class _PgcRelatedSeasonsState extends State<_PgcRelatedSeasons> {
+  late List<PgcSeasonSummary> _items;
+  late SliverChildBuilderDelegate _delegate;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateItems();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PgcRelatedSeasons oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.season.id != widget.season.id ||
+        !identical(
+          oldWidget.season.relatedSeasons,
+          widget.season.relatedSeasons,
+        ) ||
+        oldWidget.onOpen != widget.onOpen) {
+      _updateItems();
+    }
+  }
+
+  void _updateItems() {
+    final items = _items = widget.season.relatedSeasons
+        .where(
+          (item) => item.id != widget.season.id && item.title.trim().isNotEmpty,
+        )
+        .toList(growable: false);
+    final onOpen = widget.onOpen;
+    final indices = {for (var i = 0; i < items.length; i++) items[i].id: i};
+    _delegate = SliverChildBuilderDelegate(
+      (context, index) => _PgcRelatedSeasonTile(
+        key: ValueKey(items[index].id),
+        related: items[index],
+        onOpen: onOpen,
+      ),
+      childCount: items.length,
+      findChildIndexCallback: (key) =>
+          key is ValueKey<PgcSeasonId> ? indices[key.value] : null,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => _items.isEmpty
+      ? const SliverToBoxAdapter(child: SizedBox.shrink())
+      : SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          sliver: SliverMainAxisGroup(
+            slivers: [
+              SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 20),
+                    const Divider(height: 1),
+                    const SizedBox(height: 18),
+                    Text(
+                      '${widget.season.title}系列',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                 ),
+              ),
+              SliverList(
+                key: const ValueKey('pgc-related-list'),
+                delegate: _delegate,
               ),
             ],
           ),
-        ),
-      );
+        );
+}
+
+final class _PgcRelatedSeasonTile extends StatelessWidget {
+  const _PgcRelatedSeasonTile({
+    super.key,
+    required this.related,
+    required this.onOpen,
+  });
+  final PgcSeasonSummary related;
+  final ValueChanged<PgcSeasonSummary>? onOpen;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: InkWell(
+      key: ValueKey('pgc-related-${related.seasonId}'),
+      borderRadius: BorderRadius.circular(6),
+      onTap: onOpen == null ? null : () => onOpen?.call(related),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: related.coverUrl == null
+                ? const SizedBox(
+                    width: 96,
+                    height: 54,
+                    child: ColoredBox(
+                      color: Colors.black12,
+                      child: Icon(Icons.movie_outlined),
+                    ),
+                  )
+                : AppCoverImage(
+                    url: related.coverUrl.toString(),
+                    width: 96,
+                    height: 54,
+                    fit: BoxFit.cover,
+                  ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                related.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

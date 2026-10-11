@@ -41,6 +41,7 @@ final class ImageLoadRequest {
   }
 
   void cancel() {
+    if (_cancelled) return;
     _cancelled = true;
     _abort?.call();
   }
@@ -108,13 +109,71 @@ final class CachedImageBytes {
   final bool fromDisk;
 }
 
+/// Visible images take the next free transport slot before viewport prefetch.
+enum ImageLoadPriority { visible, prefetch }
+
+/// One consumer of a shared URL transfer. Releasing a lease never cancels
+/// another consumer; the last release cancels unfinished transport immediately.
+final class ImageByteLease {
+  ImageByteLease._(this.result, this._release, this._setPriority);
+  final Future<CachedImageBytes> result;
+  final void Function() _release;
+  final void Function(ImageLoadPriority) _setPriority;
+  bool _released = false;
+
+  void setPriority(ImageLoadPriority priority) {
+    if (!_released) _setPriority(priority);
+  }
+
+  void release() {
+    if (_released) return;
+    _released = true;
+    _release();
+  }
+}
+
+final class _ImageTask {
+  _ImageTask({
+    required this.uri,
+    required this.scope,
+    required this.generation,
+    required this.policy,
+    required this.storageEpoch,
+    required this.request,
+    required this.skipDisk,
+  });
+  final Uri uri;
+  final String scope;
+  final int generation, policy, storageEpoch;
+  final ImageLoadRequest request;
+  final bool skipDisk;
+  final result = Completer<CachedImageBytes>();
+  final cancelled = Completer<void>();
+  final consumers = <Object, ImageLoadPriority>{};
+  Completer<void>? slot;
+  bool get visible => consumers.values.contains(ImageLoadPriority.visible);
+}
+
+final class _DiskEntry {
+  _DiskEntry(this.file, this.size, this.modified);
+  final File file;
+  final int size;
+  DateTime modified;
+}
+
+final class _PendingImageWrite {
+  _PendingImageWrite(this.task, this.bytes);
+  final _ImageTask task;
+  final Uint8List bytes;
+}
+
 /// Account-scoped, bounded, best-effort storage. Disk failures never prevent a
 /// successfully downloaded image from being displayed. Only digests and numeric
 /// timestamps are written; URLs and account identifiers are never persisted.
 final class ImageByteCache {
-  // Public named injection points keep fake loaders and directories simple.
   ImageByteCache({
     required this.directory,
+    this.fileForPath = File.new,
     this.loader = loadPublicImage,
     DateTime Function()? now,
     this.maxEntries = 512,
@@ -122,6 +181,8 @@ final class ImageByteCache {
     this.maxImageBytes = 4 * 1024 * 1024,
     this.maxConcurrent = 6,
     this.maxPending = 64,
+    this.maxPendingWrites = 16,
+    this.maxPendingWriteBytes = 16 * 1024 * 1024,
     this.ttl = const Duration(days: 7),
     this.timeout = const Duration(seconds: 15),
     bool enabled = true,
@@ -130,20 +191,31 @@ final class ImageByteCache {
        _enabled = enabled;
 
   final Future<Directory> Function() directory;
+  final File Function(String path) fileForPath;
   final ImageByteLoader loader;
   final DateTime Function() _now;
   final int maxEntries, maxTotalBytes, maxImageBytes, maxConcurrent, maxPending;
+  final int maxPendingWrites, maxPendingWriteBytes;
   final Duration ttl, timeout;
-  final Map<String, Future<CachedImageBytes>> _inFlight = {};
-  final Set<ImageLoadRequest> _requests = {};
-  final List<Completer<void>> _waiting = [];
+  final Map<String, _ImageTask> _inFlight = {};
+  final Set<Future<void>> _running = {};
+  final List<_ImageTask> _waiting = [];
   final _capacityChanges = StreamController<void>.broadcast();
+  final Map<String, _DiskEntry> _entries = {};
+  final Map<String, _PendingImageWrite> _pendingWriteBuffers = {};
   Future<void> _diskQueue = Future.value();
+  int _diskBytes = 0;
+  int _pendingWrites = 0;
+  int _pendingWriteBytes = 0;
+  final Set<Future<void>> _diskReads = {};
   int _active = 0;
   int _generation = 0;
   int _policyGeneration = 0;
+  int _storageEpoch = 0;
   bool _closed = false;
   bool _initialized = false;
+  bool _initializationScheduled = false;
+  bool _dispatchScheduled = false;
   bool _enabled;
   String _scope = 'guest';
   bool get enabled => _enabled;
@@ -151,8 +223,15 @@ final class ImageByteCache {
   String get scope => _scope;
   bool get hasCapacity => !_closed && _inFlight.length < maxPending;
 
-  /// Consumers wait outside the bounded transport queue and retry only while
-  /// visible. A completed request makes room even if its download failed.
+  /// Includes the running write, so a blocked disk cannot retain unbounded
+  /// downloaded byte buffers. Writes beyond either budget are simply skipped.
+  int get pendingWrites => _pendingWrites;
+  int get pendingWriteBytes => _pendingWriteBytes;
+
+  /// Wait for optional persistence at explicit shutdown/verification boundaries.
+  /// Display and transport admission never wait for this drain.
+  Future<void> flushWrites() => _diskQueue;
+
   Stream<void> get capacityChanges => _capacityChanges.stream;
 
   set enabled(bool value) {
@@ -182,185 +261,339 @@ final class ImageByteCache {
 
   void invalidateSession() {
     ++_generation;
-    for (final request in _requests) {
-      request.cancel();
+    for (final entry in _inFlight.entries.toList()) {
+      _cancel(entry.key, entry.value);
     }
   }
 
-  Future<void> clearScope(String scope) => _diskOperation(() async {
-    final root = await directory();
-    final scopeDirectory = Directory(path.join(root.path, _digest(scope)));
-    if (await scopeDirectory.exists()) {
-      await scopeDirectory.delete(recursive: true);
-    }
-  });
-
-  Future<CachedImageBytes> load(Uri uri, {bool skipDisk = false}) {
-    if (_closed || !isPublicImageUri(uri)) {
-      return Future.error(const ImageLoadCancelled());
-    }
-    final generation = _generation;
-    final scope = _scope;
-    final key = '$generation:${_digest(uri.toString())}';
-    final previous = _inFlight[key];
-    if (previous != null) return previous;
-    if (_inFlight.length >= maxPending) {
-      return Future.error(const ImageQueueFull());
-    }
-    final policy = _policyGeneration;
-    final request = ImageLoadRequest(maxBytes: maxImageBytes, timeout: timeout);
-    _requests.add(request);
-    late final Future<CachedImageBytes> task;
-    task = _load(uri, scope, generation, policy, request, skipDisk)
-        .whenComplete(() {
-          _requests.remove(request);
-          if (identical(_inFlight[key], task)) {
-            _inFlight.remove(key);
-            if (!_closed && _capacityChanges.hasListener) {
-              _capacityChanges.add(null);
-            }
-          }
-        });
-    _inFlight[key] = task;
-    return task;
-  }
-
-  Future<CachedImageBytes> _load(
-    Uri uri,
-    String scope,
-    int generation,
-    int policy,
-    ImageLoadRequest request,
-    bool skipDisk,
-  ) async {
-    final key = _digest(uri.toString());
-    Uint8List? cached;
-    if (_enabled && !skipDisk) {
-      await _diskOperation(() async {
-        if (!_enabled || policy != _policyGeneration) return;
-        final file = await _file(scope, key);
-        if (!await file.exists()) return;
-        try {
-          final stat = await file.stat();
-          if (stat.size > maxImageBytes + 256) throw const FormatException();
-          final content = await file.readAsBytes();
-          final separator = content.indexOf(10);
-          if (separator < 0 || separator > 255) throw const FormatException();
-          final Object? decoded = jsonDecode(
-            utf8.decode(content.sublist(0, separator)),
-          );
-          if (decoded is! Map<String, Object?>) throw const FormatException();
-          final created = decoded['created'];
-          final bytes = Uint8List.sublistView(content, separator + 1);
-          if (created is! int ||
-              bytes.isEmpty ||
-              bytes.length > maxImageBytes ||
-              _now().millisecondsSinceEpoch - created > ttl.inMilliseconds ||
-              sha256.convert(bytes).toString() != decoded['digest']) {
-            throw const FormatException();
-          }
-          cached = bytes;
-          await file.setLastModified(_now());
-        } on FormatException {
-          await file.delete();
+  Future<void> clearScope(String scope) {
+    // Invalidate pending writes synchronously, including loads that have not
+    // reached the write queue yet. The serialized delete then drains old work.
+    ++_storageEpoch;
+    return _diskOperation(() async {
+      final root = await directory();
+      final scopeDirectory = Directory(path.join(root.path, _digest(scope)));
+      if (await scopeDirectory.exists()) {
+        await scopeDirectory.delete(recursive: true);
+      }
+      for (final entry in _entries.values.toList()) {
+        if (path.isWithin(scopeDirectory.path, entry.file.path)) {
+          _forget(entry.file.path);
         }
-      });
-      request.check();
-      if (generation != _generation) throw const ImageLoadCancelled();
-      if (cached case final Uint8List bytes
-          when _enabled && policy == _policyGeneration) {
-        return CachedImageBytes(bytes, fromDisk: true);
+      }
+    });
+  }
+
+  /// Non-widget consumers own demand until completion; widgets use acquire so
+  /// viewport/source disposal can release their demand before completion.
+  Future<CachedImageBytes> load(Uri uri, {bool skipDisk = false}) {
+    final lease = acquire(uri, skipDisk: skipDisk);
+    return lease.result.whenComplete(lease.release);
+  }
+
+  ImageByteLease acquire(
+    Uri uri, {
+    bool skipDisk = false,
+    ImageLoadPriority priority = ImageLoadPriority.visible,
+  }) {
+    if (_closed || !isPublicImageUri(uri)) {
+      return ImageByteLease._(
+        Future.error(const ImageLoadCancelled()),
+        () {},
+        (_) {},
+      );
+    }
+    final key = '$_generation:${_digest(uri.toString())}';
+    var task = _inFlight[key];
+    if (task == null) {
+      if (_inFlight.length >= maxPending) {
+        return ImageByteLease._(
+          Future.error(const ImageQueueFull()),
+          () {},
+          (_) {},
+        );
+      }
+      task = _ImageTask(
+        uri: uri,
+        scope: _scope,
+        generation: _generation,
+        policy: _policyGeneration,
+        storageEpoch: _storageEpoch,
+        request: ImageLoadRequest(maxBytes: maxImageBytes, timeout: timeout),
+        skipDisk: skipDisk,
+      );
+      _inFlight[key] = task;
+      // A consumer may release a deferred image before Flutter listens.
+      // Keep cancellation handled while preserving errors on the result.
+      unawaited(
+        task.result.future.then<void>(
+          (_) {},
+          onError: (Object _, StackTrace _) {},
+        ),
+      );
+      final created = task;
+      late final Future<void> running;
+      running = Future<void>.microtask(() => _run(key, created))
+          .whenComplete(() => _running.remove(running));
+      _running.add(running);
+    }
+    final shared = task;
+    final consumer = Object();
+    shared.consumers[consumer] = priority;
+    return ImageByteLease._(shared.result.future, () {
+      shared.consumers.remove(consumer);
+      if (shared.consumers.isEmpty && !shared.result.isCompleted) {
+        _cancel(key, shared);
+      }
+    }, (value) => shared.consumers[consumer] = value);
+  }
+
+  void _remove(String key, _ImageTask task) {
+    if (!identical(_inFlight[key], task)) return;
+    _inFlight.remove(key);
+    if (!_closed && _capacityChanges.hasListener) _capacityChanges.add(null);
+  }
+
+  void _cancel(String key, _ImageTask task) {
+    task.request.cancel();
+    if (!task.cancelled.isCompleted) task.cancelled.complete();
+    if (_waiting.remove(task)) {
+      task.slot?.completeError(const ImageLoadCancelled());
+    }
+    if (!task.result.isCompleted) {
+      task.result.completeError(const ImageLoadCancelled());
+    }
+    _remove(key, task);
+  }
+
+  Future<void> _run(String key, _ImageTask task) async {
+    try {
+      task.request.check();
+      final result = await Future.any([
+        _load(task),
+        task.cancelled.future.then<CachedImageBytes>(
+          (_) => throw const ImageLoadCancelled(),
+        ),
+      ]);
+      if (!task.result.isCompleted) task.result.complete(result);
+    } catch (error, stack) {
+      if (!task.result.isCompleted) task.result.completeError(error, stack);
+    } finally {
+      _remove(key, task);
+    }
+  }
+
+  Future<CachedImageBytes> _load(_ImageTask task) async {
+    final key = _digest(task.uri.toString());
+    final pending = _pendingWriteBuffers['${task.generation}:$key'];
+    if (!task.skipDisk && pending != null && _canStore(pending.task)) {
+      return CachedImageBytes(pending.bytes);
+    }
+    if (_enabled && !task.skipDisk && _diskReads.length < maxPending) {
+      // Disk hits may proceed while optional writes wait. Atomic replacement
+      // means a reader sees either a complete old file or a complete new file.
+      // Initialization/maintenance remains on the serialized writer queue.
+      if (!_initialized && !_initializationScheduled) {
+        _initializationScheduled = true;
+        unawaited(
+          _diskOperation(() async {}).whenComplete(() {
+            _initializationScheduled = false;
+          }),
+        );
+      }
+      final cached = await _read(task, key);
+      task.request.check();
+      if (cached != null && _canStore(task)) {
+        return CachedImageBytes(cached, fromDisk: true);
       }
     }
-    await _acquire();
+    await _acquire(task);
     try {
-      request.check();
-      final bytes = await loader(uri, request).timeout(
-        timeout,
-        onTimeout: () {
-          request.cancel();
-          throw TimeoutException('Image deadline exceeded');
-        },
-      );
-      request.check();
-      if (generation != _generation) throw const ImageLoadCancelled();
+      task.request.check();
+      final bytes =
+          await Future.any([
+            loader(task.uri, task.request),
+            task.cancelled.future.then<Uint8List>(
+              (_) => throw const ImageLoadCancelled(),
+            ),
+          ]).timeout(
+            timeout,
+            onTimeout: () {
+              task.request.cancel();
+              throw TimeoutException('Image deadline exceeded');
+            },
+          );
+      task.request.check();
+      if (task.generation != _generation) throw const ImageLoadCancelled();
       if (bytes.isEmpty || bytes.length > maxImageBytes) {
         throw const HttpException('Image response size rejected');
       }
-      if (_enabled && policy == _policyGeneration) {
-        await _diskOperation(() async {
-          if (!_enabled ||
-              policy != _policyGeneration ||
-              generation != _generation) {
-            return;
-          }
-          final file = await _file(scope, key);
-          await file.parent.create(recursive: true);
-          final temporary = File('${file.path}.tmp');
-          final header = utf8.encode(
-            '${jsonEncode({'created': _now().millisecondsSinceEpoch, 'digest': sha256.convert(bytes).toString()})}\n',
-          );
-          try {
-            final sink = temporary.openWrite();
-            try {
-              sink.add(header);
-              sink.add(bytes);
-              await sink.flush();
-            } finally {
-              await sink.close();
-            }
-            if (!_enabled ||
-                policy != _policyGeneration ||
-                generation != _generation) {
-              return;
-            }
-            if (await file.exists()) await file.delete();
-            await temporary.rename(file.path);
-            await file.setLastModified(_now());
-            await _prune();
-          } finally {
-            if (await temporary.exists()) await temporary.delete();
-          }
-        });
-      }
-      request.check();
-      if (generation != _generation) throw const ImageLoadCancelled();
+      _scheduleWrite(task, key, bytes);
       return CachedImageBytes(bytes);
     } finally {
       _release();
     }
   }
 
-  Future<File> _file(String scope, String key) async =>
-      File(path.join((await directory()).path, _digest(scope), '$key.img'));
+  Future<Uint8List?> _read(_ImageTask task, String key) async {
+    Uint8List? cached;
+    late final Future<void> operation;
+    operation = (() async {
+      try {
+        if (!_canStore(task) || task.request.cancelled) return;
+        final file = await _file(task.scope, key);
+        final observedEntry = _entries[file.path];
+        final stat = await file.stat();
+        if (stat.type != FileSystemEntityType.file ||
+            stat.size > maxImageBytes + 256) {
+          return;
+        }
+        final content = await file.readAsBytes();
+        final separator = content.indexOf(10);
+        if (separator < 0 || separator > 255) return;
+        final Object? decoded = jsonDecode(
+          utf8.decode(content.sublist(0, separator)),
+        );
+        if (decoded is! Map<String, Object?>) return;
+        final created = decoded['created'];
+        final bytes = Uint8List.sublistView(content, separator + 1);
+        if (created is! int ||
+            bytes.isEmpty ||
+            bytes.length > maxImageBytes ||
+            _now().millisecondsSinceEpoch - created > ttl.inMilliseconds ||
+            sha256.convert(bytes).toString() != decoded['digest'] ||
+            !_canStore(task) ||
+            task.request.cancelled) {
+          return;
+        }
+        cached = bytes;
+        await file.setLastModified(_now());
+        // Readers only touch an existing entry. A concurrent clear, invalidate
+        // or eviction must never be undone by a late read re-inserting it.
+        final entry = _entries[file.path];
+        if (_canStore(task) &&
+            entry != null &&
+            identical(entry, observedEntry)) {
+          entry.modified = _now();
+        }
+      } on Exception {
+        // Missing, expired or corrupt data is a cache miss. A later atomic
+        // write replaces it; no racing delete can remove another writer's file.
+      }
+    })().whenComplete(() => _diskReads.remove(operation));
+    _diskReads.add(operation);
+    await operation;
+    return cached;
+  }
 
-  Future<void> invalidate(Uri uri) => _diskOperation(() async {
-    final file = await _file(_scope, _digest(uri.toString()));
-    if (await file.exists()) await file.delete();
-  });
+  bool _canStore(_ImageTask task) =>
+      _enabled &&
+      task.policy == _policyGeneration &&
+      task.generation == _generation &&
+      task.storageEpoch == _storageEpoch;
 
-  Future<void> _prune() async {
+  void _scheduleWrite(_ImageTask task, String key, Uint8List bytes) {
+    if (!_canStore(task) ||
+        _pendingWrites >= maxPendingWrites ||
+        _pendingWriteBytes + bytes.length > maxPendingWriteBytes) {
+      return;
+    }
+    ++_pendingWrites;
+    _pendingWriteBytes += bytes.length;
+    final bufferKey = '${task.generation}:$key';
+    final pending = _PendingImageWrite(task, bytes);
+    _pendingWriteBuffers[bufferKey] = pending;
+    unawaited(
+      _diskOperation(() async {
+        if (!_canStore(task)) return;
+        final file = await _file(task.scope, key);
+        await file.parent.create(recursive: true);
+        final temporary = File('${file.path}.tmp');
+        final header = utf8.encode(
+          '${jsonEncode({'created': _now().millisecondsSinceEpoch, 'digest': sha256.convert(bytes).toString()})}\n',
+        );
+        try {
+          final sink = temporary.openWrite();
+          try {
+            sink.add(header);
+            sink.add(bytes);
+            await sink.flush();
+          } finally {
+            await sink.close();
+          }
+          if (!_canStore(task)) return;
+          await temporary.rename(file.path);
+          await file.setLastModified(_now());
+          _remember(file, header.length + bytes.length);
+          await _pruneIndex();
+        } finally {
+          if (await temporary.exists()) await temporary.delete();
+        }
+      }).whenComplete(() {
+        if (identical(_pendingWriteBuffers[bufferKey], pending)) {
+          _pendingWriteBuffers.remove(bufferKey);
+        }
+        --_pendingWrites;
+        _pendingWriteBytes -= bytes.length;
+      }),
+    );
+  }
+
+  Future<File> _file(String scope, String key) async => fileForPath(
+    path.join((await directory()).path, _digest(scope), '$key.img'),
+  );
+
+  Future<void> invalidate(Uri uri) {
+    final scope = _scope;
+    _pendingWriteBuffers.remove('$_generation:${_digest(uri.toString())}');
+    return _diskOperation(() async {
+      final file = await _file(scope, _digest(uri.toString()));
+      if (await file.exists()) await file.delete();
+      _forget(file.path);
+    });
+  }
+
+  void _forget(String filePath) {
+    final previous = _entries.remove(filePath);
+    if (previous != null) _diskBytes -= previous.size;
+  }
+
+  void _remember(File file, int size, [DateTime? modified]) {
+    _forget(file.path);
+    _entries[file.path] = _DiskEntry(file, size, modified ?? _now());
+    _diskBytes += size;
+  }
+
+  Future<void> _initializeIndex() async {
     final root = await directory();
-    final entries = <({File file, FileStat stat})>[];
-    var total = 0;
+    if (!await root.exists()) return;
     await for (final entity in root.list(recursive: true, followLinks: false)) {
       if (entity is! File) continue;
       final stat = await entity.stat();
       if (!entity.path.endsWith('.img') ||
           _now().difference(stat.modified) > ttl) {
         await entity.delete();
-        continue;
+      } else {
+        _remember(entity, stat.size, stat.modified);
+        // Bound the index even if an older/external cache exceeds the quota.
+        if (_entries.length > maxEntries || _diskBytes > maxTotalBytes) {
+          await _pruneIndex();
+        }
       }
-      entries.add((file: entity, stat: stat));
-      total += stat.size;
     }
-    entries.sort((a, b) => a.stat.modified.compareTo(b.stat.modified));
-    var count = entries.length;
+  }
+
+  Future<void> _pruneIndex() async {
+    final entries = _entries.values.toList()
+      ..sort((a, b) => a.modified.compareTo(b.modified));
     for (final entry in entries) {
-      if (count <= maxEntries && total <= maxTotalBytes) break;
-      await entry.file.delete();
-      total -= entry.stat.size;
-      --count;
+      if (_entries.length <= maxEntries &&
+          _diskBytes <= maxTotalBytes &&
+          _now().difference(entry.modified) <= ttl) {
+        break;
+      }
+      if (await entry.file.exists()) await entry.file.delete();
+      _forget(entry.file.path);
     }
   }
 
@@ -368,9 +601,8 @@ final class ImageByteCache {
     final operation = _diskQueue.then((_) async {
       try {
         if (!_initialized) {
+          await _initializeIndex();
           _initialized = true;
-          final root = await directory();
-          if (await root.exists()) await _prune();
         }
         await action();
       } on Exception {
@@ -384,35 +616,43 @@ final class ImageByteCache {
     return operation;
   }
 
-  Future<void> _acquire() async {
-    if (_active < maxConcurrent) {
-      ++_active;
-      return;
-    }
+  Future<void> _acquire(_ImageTask task) async {
+    task.request.check();
     final waiter = Completer<void>();
-    _waiting.add(waiter);
+    task.slot = waiter;
+    _waiting.add(task);
+    _scheduleDispatch();
     await waiter.future;
   }
 
+  void _scheduleDispatch() {
+    if (_dispatchScheduled) return;
+    _dispatchScheduled = true;
+    // Collect demand from the current layout before assigning free slots, so
+    // a preceding prefetch child cannot jump ahead of visible siblings.
+    scheduleMicrotask(() {
+      _dispatchScheduled = false;
+      while (_active < maxConcurrent && _waiting.isNotEmpty) {
+        final visible = _waiting.indexWhere((task) => task.visible);
+        final task = _waiting.removeAt(visible < 0 ? 0 : visible);
+        ++_active;
+        task.slot?.complete();
+      }
+    });
+  }
+
   void _release() {
-    if (_waiting.isNotEmpty) {
-      _waiting.removeAt(0).complete();
-    } else {
-      --_active;
-    }
+    --_active;
+    _scheduleDispatch();
   }
 
   Future<void> close() async {
     _closed = true;
-    for (final request in _requests) {
-      request.cancel();
+    for (final entry in _inFlight.entries.toList()) {
+      _cancel(entry.key, entry.value);
     }
-    await Future.wait(
-      _inFlight.values.map(
-        (future) =>
-            future.then<void>((_) {}, onError: (Object _, StackTrace _) {}),
-      ),
-    );
+    await Future.wait(_running.toList());
+    await Future.wait(_diskReads.toList());
     await _diskQueue;
     await _capacityChanges.close();
   }

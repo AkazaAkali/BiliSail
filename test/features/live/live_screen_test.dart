@@ -11,6 +11,7 @@ import 'package:bilisail/features/live/domain/live_chat_repository.dart';
 import 'package:bilisail/features/live/domain/live_room.dart';
 import 'package:bilisail/features/live/presentation/live_screen.dart';
 import 'package:bilisail/features/live/presentation/live_player_danmaku.dart';
+import 'package:bilisail/features/live/presentation/live_super_chat_card.dart';
 import 'package:bilisail/shared/ui/smooth_scroll_behavior.dart';
 import 'package:bilisail/shared/ui/paging_tab_strip.dart';
 import 'package:flutter/gestures.dart';
@@ -122,6 +123,152 @@ void main() {
         ),
     ]);
   }
+
+  testWidgets('chat and audience updates retain player and unrelated views', (
+    tester,
+  ) async {
+    var playerBuilds = 0;
+    await showPage(
+      tester,
+      playerBuilder: (_, _) {
+        playerBuilds++;
+        return const _PlayerProbe();
+      },
+    );
+    await tester.pumpAndSettle();
+    final player = tester.state(find.byType(_PlayerProbe));
+    final renderLayer = tester.renderObject(find.byType(_PlayerProbe));
+    final roomTitle = tester.widget(find.text(room.title));
+    final scBubble = tester.widget(find.byType(LiveSuperChatBubble).first);
+    final chatList = tester.widget(
+      find.byKey(const ValueKey('live-chat-list')),
+    );
+    final opens = realtime.opens;
+    playerBuilds = 0;
+
+    realtime.events.add(const [
+      LiveViewerCountChanged('42'),
+      LiveWatchedCountChanged('84'),
+    ]);
+    await tester.pump();
+    expect(find.text('当前42人在看'), findsOneWidget);
+    expect(find.text('84人看过'), findsOneWidget);
+    expect(
+      tester.widget(find.byKey(const ValueKey('live-chat-list'))),
+      same(chatList),
+    );
+    expect(tester.widget(find.text(room.title)), same(roomTitle));
+    expect(
+      tester.widget(find.byType(LiveSuperChatBubble).first),
+      same(scBubble),
+    );
+    expect(playerBuilds, 0);
+
+    for (var index = 0; index < 20; index++) {
+      receiveMessages(index, 1);
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await tester.pumpAndSettle();
+    expect(
+      container.read(liveControllerProvider(room.id)).messages,
+      hasLength(21),
+    );
+    expect(tester.widget(find.text(room.title)), same(roomTitle));
+    expect(
+      tester.widget(find.byType(LiveSuperChatBubble).first),
+      same(scBubble),
+    );
+    expect(playerBuilds, 0);
+    expect(tester.state(find.byType(_PlayerProbe)), same(player));
+    expect(tester.renderObject(find.byType(_PlayerProbe)), same(renderLayer));
+    expect(realtime.opens, opens);
+    expect(realtime.reads.single.isCancelled, false);
+
+    await tester.tap(find.byTooltip('收起直播信息'));
+    await tester.pumpAndSettle();
+    receiveMessages(30, 1);
+    await tester.pumpAndSettle();
+    expect(tester.state(find.byType(_PlayerProbe)), same(player));
+    expect(tester.renderObject(find.byType(_PlayerProbe)), same(renderLayer));
+    expect(playerBuilds, 0);
+    expect(realtime.opens, opens);
+    expect(realtime.reads.single.isCancelled, false);
+    await tester.tap(find.byTooltip('展开直播信息'));
+    await tester.pumpAndSettle();
+    expect(chatPosition(tester).extentAfter, lessThanOrEqualTo(1));
+    expect(playerBuilds, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'room status immediately replaces the player and closes realtime',
+    (tester) async {
+      var playerBuilds = 0;
+      await showPage(
+        tester,
+        playerBuilder: (_, _) {
+          playerBuilds++;
+          return const _PlayerProbe();
+        },
+      );
+      await tester.pumpAndSettle();
+      playerBuilds = 0;
+      realtime.events.add(const [LiveRoomStatusChanged(true)]);
+      await tester.pump();
+      expect(playerBuilds, 0);
+      realtime.events.add(const [LiveRoomStatusChanged(false)]);
+      expect(realtime.reads.single.isCancelled, true);
+      await tester.pumpAndSettle();
+      expect(find.byType(_PlayerProbe), findsNothing);
+      expect(find.text('主播尚未开播'), findsWidgets);
+      expect(playerBuilds, 0);
+      await container.read(liveControllerProvider(room.id).notifier).load();
+      await tester.pumpAndSettle();
+      expect(find.byType(_PlayerProbe), findsOneWidget);
+      expect(playerBuilds, 1);
+      expect(realtime.opens, 2);
+    },
+  );
+
+  testWidgets('cached live player still receives inherited theme updates', (
+    tester,
+  ) async {
+    final primary = ValueNotifier<Color>(Colors.blue);
+    addTearDown(primary.dispose);
+    final page = LiveScreen(
+      roomId: '12',
+      playerBuilder: (context, _) => Text(
+        'player-theme',
+        style: TextStyle(color: Theme.of(context).colorScheme.primary),
+      ),
+    );
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: ValueListenableBuilder<Color>(
+          valueListenable: primary,
+          builder: (_, color, _) => MaterialApp(
+            theme: ThemeData(colorScheme: ColorScheme.light(primary: color)),
+            home: Scaffold(body: page),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<Text>(find.text('player-theme')).style?.color,
+      Colors.blue,
+    );
+    primary.value = Colors.red;
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<Text>(find.text('player-theme')).style?.color,
+      Colors.red,
+    );
+    expect(realtime.opens, 1);
+    expect(realtime.reads.single.isCancelled, false);
+    expect(tester.takeException(), isNull);
+  });
 
   for (final dimensions in [const Size(390, 844), const Size(844, 390)]) {
     testWidgets(

@@ -24,6 +24,141 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test(
+    'identical settings leave danmaku scheduling and caches untouched',
+    () async {
+      final engine = _FakeEngine();
+      final repository = _FakeRepository(autoResolve: true);
+      final session = PlaybackSession(
+        engine: engine,
+        repository: repository,
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+        danmakuNow: () => Duration.zero,
+      );
+      addTearDown(session.close);
+      final settings = AppSettings(danmakuBlockedWords: ['blocked']);
+      session.configureSettings(settings);
+      await session.open(_detail('one'), _part('one'));
+      repository.pendingComments['one:1']!.complete([_comment('visible', 0)]);
+      await _flush();
+      session.danmaku.setViewport(width: 800, height: 450);
+      final visible = session.danmaku.frame().single;
+      final builds = session.danmaku.textLayoutBuildCount;
+      var notifications = 0;
+      session.danmaku.addListener(() => notifications++);
+      session.configureSettings(settings.copyWith());
+      session.configureSettings(
+        settings.copyWith(showCollapsedProgress: false),
+      );
+      expect(notifications, 0);
+      expect(session.danmaku.frame().single.event.id, visible.event.id);
+      expect(session.danmaku.textLayoutBuildCount, builds);
+      session.configureSettings(
+        settings.copyWith(danmakuBlockedWords: ['visible']),
+      );
+      expect(session.danmaku.frame(), isEmpty);
+      expect(notifications, 1);
+    },
+  );
+
+  test(
+    'hidden playback cancels comment work and restores the confirmed window',
+    () async {
+      final engine = _FakeEngine();
+      final repository = _FakeRepository(
+        autoResolve: true,
+        mediaDuration: const Duration(minutes: 30),
+      );
+      final session = PlaybackSession(
+        engine: engine,
+        repository: repository,
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+        danmakuNow: () => Duration.zero,
+      );
+      addTearDown(session.close);
+      final owner = Object();
+      session.attach(owner);
+      await session.activate(owner, _detail('one'), _part('one'));
+      repository.pendingComments['one:1']!.complete([_comment('old', 0)]);
+      await _flush();
+      session.danmaku.setViewport(width: 800, height: 450);
+      expect(session.danmaku.frame().single.event.id, 'old');
+      final late = repository.pendingComments['one:2']!;
+      final lateToken = repository.commentCancellations['one:2']!;
+      await session.deactivate(owner);
+      expect(lateToken.isCancelled, isTrue);
+      var notifications = 0;
+      session.danmaku.addListener(() => notifications++);
+      final requests = repository.pendingComments.length;
+      final generation = engine.currentSnapshot.generation;
+      for (var second = 30; second <= 750; second += 30) {
+        engine.emit(
+          engine.currentSnapshot.copyWith(position: Duration(seconds: second)),
+        );
+      }
+      late.complete([_comment('late-hidden', 750)]);
+      await _flush();
+      expect(notifications, 0);
+      expect(repository.pendingComments.length, requests);
+      expect(session.snapshots.value.position, const Duration(seconds: 750));
+      expect(engine.currentSnapshot.phase, PlaybackPhase.playing);
+      await session.activate(owner, _detail('one'), _part('one'));
+      expect(repository.pendingComments.keys, containsAll(['one:3', 'one:4']));
+      repository.pendingComments['one:3']!.complete([
+        _comment('expired', 730),
+        _comment('current', 749),
+        _comment('future', 751),
+      ]);
+      await _flush();
+      expect(session.danmaku.frame().map((item) => item.event.id), ['current']);
+      expect(engine.currentSnapshot.generation, generation);
+      expect(engine.openedUris, hasLength(1));
+      expect(session.snapshots.value.position, const Duration(seconds: 750));
+    },
+  );
+
+  test('equal snapshots suppress notifications while confirmed positions remain precise', () async {
+    var now = Duration.zero;
+    final engine = _FakeEngine();
+    final session = PlaybackSession(
+      engine: engine,
+      repository: _FakeRepository(autoResolve: true),
+      progress: _FakeProgress(),
+      accountScope: () => 'guest',
+      danmakuNow: () => now,
+    );
+    addTearDown(session.close);
+    await session.open(_detail('one'), _part('one'));
+    var notifications = 0;
+    session.snapshots.addListener(() => notifications++);
+    engine.emit(engine.currentSnapshot.copyWith());
+    expect(notifications, 0);
+    for (var ms = 1; ms <= 20; ms++) {
+      now = Duration(milliseconds: ms);
+      engine.emit(engine.currentSnapshot.copyWith(position: now));
+      expect(session.danmaku.position, now);
+    }
+    expect(notifications, 20);
+    var commentNotifications = 0;
+    session.danmaku.addListener(() => commentNotifications++);
+    engine.emit(
+      engine.currentSnapshot.copyWith(buffered: const Duration(seconds: 20)),
+    );
+    engine.emit(engine.currentSnapshot.copyWith(volume: 25));
+    expect(commentNotifications, 0);
+    expect(notifications, 22);
+    expect(
+      engine.currentSnapshot.copyWith(
+        videoDimensions: const VideoDimensions(1280, 720),
+      ),
+      engine.currentSnapshot.copyWith(
+        videoDimensions: const VideoDimensions(1280, 720),
+      ),
+    );
+  });
+
   for (final failure in [
     PlayerFailureKind.nativePlayback,
     PlayerFailureKind.invalidSource,
@@ -1757,6 +1892,54 @@ void main() {
       await session.seek(const Duration(seconds: 30));
       expect(session.danmaku.frame().single.event.id, 'ongoing');
       expect(repository.pendingComments.keys, ['one:1']);
+    },
+  );
+
+  test(
+    'dense window trimming still authoritatively retains active comments',
+    () async {
+      var now = Duration.zero;
+      final engine = _FakeEngine();
+      final repository = _FakeRepository(autoResolve: true);
+      final session = PlaybackSession(
+        engine: engine,
+        repository: repository,
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+        danmakuNow: () => now,
+      );
+      addTearDown(session.close);
+      session.configureSettings(AppSettings(danmakuMaxPerSecond: 0));
+      await session.open(_detail('one'), _part('one'));
+      repository.pendingComments['one:1']!.complete([
+        _comment('ongoing', 0),
+        for (var i = 0; i < 5999; i++) _comment('dense-$i', 1),
+      ]);
+      await _flush();
+      session.danmaku.setViewport(width: 800, height: 450);
+      await session.setRate(3);
+      expect(session.danmaku.frame().single.event.id, 'ongoing');
+      for (var step = 1; step <= 10; step++) {
+        now = Duration(milliseconds: step * 500);
+        engine.emit(
+          engine.currentSnapshot.copyWith(
+            position: Duration(milliseconds: step * 1500),
+          ),
+        );
+        session.danmaku.frame();
+      }
+      expect(
+        session.danmaku.frame().map((item) => item.event.id),
+        contains('ongoing'),
+      );
+      expect(session.danmaku.pendingCount, lessThanOrEqualTo(500));
+      session.configureSettings(
+        AppSettings(danmakuMaxPerSecond: 0, danmakuBlockedWords: ['ongoing']),
+      );
+      expect(
+        session.danmaku.frame().map((item) => item.event.id),
+        isNot(contains('ongoing')),
+      );
     },
   );
 

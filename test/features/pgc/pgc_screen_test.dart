@@ -58,6 +58,146 @@ final _season = PgcSeason(
 
 void main() {
   for (final width in [390.0, 1200.0]) {
+    testWidgets('series stay lazy and local controls retain player at $width', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = Size(width, 844);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final auth = _Auth();
+      addTearDown(auth.dispose);
+      final repo = _Repo()
+        ..value = PgcSeason(
+          id: _season.id,
+          title: _season.title,
+          description: '剧集简介内容。' * 10,
+          episodes: _season.episodes,
+          relatedSeasons: [
+            for (var i = 0; i < 100; i++)
+              PgcSeasonSummary(id: PgcSeasonId('r$i'), title: '系列 $i'),
+          ],
+        );
+      var playerBuilds = 0;
+      PgcSeasonSummary? opened;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            pgcRepositoryProvider.overrideWithValue(repo),
+            authRepositoryProvider.overrideWithValue(auth),
+          ],
+          child: InputTestApp(
+            home: Scaffold(
+              body: PgcScreen(
+                seasonId: 's1',
+                playerBuilder: (_, _, episode) {
+                  playerBuilds++;
+                  return Text('player ${episode.episodeId}');
+                },
+                commentsBuilder: (_, _, _) => const Text('评论内容'),
+                onOpenSeason: (season) => opened = season,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      if (width < 700) {
+        await tester.tap(find.byTooltip('展开影视信息'));
+        await tester.pumpAndSettle();
+      }
+      final tiles = find.byWidgetPredicate(
+        (widget) =>
+            widget is InkWell &&
+            widget.key is ValueKey<String> &&
+            (widget.key as ValueKey<String>).value.startsWith('pgc-related-'),
+      );
+      expect(tiles.evaluate().length, lessThan(25));
+      expect(find.byKey(const ValueKey('pgc-related-r99')), findsNothing);
+      final list = find.byKey(
+        const ValueKey('pgc-related-list'),
+        skipOffstage: false,
+      );
+      final delegate = tester.widget<SliverList>(list).delegate;
+      final before = playerBuilds;
+      await tester.tap(find.text('展开'));
+      await tester.pumpAndSettle();
+      expect(playerBuilds, before);
+      expect(tester.widget<SliverList>(list).delegate, same(delegate));
+      await tester.tap(find.byKey(const ValueKey('pgc-tab-评论')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('pgc-tab-简介')));
+      await tester.pumpAndSettle();
+      expect(find.text('收起'), findsOneWidget);
+      expect(playerBuilds, before);
+      await tester.tap(find.byTooltip('收起影视信息'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('展开影视信息'));
+      await tester.pumpAndSettle();
+      expect(playerBuilds, before);
+      final intro = tester
+          .widget<CustomScrollView>(find.byKey(const ValueKey('pgc-intro')))
+          .controller!;
+      intro.jumpTo(intro.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(tiles.evaluate().length, lessThan(25));
+      expect(find.byKey(const ValueKey('pgc-related-r0')), findsNothing);
+      final last = find.byKey(const ValueKey('pgc-related-r99'));
+      await tester.ensureVisible(last);
+      await tester.tap(last);
+      expect(opened?.id, const PgcSeasonId('r99'));
+      intro.jumpTo(0);
+      await tester.pumpAndSettle();
+      expect(find.text('收起'), findsOneWidget);
+      expect(playerBuilds, before);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('cached player still receives inherited theme changes', (
+    tester,
+  ) async {
+    final auth = _Auth();
+    addTearDown(auth.dispose);
+    final theme = ValueNotifier(Colors.blue);
+    addTearDown(theme.dispose);
+    final page = PgcScreen(
+      seasonId: 's1',
+      playerBuilder: (context, _, _) => Text(
+        'player-theme',
+        style: TextStyle(color: Theme.of(context).colorScheme.primary),
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          pgcRepositoryProvider.overrideWithValue(_Repo()),
+          authRepositoryProvider.overrideWithValue(auth),
+        ],
+        child: ValueListenableBuilder<Color>(
+          valueListenable: theme,
+          builder: (_, color, _) => MaterialApp(
+            theme: ThemeData(colorScheme: ColorScheme.light(primary: color)),
+            home: Scaffold(body: page),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<Text>(find.text('player-theme')).style?.color,
+      Colors.blue,
+    );
+    theme.value = Colors.red;
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<Text>(find.text('player-theme')).style?.color,
+      Colors.red,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final width in [390.0, 1200.0]) {
     testWidgets(
       'episode drag reaches the real intro top and retains player at $width',
       (tester) async {
@@ -115,9 +255,7 @@ void main() {
         }
         final player = tester.state(find.byType(_TrackedPlayer));
         final intro = tester
-            .widget<SingleChildScrollView>(
-              find.byKey(const ValueKey('pgc-intro')),
-            )
+            .widget<CustomScrollView>(find.byKey(const ValueKey('pgc-intro')))
             .controller!;
         final list = find.byKey(const ValueKey('pgc-episode-list'));
         final inner = tester.widget<ListView>(list).controller!;
@@ -508,6 +646,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byKey(const ValueKey('pgc-episode-e2')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('pgc-episode-e2')));
       await tester.pumpAndSettle();
       expect(currentEpisodeId, 'e2');
@@ -741,12 +880,15 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('pgc-episode-order')));
     await tester.pumpAndSettle();
     expect(find.byTooltip('切换为正序'), findsOneWidget);
+    final introScroll = tester
+        .widget<CustomScrollView>(find.byKey(const ValueKey('pgc-intro')))
+        .controller;
+    introScroll?.jumpTo(introScroll.position.maxScrollExtent);
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(const ValueKey('pgc-related-s2')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('pgc-related-s2')));
     expect(opened?.seasonId, 's2');
-    final introScroll = tester
-        .widget<SingleChildScrollView>(find.byKey(const ValueKey('pgc-intro')))
-        .controller;
     introScroll?.jumpTo(40);
     await tester.pump();
     expect(introScroll?.offset, 40);
