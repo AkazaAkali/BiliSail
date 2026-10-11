@@ -9,6 +9,30 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('queued live and video quality changes persist independently', () async {
+    final repository = _DeferredSettingsRepository();
+    final container = ProviderContainer(
+      overrides: [settingsRepositoryProvider.overrideWithValue(repository)],
+    );
+    addTearDown(container.dispose);
+    await container.read(settingsControllerProvider.future);
+    final controller = container.read(settingsControllerProvider.notifier);
+    final live = controller.setPreferredLiveQuality(0);
+    final video = controller.setPreferredQuality(120);
+    final visible = container.read(settingsControllerProvider).requireValue;
+    expect(visible.preferredLiveQuality, 0);
+    expect(visible.preferredQuality, 120);
+    await Future<void>.delayed(Duration.zero);
+    repository.completeNext();
+    await live;
+    await Future<void>.delayed(Duration.zero);
+    repository.completeNext();
+    await video;
+    container.invalidate(settingsControllerProvider);
+    final reloaded = await container.read(settingsControllerProvider.future);
+    expect(reloaded.preferredLiveQuality, 0);
+    expect(reloaded.preferredQuality, 120);
+  });
   test(
     'shortcut configuration becomes active only after a successful save',
     () async {

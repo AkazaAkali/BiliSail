@@ -278,7 +278,7 @@ final class _SettingsCategoryPageState
                             controller.setResumePlayback,
                             '优先从本地记录继续观看，没有本地记录时使用云端进度',
                           ),
-                          _choices('优先清晰度', s.preferredQuality, const {
+                          _choices('视频默认清晰度', s.preferredQuality, const {
                             16: '360P',
                             32: '480P',
                             64: '720P',
@@ -292,6 +292,16 @@ final class _SettingsCategoryPageState
                           }, controller.setPreferredQuality),
                           const Text(
                             '按接口返回的可用清晰度选择；权限和片源限制仍适用',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          _choices(
+                            '直播默认清晰度',
+                            s.preferredLiveQuality,
+                            AppSettings.liveQualityOptions,
+                            controller.setPreferredLiveQuality,
+                          ),
+                          const Text(
+                            '用于新打开的直播间；自动由服务端选择清晰度，权限和直播源限制仍适用。当前直播间的手动选择保持不变。',
                             style: TextStyle(fontSize: 12),
                           ),
                           _choices('默认播放倍速', s.defaultPlaybackRate, {

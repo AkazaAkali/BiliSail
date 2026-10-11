@@ -27,6 +27,109 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  for (final quality in [0, 250, 400, 20000]) {
+    test('new live owner uses its own default qn $quality', () async {
+      final content = _FakeContentRepository();
+      final repository = _FakeRepository(autoResolve: true);
+      final session = PlaybackSession(
+        engine: _FakeEngine(),
+        repository: repository,
+        contentRepository: content,
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      session.configureSettings(
+        AppSettings(preferredQuality: 120, preferredLiveQuality: quality),
+      );
+      final video = Object(), live = Object(), pgc = Object();
+      for (final owner in [video, live, pgc]) {
+        session.attach(owner);
+      }
+      await session.activate(video, _detail('video'), _part('video'));
+      expect(repository.qualities.last, 120);
+      await session.activate(
+        live,
+        null,
+        null,
+        target: const LivePlaybackTarget('42'),
+      );
+      expect(content.qualities.last, quality);
+      expect(session.requestedQuality, quality);
+      await session.activate(
+        pgc,
+        null,
+        null,
+        target: const PgcPlaybackTarget('7'),
+      );
+      expect(content.qualities.last, 120);
+    });
+  }
+
+  test(
+    'live default changes affect new rooms and preserve retained selections',
+    () async {
+      final engine = _FakeEngine();
+      final content = _FakeContentRepository()..liveLineCount = 2;
+      final session = PlaybackSession(
+        engine: engine,
+        repository: _FakeRepository(autoResolve: true),
+        contentRepository: content,
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      final live = Object(), other = Object();
+      session.attach(live);
+      session.attach(other);
+      session.configureSettings(AppSettings(preferredLiveQuality: 250));
+      await session.activate(
+        live,
+        null,
+        null,
+        target: const LivePlaybackTarget('42'),
+      );
+      await session.changeQuality(400);
+      await session.changeLiveLine(1);
+      final opens = engine.sources.length;
+      session.configureSettings(AppSettings(preferredLiveQuality: 0));
+      await session.activate(
+        live,
+        null,
+        null,
+        target: const LivePlaybackTarget('42'),
+      );
+      expect(engine.sources.length, opens);
+      expect(session.requestedQuality, 400);
+      expect(session.liveLine, 1);
+      await session.activate(other, _detail('video'), _part('video'));
+      await session.activate(
+        live,
+        null,
+        null,
+        target: const LivePlaybackTarget('42'),
+      );
+      expect(content.qualities.last, 400);
+      expect(session.liveLine, 1);
+      await session.activate(
+        live,
+        null,
+        null,
+        target: const LivePlaybackTarget('43'),
+      );
+      expect(content.qualities.last, 0);
+      expect(session.liveLine, 0);
+      session.configureSettings(AppSettings(preferredLiveQuality: 10000));
+      await session.activate(
+        live,
+        null,
+        null,
+        target: const LivePlaybackTarget('44'),
+      );
+      expect(content.qualities.last, 10000);
+    },
+  );
+
   test(
     'live line and quality switches preserve pause, volume and server order',
     () async {

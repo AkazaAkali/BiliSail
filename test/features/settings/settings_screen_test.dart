@@ -11,6 +11,99 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final inPlayer in [false, true]) {
+    testWidgets('live default quality saves separately (player: $inPlayer)', (
+      tester,
+    ) async {
+      final repository = _SettingsRepository();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [settingsRepositoryProvider.overrideWithValue(repository)],
+          child: MaterialApp(
+            home: Scaffold(
+              body: inPlayer
+                  ? Builder(
+                      builder: (context) => ElevatedButton(
+                        onPressed: () => showPlayerSettings(context),
+                        child: const Text('播放配置'),
+                      ),
+                    )
+                  : const SettingsScreen(category: SettingsCategory.playback),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      if (inPlayer) {
+        await tester.tap(find.text('播放配置'));
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('视频默认清晰度'), findsOneWidget);
+      expect(find.text('直播默认清晰度'), findsOneWidget);
+      final liveDropdown = find.byKey(const ValueKey('preferred-live-quality'));
+      for (final (label, quality) in [('自动', 0), ('超清', 250)]) {
+        final choice = find.widgetWithText(ChoiceChip, label);
+        if (inPlayer) {
+          await tester.ensureVisible(liveDropdown);
+          await tester.pumpAndSettle();
+          await tester.tap(liveDropdown);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(label).last);
+        } else {
+          await tester.ensureVisible(choice);
+          await tester.pumpAndSettle();
+          await tester.tap(choice);
+        }
+        await tester.pumpAndSettle();
+        expect(repository.settings.preferredLiveQuality, quality);
+        expect(repository.settings.preferredQuality, 80);
+        final container = ProviderScope.containerOf(
+          tester.element(find.text('直播默认清晰度')),
+        );
+        container.invalidate(settingsControllerProvider);
+        await tester.pumpAndSettle();
+        if (inPlayer) {
+          expect(
+            tester.widget<DropdownButton<int>>(liveDropdown).value,
+            quality,
+          );
+        } else {
+          expect(tester.widget<ChoiceChip>(choice).selected, isTrue);
+        }
+      }
+      final videoTile = find.widgetWithText(ListTile, '视频默认清晰度');
+      if (inPlayer) {
+        await tester.scrollUntilVisible(
+          videoTile,
+          -180,
+          scrollable: find
+              .descendant(
+                of: find.byType(ListView).first,
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        final videoDropdown = find.descendant(
+          of: videoTile,
+          matching: find.byType(DropdownButton<int>),
+        );
+        await tester.ensureVisible(videoDropdown);
+        await tester.pumpAndSettle();
+        await tester.tap(videoDropdown);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('720P').last);
+      } else {
+        final videoChoice = find.widgetWithText(ChoiceChip, '720P');
+        await tester.ensureVisible(videoChoice);
+        await tester.pumpAndSettle();
+        await tester.tap(videoChoice);
+      }
+      await tester.pumpAndSettle();
+      expect(repository.settings.preferredQuality, 64);
+      expect(repository.settings.preferredLiveQuality, 250);
+      expect(tester.takeException(), isNull);
+    });
+  }
   testWidgets('continuous playback toggle saves and reloads independently', (
     tester,
   ) async {

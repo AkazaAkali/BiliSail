@@ -74,6 +74,10 @@ class SqliteSettingsRepository implements SettingsRepository {
       preferredQuality: number('preferredQuality', 80.0).isFinite
           ? number('preferredQuality', 80.0).toInt()
           : 80,
+      preferredLiveQuality: switch (decoded['preferredLiveQuality']) {
+        final int quality => quality,
+        _ => 10000,
+      },
       preferredVideoCodec:
           VideoCodecPreference.values
               .where((item) => item.name == decoded['preferredVideoCodec'])
@@ -152,7 +156,7 @@ class SqliteSettingsRepository implements SettingsRepository {
     return database.writeSetting(
       'preferences.v1',
       jsonEncode({
-        'schemaVersion': 18,
+        'schemaVersion': 19,
         'navigationMode': value.navigationMode.name,
         'allowConcurrentPlayback': value.allowConcurrentPlayback,
         'cacheImages': value.cacheImages,
@@ -170,6 +174,7 @@ class SqliteSettingsRepository implements SettingsRepository {
         'showCollapsedProgress': value.showCollapsedProgress,
         'playerControlsMode': value.playerControlsMode.name,
         'preferredQuality': value.preferredQuality,
+        'preferredLiveQuality': value.preferredLiveQuality,
         'preferredVideoCodec': value.preferredVideoCodec.name,
         'mediaCdn': value.mediaCdn.name,
         'videoDecoding': value.videoDecoding.name,

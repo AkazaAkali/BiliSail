@@ -2,6 +2,32 @@ import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('live and video quality defaults normalize independently', () {
+    expect(const AppSettings.defaults().preferredLiveQuality, 10000);
+    expect(AppSettings().preferredLiveQuality, 10000);
+    for (final quality in AppSettings.liveQualityOptions.keys) {
+      final settings = const AppSettings.defaults()
+          .copyWith(preferredLiveQuality: quality, preferredQuality: 120)
+          .normalized()
+          .copyWith(theme: AppThemePreference.dark);
+      expect(settings.preferredLiveQuality, quality);
+      expect(settings.preferredQuality, 120);
+    }
+    for (final quality in [-1, 64, 112, 30000, 99999]) {
+      final settings = AppSettings(
+        preferredLiveQuality: quality,
+        preferredQuality: 64,
+      ).normalized();
+      expect(settings.preferredLiveQuality, 10000);
+      expect(settings.preferredQuality, 64);
+    }
+    final settings = AppSettings(
+      preferredQuality: 400,
+      preferredLiveQuality: 250,
+    ).normalized();
+    expect(settings.preferredQuality, 80);
+    expect(settings.preferredLiveQuality, 250);
+  });
   test('danmaku font scale supports one fifth size and normalizes bounds', () {
     for (final entry in <double, double>{
       .1: .2,

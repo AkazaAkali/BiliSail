@@ -59,6 +59,7 @@ final class AppSettings {
     this.showCollapsedProgress = true,
     this.playerControlsMode = PlayerControlsMode.click,
     this.preferredQuality = 80,
+    this.preferredLiveQuality = 10000,
     this.preferredVideoCodec = VideoCodecPreference.h264,
     this.mediaCdn = MediaCdnPreference.automatic,
     this.videoDecoding = VideoDecodingPreference.automatic,
@@ -110,6 +111,7 @@ final class AppSettings {
        showCollapsedProgress = true,
        playerControlsMode = PlayerControlsMode.click,
        preferredQuality = 80,
+       preferredLiveQuality = 10000,
        preferredVideoCodec = VideoCodecPreference.h264,
        mediaCdn = MediaCdnPreference.automatic,
        videoDecoding = VideoDecodingPreference.automatic,
@@ -161,6 +163,7 @@ final class AppSettings {
   final bool showCollapsedProgress;
   final PlayerControlsMode playerControlsMode;
   final int preferredQuality;
+  final int preferredLiveQuality;
   final VideoCodecPreference preferredVideoCodec;
   final MediaCdnPreference mediaCdn;
   final VideoDecodingPreference videoDecoding;
@@ -223,6 +226,7 @@ final class AppSettings {
     bool? showCollapsedProgress,
     PlayerControlsMode? playerControlsMode,
     int? preferredQuality,
+    int? preferredLiveQuality,
     VideoCodecPreference? preferredVideoCodec,
     MediaCdnPreference? mediaCdn,
     VideoDecodingPreference? videoDecoding,
@@ -271,6 +275,7 @@ final class AppSettings {
     showCollapsedProgress: showCollapsedProgress ?? this.showCollapsedProgress,
     playerControlsMode: playerControlsMode ?? this.playerControlsMode,
     preferredQuality: preferredQuality ?? this.preferredQuality,
+    preferredLiveQuality: preferredLiveQuality ?? this.preferredLiveQuality,
     preferredVideoCodec: preferredVideoCodec ?? this.preferredVideoCodec,
     mediaCdn: mediaCdn ?? this.mediaCdn,
     videoDecoding: videoDecoding ?? this.videoDecoding,
@@ -322,6 +327,18 @@ final class AppSettings {
     126,
     127,
   ];
+  // Live qn values are separate from VOD quality IDs. Dolby is omitted while
+  // live playback selects AVC streams; zero lets the server choose a quality.
+  static const liveQualityOptions = {
+    0: '自动',
+    80: '流畅',
+    150: '高清',
+    250: '超清',
+    400: '蓝光',
+    10000: '原画',
+    15000: '2K',
+    20000: '4K',
+  };
   static const supportedSponsorCategories = [
     'sponsor',
     'intro',
@@ -347,6 +364,9 @@ final class AppSettings {
       preferredQuality: supportedQualities.contains(preferredQuality)
           ? preferredQuality
           : 80,
+      preferredLiveQuality: liveQualityOptions.containsKey(preferredLiveQuality)
+          ? preferredLiveQuality
+          : 10000,
       defaultPlaybackRate: PlaybackRates.nearest(defaultPlaybackRate),
       defaultVolume: bounded(defaultVolume, 0, 100, 100),
       danmakuOpacity: bounded(danmakuOpacity, .2, 1, .8),

@@ -16,6 +16,39 @@ void main() {
   });
   tearDown(() => database.close());
   test(
+    'live quality migrates independently and survives save and reload',
+    () async {
+      expect((await repository.load()).preferredLiveQuality, 10000);
+      for (final invalid in [null, '250', true, -1, 112, 99999, 250.5]) {
+        await database.writeSetting(
+          'preferences.v1',
+          jsonEncode({
+            'schemaVersion': 18,
+            'preferredQuality': 64,
+            'preferredLiveQuality': ?invalid,
+          }),
+        );
+        final loaded = await repository.load();
+        expect(loaded.preferredLiveQuality, 10000);
+        expect(loaded.preferredQuality, 64);
+      }
+      for (final quality in AppSettings.liveQualityOptions.keys) {
+        await repository.save(
+          AppSettings(preferredLiveQuality: quality, preferredQuality: 120),
+        );
+        final loaded = await repository.load();
+        expect(loaded.preferredLiveQuality, quality);
+        expect(loaded.preferredQuality, 120);
+        final snapshot = jsonDecode(
+          (await database.readSetting('preferences.v1')) ?? '{}',
+        ) as Map<String, Object?>;
+        expect(snapshot['schemaVersion'], 19);
+        expect(snapshot['preferredLiveQuality'], quality);
+      }
+      expect(database.schemaVersion, 3);
+    },
+  );
+  test(
     'normalization migrates off and each mode survives save and reload',
     () async {
       expect(
@@ -111,7 +144,7 @@ void main() {
         final snapshot = jsonDecode(
           (await database.readSetting('preferences.v1')) ?? '{}',
         ) as Map<String, Object?>;
-        expect(snapshot['schemaVersion'], 18);
+        expect(snapshot['schemaVersion'], 19);
         expect(snapshot['playerControlsMode'], mode.name);
       }
       expect(database.schemaVersion, 3);
@@ -178,7 +211,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 18);
+          expect(snapshot['schemaVersion'], 19);
           expect(snapshot['navigationMode'], mode.name);
         }
         for (final selected in WorkspaceNavigationMode.values) {
@@ -226,7 +259,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 18);
+      expect(snapshot['schemaVersion'], 19);
       expect(snapshot['theme'], 'dark');
       expect(database.schemaVersion, 3);
     },
@@ -268,7 +301,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 18);
+      expect(snapshot['schemaVersion'], 19);
       expect(snapshot['allowConcurrentPlayback'], allowed);
       expect(snapshot['navigationMode'], 'singlePage');
       final reloaded = await repository.load();

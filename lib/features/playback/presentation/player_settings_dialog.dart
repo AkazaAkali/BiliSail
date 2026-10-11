@@ -160,7 +160,7 @@ class _PlayerSettingsDialogState extends ConsumerState<_PlayerSettingsDialog> {
                           (c, v) => c.copyWith(resumePlayback: v),
                         ),
                         ListTile(
-                          title: const Text('默认清晰度'),
+                          title: const Text('视频默认清晰度'),
                           subtitle: DropdownButton<int>(
                             isExpanded: true,
                             value: s.preferredQuality,
@@ -180,6 +180,39 @@ class _PlayerSettingsDialogState extends ConsumerState<_PlayerSettingsDialog> {
                                 );
                               }
                             },
+                          ),
+                        ),
+                        ListTile(
+                          title: const Text('直播默认清晰度'),
+                          subtitle: DropdownButton<int>(
+                            key: const ValueKey('preferred-live-quality'),
+                            isExpanded: true,
+                            value: s.preferredLiveQuality,
+                            items: [
+                              for (final option
+                                  in AppSettings.liveQualityOptions.entries)
+                                DropdownMenuItem(
+                                  value: option.key,
+                                  child: Text(option.value),
+                                ),
+                            ],
+                            onChanged: (quality) {
+                              if (quality != null) {
+                                unawaited(
+                                  _update(
+                                    (c) => c.copyWith(
+                                      preferredLiveQuality: quality,
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 16),
+                          child: Text(
+                            '用于新打开的直播间；自动由服务端选择清晰度，权限和直播源限制仍适用。当前直播间的手动选择保持不变。',
                           ),
                         ),
                         ListTile(
@@ -247,7 +280,7 @@ class _PlayerSettingsDialogState extends ConsumerState<_PlayerSettingsDialog> {
                         const Padding(
                           padding: EdgeInsets.all(16),
                           child: Text(
-                            '默认清晰度、自动播放和续播用于新视频；播放页调整的倍速和音量由本次运行中的后续播放继承，重启后使用默认值。未在播放页调整时，修改默认值也会应用到当前播放。',
+                            '视频默认清晰度、自动播放和续播用于新视频；播放页调整的倍速和音量由本次运行中的后续播放继承，重启后使用默认值。未在播放页调整时，修改默认值也会应用到当前播放。',
                           ),
                         ),
                       ],

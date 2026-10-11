@@ -367,8 +367,14 @@ class PlaybackSession extends ChangeNotifier {
       force: true,
       quality:
           restored?.quality ??
-          (sameOwner && sameKind ? _quality : null) ??
-          (target is LivePlaybackTarget ? 10000 : _settings.preferredQuality),
+          (sameOwner &&
+                  sameKind &&
+                  (target is! LivePlaybackTarget || contentTarget == target)
+              ? _quality
+              : null) ??
+          (target is LivePlaybackTarget
+              ? _settings.preferredLiveQuality
+              : _settings.preferredQuality),
       liveLine: restored?.liveLine,
       position: nextPlaying != null ? nextIntent?.position : restored?.position,
       desiredPlaying:
