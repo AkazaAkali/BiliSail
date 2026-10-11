@@ -23,7 +23,11 @@ Flutter 固定 **3.47.6 stable / Dart 3.13.5**；升级需同时调整工作流�
 
 SDK 缓存沿用 `flutter-action` 的默认键，按系统、SDK 架构、版本和 revision 隔离。Pub 缓存键只配置系统、架构和版本前缀，由当前固定的 Action 追加所有 `pubspec.lock` 的哈希，避免重复追加。Gradle 缓存键覆盖 Android Gradle 脚本、`android/gradle.properties`、Wrapper 配置、所有 Pub 锁文件和 `.flutter-version`，使插件、SDK 或构建配置变化后保存新的依赖缓存。Release 复用 CI 的同一套缓存配置；安装包仍通过本次运行的 artifacts 传递。
 
-CI 在工作流顶层固定 `PUB_HOSTED_URL=https://pub.flutter-io.cn`，与根应用及三个包锁文件中的 hosted URL 一致；检查、三端构建和 Release 复用流程均使用此包源。切换包源时须在同一包源下重新生成并验证四份锁文件，继续保留 `--enforce-lockfile`。
+CI 在工作流顶层显式设置 `PUB_HOSTED_URL=https://pub.dev`，与根应用及 `bili_api`、`bili_player`、`bili_danmaku`、`bili_mux` 五份锁文件的官方 hosted 源一致；检查、三端构建和 Release 复用流程均使用此源。Dependabot 的 Pub 更新也使用官方源。严格检查和提交前，本地应先设置 `$env:PUB_HOSTED_URL = 'https://pub.dev'`（PowerShell）或 `export PUB_HOSTED_URL=https://pub.dev`（sh），再执行 `pwsh ./tool/check.ps1 -EnforceLockfile`。
+
+本地临时使用镜像运行 `pub get` 可能改写锁文件中的 hosted URL；不要将这类改动混入提交。恢复官方源后重新验证五份锁文件，并确认依赖版本、约束、内容哈希没有意外变化。`FLUTTER_STORAGE_BASE_URL` 控制 Flutter SDK 下载，与 Pub 包源是不同设置。
+
+Dart 3.13.5 内置的 [Pub 源码](https://github.com/dart-lang/pub/blob/ec276d10a7fa0f6c6ec005340fb9ad29f3b012d0/lib/src/source/hosted.dart#L40) 会将官方旧域名 `https://pub.dartlang.org` 规范化为 `https://pub.dev`，再用于 hosted 来源身份比较；两者的文本差异不等于来源冲突。`pub.flutter-io.cn` 是另一来源，不能依赖这种官方别名规范化消除镜像冲突。验证以固定 Flutter 3.47.6 的实际解析、内容哈希与 `--enforce-lockfile` 为准。
 
 ## 版本与产物
 
@@ -270,3 +274,13 @@ Android 构建输出 CupertinoIcons 字体声明警告，Windows 构建输出 `f
 本轮云端 Linux 本地验证：新增版本/manifest 校验 34 项、原有 Android 签名 21 项、Windows 版本 14 项、macOS 发布检查 22 项通过；从实际 Gradle 脚本提取的 Kotlin 版本函数通过 22 项边界用例；全部 PowerShell 脚本语法解析、actionlint 1.7.12 和 `git diff --check` 通过。另下载历史两份 APK 并解析二进制 AndroidManifest.xml，确认 `0.5.3` / `2007` 和 `0.5.5` / `2001`，包名均为 `dev.bilisail.bilisail`，与历史 build-info 一致。
 
 本地未完成根应用/包的 Flutter 格式、分析、测试或三端构建：环境未安装 Flutter，固定 SDK 源码下载成功，但 Dart SDK 下载被网络代理以 HTTP 403 拒绝。`tool/check.ps1 -EnforceLockfile` 的 PowerShell 检查已运行，Flutter 阶段无法启动；完整验证须由后续远端 CI 提供。没有执行 Android 真机覆盖安装、数据保留或播放验收。
+
+
+### 统一官方 Pub 源（2026-10-11）
+
+本次仅将 CI 和五份锁文件中的 hosted 源从 `https://pub.flutter-io.cn` 迁移到 `https://pub.dev`，保留各依赖版本、约束和内容 SHA-256；不执行 `pub upgrade`，应用版本保持 `0.5.6+2`。根锁文件迁移 128 个 hosted 条目，`bili_api` 50 个、`bili_player` 57 个、`bili_danmaku` 23 个、`bili_mux` 24 个。历史镜像配置和失败记录保留在上文，不能视为当前配置。
+
+[Dependabot PR #5](https://github.com/CKopoer/BiliSail/pull/5) 同时包含包源及 drift/间接依赖升级；本次没有合并或照搬该 PR 的锁文件。此前其 CI 的来源冲突发生于镜像环境与官方来源锁文件之间；统一官方源后仍需分别检查后续 PR 的依赖变更和 CI 结果。
+
+
+迁移前后逐份解析锁文件，确认只有 282 个 hosted URL 改变，其他字段完全一致；155 个不同的已锁定包名/版本均与 `pub.dev` API 返回的 `archive_sha256` 一致，原有效哈希全部保留。工作流通过 actionlint 1.7.12。Dart 来源规范化依据固定 SDK 3.13.5 的 [DEPS](https://github.com/dart-lang/sdk/blob/3.13.5/DEPS) 所引用的 Pub 提交，不以两个官方域名的文本相等为判断标准。本地环境缺少 Flutter/PowerShell，未在本地执行固定 SDK 的解析和完整 `tool/check.ps1`；实际严格锁文件检查与三端构建由本次推送触发的 CI 验证。
