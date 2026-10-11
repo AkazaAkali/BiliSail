@@ -15,6 +15,8 @@ const _firstId = VideoId('BV1abc123456');
 const _secondId = VideoId('BV2abc123456');
 
 WatchLaterQueueItem _item(int number) => WatchLaterQueueItem(
+  entryId: 'entry-$number',
+  aid: '${number + 1}',
   video: VideoSummary(
     id: number == 0
         ? _firstId
@@ -31,6 +33,31 @@ WatchLaterQueueItem _item(int number) => WatchLaterQueueItem(
 );
 
 void main() {
+  test(
+    'confirmed removals change navigation while retaining the current source',
+    () {
+      final queue = WatchLaterQueue(
+        id: 'queue',
+        scope: 'user:7',
+        sessionEpoch: 3,
+        items: List.generate(3, _item),
+      );
+      final filtered = queue.withoutRemoved({
+        'entry-0',
+        'entry-1',
+      }, current: _firstId);
+      expect(filtered.items.map((item) => item.video.id), [
+        _firstId,
+        queue.items.last.video.id,
+      ]);
+      expect(
+        filtered.adjacent(_firstId, 1)?.video.id,
+        queue.items.last.video.id,
+      );
+      expect(filtered.withoutRemoved({'entry-0'}).items, [queue.items.last]);
+      expect(queue.items, hasLength(3));
+    },
+  );
   test(
     'queue is scoped, bounded, and retains snapshots owned by open tabs',
     () {
@@ -209,6 +236,7 @@ void main() {
                         expanded: expanded,
                         onToggle: () {},
                         onSelect: (_) {},
+                        onRemove: (_) {},
                       ),
                     ),
                   ),

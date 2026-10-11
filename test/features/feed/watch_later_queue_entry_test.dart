@@ -75,6 +75,8 @@ void main() {
       expect(queue.items.last.playCountText, '2万');
       expect(queue.items.last.danmakuCountText, '100');
       expect(queue.items.last.video.author, '测试 UP');
+      expect(queue.items.last.entryId, '2');
+      expect(queue.items.last.aid, '9007199254740993');
       expect(tester.takeException(), isNull);
     });
   }
@@ -100,6 +102,7 @@ final class _Repository implements HomeRepository {
     HomeEntry(id: 'invalid', title: '失效条目', kind: HomeEntryKind.video),
     HomeEntry(
       id: '2',
+      aid: '9007199254740993',
       title: '第二条',
       kind: HomeEntryKind.video,
       bvid: 'BV2abc123456',

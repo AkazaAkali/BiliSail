@@ -14,6 +14,25 @@ final class WatchLaterQueue {
   final int sessionEpoch;
   final List<WatchLaterQueueItem> items;
 
+  /// Keep the current source navigable if another page removes it while playing.
+  WatchLaterQueue withoutRemoved(Set<String> removed, {VideoId? current}) {
+    if (!items.any(
+      (item) => item.video.id != current && removed.contains(item.removalId),
+    )) {
+      return this;
+    }
+    return WatchLaterQueue(
+      id: id,
+      scope: scope,
+      sessionEpoch: sessionEpoch,
+      items: [
+        for (final item in items)
+          if (item.video.id == current || !removed.contains(item.removalId))
+            item,
+      ],
+    );
+  }
+
   int indexOf(VideoId id) => items.indexWhere((item) => item.video.id == id);
   WatchLaterQueueItem? adjacent(VideoId id, int direction) {
     final current = indexOf(id);
@@ -26,11 +45,15 @@ final class WatchLaterQueue {
 final class WatchLaterQueueItem {
   const WatchLaterQueueItem({
     required this.video,
+    this.entryId,
+    this.aid,
     this.playCountText = '',
     this.danmakuCountText = '',
   });
 
   final VideoSummary video;
+  final String? entryId, aid;
+  String get removalId => entryId ?? video.id.value;
   final String playCountText;
   final String danmakuCountText;
 }

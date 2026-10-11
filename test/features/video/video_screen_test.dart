@@ -12,12 +12,21 @@ import 'package:bilisail/features/auth/application/auth_controller.dart';
 import 'package:bilisail/features/auth/domain/auth_repository.dart';
 import 'package:bilisail/features/video/domain/video_extras_repository.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
+import 'package:bilisail/domain/app_failure.dart';
+import 'package:bilisail/core/network/api_requests.dart';
+import 'package:bilisail/features/feed/application/home_controller.dart';
+import 'package:bilisail/features/feed/application/watch_later_removal_controller.dart';
+import 'package:bilisail/features/feed/domain/home_channel.dart';
+import 'package:bilisail/features/feed/domain/home_repository.dart';
+import 'package:bilisail/features/video/domain/video_actions_repository.dart';
+import 'package:bilisail/shared/ui/app_notice.dart';
 import 'package:bilisail/domain/video.dart';
 import 'package:bilisail/features/video/application/video_controller.dart';
 import 'package:bilisail/features/video/domain/video_repository.dart';
 import 'package:bilisail/features/video/presentation/video_screen.dart';
 import 'package:bilisail/features/video/presentation/video_collection_panel.dart';
 import 'package:bilisail/features/video/domain/watch_later_queue.dart';
+import 'package:bilisail/features/video/presentation/watch_later_queue_panel.dart';
 import 'package:bilisail/features/playback/application/playback_session.dart';
 import 'package:bilisail/features/playback/domain/playback_repository.dart';
 import 'package:bilisail/shared/ui/playback_page_commands.dart';
@@ -394,6 +403,175 @@ void main() {
       }
     }
   });
+  for (final outcome in ['success', 'failure', 'uncertain', 'session-change']) {
+    testWidgets(
+      'watch-later queue deletion handles $outcome without changing player',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1100, 720);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        final home = _QueueHomeRepository();
+        var epoch = 0;
+        final session = PlaybackSession(
+          engine: CardFakeEngine(),
+          repository: _UnusedPlaybackRepository(),
+          progress: _UnusedProgressStore(),
+          accountScope: () => home.accountScope,
+          sessionEpoch: () => epoch,
+        );
+        addTearDown(session.close);
+        final container = ProviderContainer(
+          overrides: [
+            homeRepositoryProvider.overrideWithValue(home),
+            playbackSessionProvider.overrideWithValue(session),
+            sessionEpochProvider.overrideWithValue(() => epoch),
+            authControllerProvider.overrideWith(_GuestAuthController.new),
+            videoRepositoryProvider.overrideWithValue(_VideoRepository()),
+            videoExtrasRepositoryProvider.overrideWithValue(
+              _ExtrasRepository(),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+        final queries = [
+          for (final section in HomeChannel.watchLater.sections)
+            (
+              channel: HomeChannel.watchLater,
+              section: section,
+              scope: 'user:7',
+              folderId: null,
+            ),
+        ];
+        for (final query in queries) {
+          container.listen(homeControllerProvider(query), (_, _) {});
+          await container
+              .read(homeControllerProvider(query).notifier)
+              .refresh();
+        }
+        final queue = WatchLaterQueue(
+          id: 'remove-test',
+          scope: 'user:7',
+          sessionEpoch: 0,
+          items: [
+            for (final entry in home.entries)
+              WatchLaterQueueItem(
+                entryId: entry.id,
+                aid: entry.aid,
+                video: VideoSummary(
+                  id: VideoId(entry.bvid ?? ''),
+                  title: entry.title,
+                  coverUrl: '',
+                  author: '测试 UP',
+                  duration: const Duration(minutes: 1),
+                ),
+              ),
+          ],
+        );
+        final opened = <VideoId>[];
+        var created = 0, disposed = 0;
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: InputTestApp(
+              builder: AppNoticeHost.builder,
+              home: Scaffold(
+                body: VideoScreen(
+                  id: const VideoId('BV1abc123456'),
+                  queue: queue,
+                  onOpenQueueVideo: opened.add,
+                  playerBuilder: (_, _, _) => _TrackedPlayer(
+                    onCreate: () => created++,
+                    onDispose: () => disposed++,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final player = tester.state(find.byType(_TrackedPlayer));
+        final currentDelete = find.byKey(
+          const ValueKey('watch-later-queue-remove-BV1abc123456'),
+        );
+        final targetDelete = find.byKey(
+          const ValueKey('watch-later-queue-remove-BV2abc123456'),
+        );
+        final targetRow = find.byKey(
+          const ValueKey('watch-later-queue-BV2abc123456'),
+        );
+        expect(currentDelete, findsNothing);
+        await tester.tap(targetDelete);
+        await tester.pump();
+        expect(home.writes, hasLength(1));
+        expect(home.removed.single.id, 'original-entry-2');
+        expect(home.removed.single.aid, '9007199254740993');
+        expect(tester.widget<TextButton>(targetDelete).onPressed, isNull);
+        expect(targetRow, findsOneWidget);
+        expect(opened, isEmpty);
+        switch (outcome) {
+          case 'success':
+            home.writes.single.complete();
+          case 'failure':
+            home.writes.single.completeError(
+              const AppFailure(AppFailureKind.network, '删除失败'),
+            );
+          case 'uncertain':
+            home.writes.single.completeError(const UnknownWriteOutcome());
+          case 'session-change':
+            epoch++;
+            container.invalidate(watchLaterRemovalProvider);
+            expect(home.tokens.single.isCancelled, isTrue);
+            home.writes.single.complete();
+        }
+        await tester.pumpAndSettle();
+        expect(tester.state(find.byType(_TrackedPlayer)), same(player));
+        expect(created, 1);
+        expect(disposed, 0);
+        expect(opened, isEmpty);
+        for (final query in queries) {
+          expect(
+            container
+                .read(homeControllerProvider(query))
+                .items
+                .requireValue
+                .length,
+            outcome == 'success' ? 2 : 3,
+          );
+        }
+        if (outcome == 'success') {
+          expect(targetRow, findsNothing);
+          expect(find.text('1/2'), findsOneWidget);
+          expect(find.text('已从稍后再看删除'), findsOneWidget);
+          // Selection uses the latest filtered queue, even before the route changes.
+          final panel = tester.widget<WatchLaterQueuePanel>(
+            find.byType(WatchLaterQueuePanel),
+          );
+          panel.onSelect(const VideoId('BV2abc123456'));
+          expect(opened, isEmpty);
+          await tester.tap(
+            find.byKey(const ValueKey('watch-later-queue-BV3abc123456')),
+          );
+          expect(opened, [const VideoId('BV3abc123456')]);
+        } else if (outcome != 'session-change') {
+          expect(targetRow, findsOneWidget);
+          expect(
+            find.text(outcome == 'failure' ? '删除失败' : '删除结果暂时无法确认，请刷新稍后再看列表核对'),
+            findsOneWidget,
+          );
+          if (outcome == 'uncertain') {
+            await tester.tap(targetDelete);
+            await tester.pumpAndSettle();
+            expect(home.writes, hasLength(1));
+          }
+        } else {
+          expect(find.text('已从稍后再看删除'), findsNothing);
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
   testWidgets(
     'tags stay visible and search full names without expanding intro',
     (tester) async {
@@ -1357,6 +1535,46 @@ final class _UnusedPlaybackRepository extends Fake
 
 final class _UnusedProgressStore extends Fake
     implements PlaybackProgressStore {}
+
+final class _QueueHomeRepository
+    implements HomeRepository, HomeWatchLaterRepository {
+  @override
+  String get accountScope => 'user:7';
+  final entries = [
+    for (var i = 1; i <= 3; i++)
+      HomeEntry(
+        id: 'original-entry-$i',
+        aid: i == 2 ? '9007199254740993' : '$i',
+        bvid: 'BV${i}abc123456',
+        title: '队列视频 $i',
+        kind: HomeEntryKind.video,
+      ),
+  ];
+  final writes = <Completer<void>>[];
+  final removed = <HomeEntry>[];
+  final tokens = <RequestCancellation>[];
+
+  @override
+  Future<HomePage> load(
+    HomeQuery query, {
+    required int page,
+    String? cursor,
+    required RequestCancellation cancellation,
+  }) async => HomePage(entries, hasMore: false);
+
+  @override
+  Future<void> removeWatchLater(
+    HomeEntry entry, {
+    required String scope,
+    required RequestCancellation cancellation,
+  }) {
+    removed.add(entry);
+    tokens.add(cancellation);
+    final write = Completer<void>();
+    writes.add(write);
+    return write.future;
+  }
+}
 
 Future<void> _tagsSnapshot(WidgetTester tester, String name) async {
   if (!const bool.fromEnvironment('VIDEO_TAGS_PREVIEW')) return;

@@ -606,6 +606,8 @@ final class _HomeContentState extends ConsumerState<HomeContent> {
                   if (candidate.kind == HomeEntryKind.video &&
                       VideoId(candidate.bvid ?? '').isValid)
                     WatchLaterQueueItem(
+                      entryId: candidate.id,
+                      aid: candidate.aid,
                       video: VideoSummary(
                         id: VideoId(candidate.bvid!),
                         access: candidate.access,

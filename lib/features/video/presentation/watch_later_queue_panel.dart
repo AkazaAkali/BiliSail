@@ -15,6 +15,8 @@ final class WatchLaterQueuePanel extends StatefulWidget {
     required this.expanded,
     required this.onToggle,
     required this.onSelect,
+    this.onRemove,
+    this.pendingRemovals = const {},
   });
 
   final WatchLaterQueue queue;
@@ -22,6 +24,8 @@ final class WatchLaterQueuePanel extends StatefulWidget {
   final bool expanded;
   final VoidCallback onToggle;
   final ValueChanged<VideoId> onSelect;
+  final ValueChanged<WatchLaterQueueItem>? onRemove;
+  final Set<String> pendingRemovals;
 
   @override
   State<WatchLaterQueuePanel> createState() => _WatchLaterQueuePanelState();
@@ -137,7 +141,10 @@ final class _WatchLaterQueuePanelState extends State<WatchLaterQueuePanel> {
                 );
                 final rowHeight =
                     (coverWidth * 9 / 16).clamp(
-                      titleHeight + authorHeight + countHeight + 4 * textScale,
+                      titleHeight +
+                          authorHeight +
+                          countHeight.clamp(28.0, double.infinity) +
+                          4 * textScale,
                       double.infinity,
                     ) +
                     20;
@@ -164,11 +171,20 @@ final class _WatchLaterQueuePanelState extends State<WatchLaterQueuePanel> {
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: widget.queue.items.length,
                   itemBuilder: (context, itemIndex) => _QueueRow(
+                    key: ValueKey(widget.queue.items[itemIndex].removalId),
                     item: widget.queue.items[itemIndex],
                     selected: itemIndex == index,
                     coverWidth: coverWidth,
                     onTap: () =>
                         widget.onSelect(widget.queue.items[itemIndex].video.id),
+                    onRemove: itemIndex == index || widget.onRemove == null
+                        ? null
+                        : () => widget.onRemove?.call(
+                            widget.queue.items[itemIndex],
+                          ),
+                    removing: widget.pendingRemovals.contains(
+                      widget.queue.items[itemIndex].removalId,
+                    ),
                   ),
                 );
               },
@@ -181,16 +197,21 @@ final class _WatchLaterQueuePanelState extends State<WatchLaterQueuePanel> {
 
 final class _QueueRow extends StatelessWidget {
   const _QueueRow({
+    super.key,
     required this.item,
     required this.selected,
     required this.coverWidth,
     required this.onTap,
+    required this.onRemove,
+    required this.removing,
   });
 
   final WatchLaterQueueItem item;
   final bool selected;
   final double coverWidth;
   final VoidCallback onTap;
+  final VoidCallback? onRemove;
+  final bool removing;
 
   @override
   Widget build(BuildContext context) {
@@ -283,41 +304,73 @@ final class _QueueRow extends StatelessWidget {
                     SizedBox(height: 2 * textScale),
                     Row(
                       children: [
-                        Icon(
-                          BiliIcons.playCount,
-                          size: 12,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 3),
-                        Flexible(
-                          child: Text(
-                            viewText,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: scheme.onSurfaceVariant,
-                                  fontSize: 12,
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Icon(
+                                BiliIcons.playCount,
+                                size: 12,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 3),
+                              Flexible(
+                                child: Text(
+                                  viewText,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: scheme.onSurfaceVariant,
+                                        fontSize: 12,
+                                      ),
                                 ),
+                              ),
+                              const SizedBox(width: 8),
+                              Icon(
+                                BiliIcons.comment,
+                                size: 12,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 3),
+                              Flexible(
+                                child: Text(
+                                  danmakuText,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: scheme.onSurfaceVariant,
+                                        fontSize: 12,
+                                      ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Icon(
-                          BiliIcons.comment,
-                          size: 12,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 3),
-                        Flexible(
-                          child: Text(
-                            danmakuText,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: scheme.onSurfaceVariant,
-                                  fontSize: 12,
-                                ),
+                        if (onRemove != null)
+                          TextButton.icon(
+                            key: ValueKey(
+                              'watch-later-queue-remove-${item.video.id.value}',
+                            ),
+                            onPressed: removing ? null : onRemove,
+                            style: TextButton.styleFrom(
+                              foregroundColor: scheme.onSurfaceVariant,
+                              minimumSize: const Size(0, 28),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              textStyle: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(fontSize: 12),
+                            ),
+                            icon: removing
+                                ? const SizedBox.square(
+                                    dimension: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.delete_outline, size: 14),
+                            label: const Text('删除'),
                           ),
-                        ),
                       ],
                     ),
                   ],

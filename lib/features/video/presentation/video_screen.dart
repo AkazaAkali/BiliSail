@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../domain/app_failure.dart';
+import '../../../shared/ui/app_notice.dart';
 import '../../../core/network/api_requests.dart';
 
 import '../../../shared/ui/playback_page_commands.dart';
@@ -21,6 +22,12 @@ import '../../../domain/comment_target.dart';
 import '../../../core/presentation/workspace_activity.dart';
 import '../../../shared/ui/video_card.dart';
 import '../../../shared/ui/video_card_cover.dart';
+import '../../../shared/ui/video_card_interaction_scope.dart';
+import '../../feed/application/home_repository_provider.dart';
+import '../../feed/application/watch_later_removal_controller.dart';
+import '../../feed/domain/home_repository.dart';
+import '../domain/video_actions_repository.dart';
+import '../domain/video_card_interactions.dart';
 import 'video_author_header.dart';
 import 'video_collection_panel.dart';
 import '../application/video_controller.dart';
@@ -154,11 +161,14 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final queue =
-        widget.queue?.sessionEpoch == ref.read(sessionEpochProvider)() &&
-            widget.queue?.scope == _queueSession?.accountScope()
-        ? widget.queue
-        : null;
+    final originalQueue = _validQueue;
+    final removals = originalQueue == null
+        ? null
+        : ref.watch(watchLaterRemovalProvider(originalQueue.scope));
+    final queue = originalQueue?.withoutRemoved(
+      removals?.removed ?? const {},
+      current: widget.id,
+    );
     // Start the related read alongside detail without rebuilding the player
     // and intro header when only that read changes.
     ref.listen(relatedVideosProvider(widget.id), (_, _) {});
@@ -368,6 +378,9 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                                   onToggle: () =>
                                       setState(() => _queueExpanded = false),
                                   onSelect: _openQueueVideo,
+                                  onRemove: _removeQueueItem,
+                                  pendingRemovals:
+                                      removals?.pending ?? const {},
                                 ),
                               )
                             else
@@ -378,6 +391,8 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                                 onToggle: () =>
                                     setState(() => _queueExpanded = true),
                                 onSelect: _openQueueVideo,
+                                onRemove: _removeQueueItem,
+                                pendingRemovals: removals?.pending ?? const {},
                               ),
                           if (queue == null || !_queueExpanded) ...[
                             Expanded(
@@ -571,10 +586,8 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
     VideoPart selected,
     int direction,
   ) {
-    final queue = widget.queue;
-    if (queue != null &&
-        (queue.scope != _queueSession?.accountScope() ||
-            queue.sessionEpoch != _queueSession?.sessionEpoch())) {
+    final queue = _effectiveQueue;
+    if (widget.queue != null && queue == null) {
       return null;
     }
     final next = adjacentVideoSource(
@@ -643,7 +656,7 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
   }
 
   void _openQueueVideo(VideoId id) {
-    final queue = widget.queue;
+    final queue = _effectiveQueue;
     final session = _queueSession;
     if (id == widget.id ||
         queue == null ||
@@ -657,6 +670,80 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
       epoch: session.sessionEpoch(),
     );
     widget.onOpenQueueVideo?.call(id);
+  }
+
+  WatchLaterQueue? get _validQueue {
+    final queue = widget.queue;
+    return queue != null &&
+            queue.sessionEpoch == ref.read(sessionEpochProvider)() &&
+            queue.sessionEpoch == _queueSession?.sessionEpoch() &&
+            queue.scope == _queueSession?.accountScope()
+        ? queue
+        : null;
+  }
+
+  WatchLaterQueue? get _effectiveQueue {
+    final queue = _validQueue;
+    return queue?.withoutRemoved(
+      ref.read(watchLaterRemovalProvider(queue.scope)).removed,
+      current: widget.id,
+    );
+  }
+
+  Future<void> _removeQueueItem(WatchLaterQueueItem item) async {
+    final queue = _effectiveQueue;
+    if (!mounted ||
+        !WorkspaceActivity.isActive(context) ||
+        queue == null ||
+        item.video.id == widget.id ||
+        queue.indexOf(item.video.id) < 0 ||
+        ref.read(homeRepositoryProvider).accountScope != queue.scope) {
+      return;
+    }
+    final operations = VideoCardInteractionScope.maybeOf(context)?.interactions;
+    final synchronization = operations is VideoCardWatchLaterRemovalSync
+        ? operations as VideoCardWatchLaterRemovalSync
+        : null;
+    final id = item.video.id;
+    if (synchronization?.beginWatchLaterRemoval(id) == false) return;
+    bool current() =>
+        mounted &&
+        WorkspaceActivity.isActive(context) &&
+        _validQueue?.id == queue.id &&
+        _validQueue?.scope == queue.scope &&
+        _validQueue?.sessionEpoch == queue.sessionEpoch;
+    var removed = false, uncertain = false;
+    try {
+      removed = await ref
+          .read(watchLaterRemovalProvider(queue.scope).notifier)
+          .remove(
+            HomeEntry(
+              id: item.removalId,
+              aid: item.aid,
+              bvid: id.value,
+              title: item.video.title,
+              kind: HomeEntryKind.video,
+            ),
+          );
+      if (removed && mounted && current()) {
+        showAppNotice(context, '已从稍后再看删除');
+      }
+    } on UnknownWriteOutcome {
+      uncertain = true;
+      if (mounted && current()) {
+        showAppNotice(context, '删除结果暂时无法确认，请刷新稍后再看列表核对');
+      }
+    } on AppFailure catch (failure) {
+      if (mounted && current() && failure.kind != AppFailureKind.cancelled) {
+        showAppNotice(context, failure.message);
+      }
+    } finally {
+      synchronization?.finishWatchLaterRemoval(
+        id,
+        removed: removed,
+        uncertain: uncertain,
+      );
+    }
   }
 
   Widget _separator(String section) => Divider(
