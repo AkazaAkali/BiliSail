@@ -24,15 +24,17 @@ void main() {
   var streamSlow = false;
   var rejectAudioOnce = false;
   var videoRequests = 0;
+  Future<void> Function(HttpResponse)? streamVideo;
   final media = List<int>.generate(2048, (index) => index % 256);
 
-  Future<void> openRepository() async {
+  Future<void> openRepository({DateTime Function()? clock}) async {
     db = AppDatabase(NativeDatabase(databaseFile));
     repository = SqliteDownloadRepository(
       db,
       sources,
       defaultDirectory: () async => root.path,
       muxer: muxer,
+      clock: clock,
     );
     await repository.initialize();
   }
@@ -44,6 +46,7 @@ void main() {
     streamSlow = false;
     rejectAudioOnce = false;
     videoRequests = 0;
+    streamVideo = null;
     muxer = null;
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((request) async {
@@ -67,7 +70,10 @@ void main() {
         );
       }
       if (slow) await Future<void>.delayed(const Duration(milliseconds: 300));
-      if (streamSlow && start == 0) {
+      if (streamVideo case final send?
+          when request.uri.path.startsWith('/video')) {
+        await send(request.response);
+      } else if (streamSlow && start == 0) {
         request.response.add(media.take(512).toList());
         await request.response.flush();
         await Future<void>.delayed(const Duration(milliseconds: 650));
@@ -232,20 +238,57 @@ void main() {
   });
 
   test('streaming progress publishes a nonzero transfer speed', () async {
-    streamSlow = true;
-    await repository.enqueue([item], const DownloadSelection());
-    final deadline = DateTime.now().add(const Duration(seconds: 5));
-    var observed = false;
-    while (DateTime.now().isBefore(deadline)) {
-      final task = repository.current.tasks.single;
-      if (task.bytesPerSecond > 0) {
-        observed = true;
-        break;
+    var now = DateTime.utc(2026, 10, 11);
+    await repository.close();
+    await db.close();
+    await openRepository(clock: () => now);
+
+    final nextChunks = List.generate(3, (_) => Completer<void>());
+    addTearDown(() {
+      for (final next in nextChunks) {
+        if (!next.isCompleted) next.complete();
       }
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-    }
-    expect(observed, isTrue);
+    });
+    streamVideo = (response) async {
+      // flush alone does not guarantee separate client progress callbacks.
+      // Wait for the client to observe each chunk before sending another.
+      response.bufferOutput = false;
+      for (var index = 0; index < 4; index++) {
+        if (index > 0) await nextChunks[index - 1].future;
+        response.add(media.skip(index * 512).take(512).toList());
+        await response.flush();
+      }
+    };
+
+    Future<DownloadTask> progressAt(int bytes) => repository.changes
+        .firstWhere(
+          (state) => state.tasks.any(
+            (task) =>
+                task.status == DownloadStatus.downloading &&
+                task.downloadedBytes == bytes,
+          ),
+        )
+        .then((state) => state.tasks.single)
+        .timeout(const Duration(seconds: 5));
+
+    final firstChunk = progressAt(512);
+    await repository.enqueue([item], const DownloadSelection());
+    expect((await firstChunk).bytesPerSecond, 0);
+
+    now = now.add(const Duration(milliseconds: 250));
+    final secondChunk = progressAt(1024);
+    nextChunks[0].complete();
+    expect((await secondChunk).bytesPerSecond, 0);
+
+    now = now.add(const Duration(milliseconds: 250));
+    final thirdChunk = progressAt(1536);
+    nextChunks[1].complete();
+    expect((await thirdChunk).bytesPerSecond, 2048);
+
+    nextChunks[2].complete();
     await _waitFor(repository, DownloadStatus.completed);
+    expect(repository.current.tasks.single.bytesPerSecond, 0);
+    expect(repository.current.tasks.single.downloadedBytes, media.length * 2);
   });
 
   test(

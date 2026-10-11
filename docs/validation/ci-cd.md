@@ -284,3 +284,13 @@ Android 构建输出 CupertinoIcons 字体声明警告，Windows 构建输出 `f
 
 
 迁移前后逐份解析锁文件，确认只有 282 个 hosted URL 改变，其他字段完全一致；155 个不同的已锁定包名/版本均与 `pub.dev` API 返回的 `archive_sha256` 一致，原有效哈希全部保留。工作流通过 actionlint 1.7.12。Dart 来源规范化依据固定 SDK 3.13.5 的 [DEPS](https://github.com/dart-lang/sdk/blob/3.13.5/DEPS) 所引用的 Pub 提交，不以两个官方域名的文本相等为判断标准。本地环境缺少 Flutter/PowerShell，未在本地执行固定 SDK 的解析和完整 `tool/check.ps1`；实际严格锁文件检查与三端构建由本次推送触发的 CI 验证。
+
+### 下载速度回归测试时序修复（2026-10-11）
+
+[CI 38112987859](https://github.com/CKopoer/BiliSail/actions/runs/38112987859/job/114392259775) 的提交为 `8e74438e29b7efa0626768627408d294dc2712bb`。严格锁文件检查、格式和静态分析通过，根应用 1840 项测试通过、1 项失败；失败为 [下载仓储测试](../../test/features/downloads/sqlite_download_repository_test.dart) 的 `streaming progress publishes a nonzero transfer speed`，第 247 行预期观察到非零速度，实际为 `false`。后续包检查和三端构建因此没有执行，独立 MP4 原生回归已通过。
+
+该用例使用真实服务器每隔 650 毫秒发送小块数据，并每隔 20 毫秒轮询当前状态；仓储则以客户端进度回调建立基线，至少间隔 500 毫秒才计算速度，完成时清零。服务器发送间隔不能保证客户端回调间隔，轮询也不能保证观察到短暂状态。[IOSink.flush](https://api.dart.dev/dart-io/IOSink/flush.html) 只保证底层 consumer 接受数据，不保证操作系统已发送；[HttpResponse.bufferOutput](https://api.dart.dev/dart-io/HttpResponse/bufferOutput.html) 默认开启。本机旧用例单独运行通过，但测试没有约束这些调度和缓冲条件。
+
+修复只调整测试：使用仓储已有的可注入时钟，测试服务器关闭输出缓冲，并等待客户端发布当前块的进度后才允许发送下一块。断言通过 `changes` 订阅检查首次采样为零、250 毫秒时仍为零、500 毫秒时速度为 2048 字节/秒，以及双轨完整下载后速度清零。每次状态等待有 5 秒超时，失败清理释放发送门闩；下载实现、500 毫秒采样规则和 CI 工作流保持原值。
+
+Windows x64、Flutter 3.47.6：修复后的定向用例和全部 53 项下载回归通过。完整 `tool/check.ps1 -EnforceLockfile` 通过格式、静态分析和 2360 项测试（根应用 1841、API 390、播放器 41、弹幕 86、MP4 2）；未设置 `BILI_MUX_LIBRARY` 的 7 项原生测试按既有规则跳过。五份锁文件没有变化，本节相对链接和 `git diff --check` 通过。本机没有应用构建、安装或实机下载验收；远端 CI 与三端构建以修复提交对应的工作流结果为准。
