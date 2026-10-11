@@ -2,6 +2,7 @@ import '../../../domain/request_cancellation.dart';
 import '../../../domain/video.dart';
 import '../../../domain/video_codec.dart';
 import '../../../domain/app_failure.dart';
+import '../../../domain/audio_normalization.dart';
 import 'playback_timeline.dart';
 
 export '../../../domain/video_codec.dart';
@@ -32,6 +33,7 @@ final class PlaybackMedia {
     this.qualityLabels = const {},
     this.voices = const [],
     this.voice = const PlaybackVoice.original(),
+    this.loudness,
   });
   final PlaybackTrack video;
   final PlaybackTrack? audio;
@@ -43,6 +45,7 @@ final class PlaybackMedia {
   final Map<String, String> headers;
   final List<PlaybackVoice> voices;
   final PlaybackVoice voice;
+  final AudioLoudness? loudness;
 }
 
 final class PlaybackVoice {

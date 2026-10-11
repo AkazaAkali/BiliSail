@@ -1123,6 +1123,7 @@ final class BiliApiClient {
           'fnval': preview ? '2000' : '4048',
           'fourk': '1',
           if (!preview) ...{
+            'voice_balance': '1',
             'cur_language': language,
             'cur_production_type': '$productionType',
             'client_attr': '1',
@@ -1178,6 +1179,7 @@ final class BiliApiClient {
     return ApiPlayInfo(
       duration: Duration(milliseconds: durationMs),
       dashVideo: List.unmodifiable(videos),
+      loudness: ApiAudioLoudness.parse(data['volume']),
       dashAudio: List.unmodifiable(audios),
       acceptQuality: List.unmodifiable(
         (_list(

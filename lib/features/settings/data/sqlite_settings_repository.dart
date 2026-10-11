@@ -91,6 +91,11 @@ class SqliteSettingsRepository implements SettingsRepository {
           VideoDecodingPreference.automatic,
       defaultPlaybackRate: number('defaultPlaybackRate', 1.0),
       defaultVolume: number('defaultVolume', 100.0),
+      audioNormalization:
+          AudioNormalizationMode.values
+              .where((item) => item.name == decoded['audioNormalization'])
+              .firstOrNull ??
+          AudioNormalizationMode.off,
       danmakuArea: number('danmakuArea', 0.75),
       danmakuTopMargin: number('danmakuTopMargin', 0),
       danmakuLineSpacing: number('danmakuLineSpacing', 5),
@@ -147,7 +152,7 @@ class SqliteSettingsRepository implements SettingsRepository {
     return database.writeSetting(
       'preferences.v1',
       jsonEncode({
-        'schemaVersion': 17,
+        'schemaVersion': 18,
         'navigationMode': value.navigationMode.name,
         'allowConcurrentPlayback': value.allowConcurrentPlayback,
         'cacheImages': value.cacheImages,
@@ -170,6 +175,7 @@ class SqliteSettingsRepository implements SettingsRepository {
         'videoDecoding': value.videoDecoding.name,
         'defaultPlaybackRate': value.defaultPlaybackRate,
         'defaultVolume': value.defaultVolume,
+        'audioNormalization': value.audioNormalization.name,
         'danmakuArea': value.danmakuArea,
         'danmakuTopMargin': value.danmakuTopMargin,
         'danmakuLineSpacing': value.danmakuLineSpacing,

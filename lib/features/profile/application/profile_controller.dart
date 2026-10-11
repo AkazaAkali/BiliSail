@@ -16,6 +16,7 @@ final class ProfileListState {
   const ProfileListState({
     this.items = const [],
     this.page = 0,
+    this.pagesWithoutNewItems = 0,
     this.cursor,
     this.loading = false,
     this.hasMore = true,
@@ -23,7 +24,7 @@ final class ProfileListState {
     this.message,
   });
   final List<ProfileEntry> items;
-  final int page;
+  final int page, pagesWithoutNewItems;
   final String? cursor, message;
   final bool loading, hasMore, isHidden;
 }
@@ -252,11 +253,15 @@ class ProfileController extends Notifier<ProfileState> {
     final scope = repository.accountScope, epoch = repository.sessionEpoch;
     final base = refresh ? const ProfileListState() : old;
     final page = base.page + 1;
+    final previousEmptyPages = base.message == null
+        ? base.pagesWithoutNewItems
+        : 0;
     _setList(
       section,
       ProfileListState(
         items: base.items,
         page: base.page,
+        pagesWithoutNewItems: previousEmptyPages,
         cursor: base.cursor,
         loading: true,
         hasMore: base.hasMore,
@@ -294,13 +299,21 @@ class ProfileController extends Notifier<ProfileState> {
       final cursorAdvanced =
           section != ProfileSection.dynamics ||
           (result.cursor != null && result.cursor != base.cursor);
+      final hasMore = result.hasMore && cursorAdvanced && unique.length < 500;
+      final emptyPages = bounded.length == base.items.length
+          ? previousEmptyPages + 1
+          : 0;
       _setList(
         section,
         ProfileListState(
           items: List.unmodifiable(bounded),
           page: page,
+          pagesWithoutNewItems: emptyPages,
           cursor: result.cursor,
-          hasMore: result.hasMore && cursorAdvanced && unique.length < 500,
+          hasMore: hasMore,
+          // Automatic viewport filling must stop on repeated/filtered pages.
+          // Keep the server cursor so an explicit retry can continue.
+          message: hasMore && emptyPages >= 3 ? '连续多页没有新内容，可重试继续加载' : null,
         ),
       );
     } on AppFailure catch (error) {
@@ -310,6 +323,7 @@ class ProfileController extends Notifier<ProfileState> {
           ProfileListState(
             items: base.items,
             page: base.page,
+            pagesWithoutNewItems: previousEmptyPages,
             cursor: base.cursor,
             hasMore: base.hasMore,
             message: error.kind == AppFailureKind.cancelled
@@ -325,6 +339,7 @@ class ProfileController extends Notifier<ProfileState> {
           ProfileListState(
             items: base.items,
             page: base.page,
+            pagesWithoutNewItems: previousEmptyPages,
             cursor: base.cursor,
             hasMore: base.hasMore,
             message: '内容暂时无法加载，请重试',

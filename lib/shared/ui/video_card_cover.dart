@@ -258,9 +258,22 @@ class _VideoCardCoverState extends State<VideoCardCover>
                 widget.child,
                 if (preview != null)
                   IgnorePointer(
-                    child: _VideoCardPlaybackPreview(
-                      key: const ValueKey('video-card-preview'),
-                      preview: preview,
+                    // The session is returned only after its first frame is
+                    // ready. Keep the cover underneath and fade only on entry;
+                    // exit must remove the surface as soon as it is released.
+                    child: TweenAnimationBuilder<double>(
+                      key: ObjectKey(preview),
+                      tween: Tween(begin: 0, end: 1),
+                      duration: MediaQuery.disableAnimationsOf(context)
+                          ? Duration.zero
+                          : const Duration(milliseconds: 200),
+                      curve: Curves.linear,
+                      builder: (context, opacity, child) =>
+                          Opacity(opacity: opacity, child: child),
+                      child: _VideoCardPlaybackPreview(
+                        key: const ValueKey('video-card-preview'),
+                        preview: preview,
+                      ),
                     ),
                   ),
                 if (widget.video.access.label != null)

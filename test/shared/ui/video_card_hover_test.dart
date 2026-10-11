@@ -411,6 +411,8 @@ void main() {
         );
         await tester.pump();
       }
+      // Capture the settled preview after its first-frame fade-in.
+      await tester.pump(const Duration(milliseconds: 200));
       expect(tester.takeException(), isNull);
       final boundary = key.currentContext?.findRenderObject();
       if (boundary is! RenderRepaintBoundary) {

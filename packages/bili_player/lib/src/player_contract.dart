@@ -72,6 +72,7 @@ final class OpenOptions {
     this.play = false,
     this.rate = 1,
     this.volume = 100,
+    this.audioGainDb = 0,
     this.videoDecoding = VideoDecodingMode.automatic,
     this.openTimeout = const Duration(seconds: 35),
     this.maxBufferAhead = maximumBufferAhead,
@@ -80,6 +81,9 @@ final class OpenOptions {
   final bool play;
   final double rate;
   final double volume;
+
+  /// Source normalization gain, independent of the user's volume percentage.
+  final double audioGainDb;
   final VideoDecodingMode videoDecoding;
   final Duration openTimeout;
 
@@ -247,6 +251,11 @@ abstract interface class PlayerEngine {
   Future<void> setVolume(double volume);
   Future<void> stop();
   Future<void> dispose();
+}
+
+/// Optional native gain control; changing gain must not reopen media.
+abstract interface class AudioGainControl {
+  Future<void> setAudioGain(double gainDb);
 }
 
 /// Implemented by engines that can supply a Flutter video surface.

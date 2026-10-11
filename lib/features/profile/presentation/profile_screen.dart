@@ -6,6 +6,7 @@ import '../../../domain/user.dart';
 import '../../../domain/video.dart';
 import '../../live/domain/live_room.dart';
 import '../../../shared/ui/network_avatar.dart';
+import '../../../shared/ui/paged_scroll_viewport.dart';
 import '../../../shared/ui/state_view.dart';
 import '../../../shared/ui/dynamic_post_interactions.dart';
 import '../../../shared/ui/sliver_dynamic_post_list.dart';
@@ -182,11 +183,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               value: state.section,
               onChanged: controller.select,
               viewKey: const ValueKey('profile-section-swipe'),
-              pageBuilder: (context, section, _) => _sectionPage(
+              pageBuilder: (context, section, active) => _sectionPage(
                 context,
                 state.copy(section: section),
                 controller,
                 session: session,
+                active: active,
               ),
             ),
           ),
@@ -200,193 +202,202 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     ProfileState state,
     ProfileController controller, {
     required (UserId, int) session,
+    required bool active,
   }) {
     final entries = state.current.items;
-    return Column(
-      children: [
-        Expanded(
-          child: _ProfileSectionScrollView(
-            key: PageStorageKey((
-              session,
-              state.section,
-              state.section == ProfileSection.folders ? state.folderId : null,
-            )),
-            slivers: [
-              SliverPadding(
-                padding: const EdgeInsets.all(16),
-                sliver: SliverToBoxAdapter(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (state.section == ProfileSection.videos) ...[
-                        _ProfileVideoFilters(
-                          order: state.order,
-                          keyword: state.keyword,
-                          onOrderChanged: (value) =>
-                              controller.filter(order: value),
-                          onSearch: (value) =>
-                              controller.filter(keyword: value),
+    final listKey = (
+      session,
+      state.section,
+      state.section == ProfileSection.folders ? state.folderId : null,
+    );
+    return PagedScrollViewport(
+      key: ValueKey(listKey),
+      active: active,
+      canLoadMore:
+          state.current.page > 0 &&
+          state.current.hasMore &&
+          !state.current.loading &&
+          !state.current.isHidden &&
+          state.current.message == null,
+      contentVersion: state.current,
+      onLoadMore: () async {
+        final current = ref.read(profileControllerProvider(widget.id));
+        // A deferred layout check must still target the selected list/query.
+        if (current.sessionGeneration == state.sessionGeneration &&
+            current.section == state.section &&
+            current.folderId == state.folderId &&
+            current.order == state.order &&
+            current.keyword == state.keyword &&
+            current.current.message == null) {
+          await controller.load();
+        }
+      },
+      builder: (scrollController) => CustomScrollView(
+        key: PageStorageKey(listKey),
+        controller: scrollController,
+        primary: false,
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.all(16),
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (state.section == ProfileSection.videos) ...[
+                    _ProfileVideoFilters(
+                      order: state.order,
+                      keyword: state.keyword,
+                      onOrderChanged: (value) =>
+                          controller.filter(order: value),
+                      onSearch: (value) => controller.filter(keyword: value),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  if (state.section == ProfileSection.folders &&
+                      state.folderId != null)
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        TextButton.icon(
+                          onPressed: controller.closeFolder,
+                          icon: const Icon(Icons.arrow_back),
+                          label: const Text('返回收藏夹'),
                         ),
-                        const SizedBox(height: 12),
+                        Text(state.folderTitle ?? ''),
                       ],
-                      if (state.section == ProfileSection.folders &&
-                          state.folderId != null)
-                        Wrap(
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            TextButton.icon(
-                              onPressed: controller.closeFolder,
-                              icon: const Icon(Icons.arrow_back),
-                              label: const Text('返回收藏夹'),
-                            ),
-                            Text(state.folderTitle ?? ''),
-                          ],
-                        ),
-                      if (state.current.items.isEmpty && state.current.loading)
-                        const StateView.loading(),
-                      if (state.current.message case final message?)
-                        StateView.error(
-                          message: message,
-                          onAction: () => controller.load(),
-                        ),
-                      if (state.current.isHidden)
-                        StateView.empty(
-                          message:
-                              '该用户未公开${profileSectionLabel(state.section)}列表',
-                          icon: Icons.visibility_off_outlined,
-                        ),
-                      if (state.current.items.isEmpty &&
-                          !state.current.loading &&
-                          !state.current.isHidden &&
-                          state.current.message == null)
-                        StateView.empty(
-                          message:
-                              '${profileSectionLabel(state.section)}暂无公开内容',
-                        ),
-                    ],
-                  ),
-                ),
+                    ),
+                  if (state.current.items.isEmpty && state.current.loading)
+                    const StateView.loading(),
+                  if (state.current.message case final message?)
+                    StateView.error(
+                      message: message,
+                      onAction: () => controller.load(),
+                    ),
+                  if (state.current.isHidden)
+                    StateView.empty(
+                      message: '该用户未公开${profileSectionLabel(state.section)}列表',
+                      icon: Icons.visibility_off_outlined,
+                    ),
+                  if (state.current.items.isEmpty &&
+                      !state.current.loading &&
+                      !state.current.isHidden &&
+                      state.current.message == null)
+                    StateView.empty(
+                      message: '${profileSectionLabel(state.section)}暂无公开内容',
+                    ),
+                ],
               ),
-              SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                sliver:
-                    state.section == ProfileSection.dynamics &&
-                        entries.every((entry) => entry.dynamicPost != null)
-                    ? SliverDynamicPostList(
-                        posts: [
-                          for (final entry in entries) ?entry.dynamicPost,
-                        ],
-                        spacing: 12,
-                        onOpenUser: widget.onOpenUser,
-                        onOpenVideo: widget.onOpenVideo,
-                        onOpenLink: (uri) =>
-                            ref.read(externalLinkOpenerProvider)(uri),
-                      )
-                    : SliverLayoutBuilder(
-                        builder: (context, constraints) {
-                          if (state.section == ProfileSection.folders &&
-                              state.folderId != null) {
-                            return SliverResponsiveCardGrid(
-                              itemCount: entries.length,
-                              itemBuilder: (context, index) => _entry(
-                                entries[index],
-                                controller,
-                                sharedVideoCard: true,
-                              ),
-                            );
-                          }
-                          final isVideoList =
-                              entries.isNotEmpty &&
-                              entries.every(
-                                (e) =>
-                                    e.kind == ProfileEntryKind.video &&
-                                    e.video != null,
-                              );
-                          if (!isVideoList) {
-                            return SliverList.builder(
-                              itemCount: entries.length,
-                              itemBuilder: (context, index) => Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: Align(
-                                  alignment: Alignment.topCenter,
-                                  child: ConstrainedBox(
-                                    constraints: BoxConstraints(
-                                      maxWidth:
-                                          state.section ==
-                                              ProfileSection.dynamics
-                                          ? 780
-                                          : double.infinity,
-                                    ),
-                                    child: _entry(entries[index], controller),
-                                  ),
-                                ),
-                              ),
-                            );
-                          }
-                          final columns = (constraints.crossAxisExtent / 560)
-                              .floor()
-                              .clamp(1, 3);
-                          final cardWidth =
-                              (constraints.crossAxisExtent -
-                                  (columns - 1) * 24) /
-                              columns;
-                          return SliverGrid.builder(
-                            itemCount: entries.length,
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: columns,
-                                  mainAxisExtent: ProfileVideoCard.heightFor(
-                                    cardWidth,
-                                    MediaQuery.textScalerOf(context),
-                                  ),
-                                  crossAxisSpacing: 24,
-                                  mainAxisSpacing: 24,
-                                ),
-                            itemBuilder: (context, index) =>
-                                _video(entries[index].video!),
-                          );
-                        },
-                      ),
-              ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      if (state.current.items.isNotEmpty &&
-                          state.current.message == null)
-                        Center(
-                          child: state.current.loading
-                              ? const CircularProgressIndicator()
-                              : state.current.hasMore
-                              ? OutlinedButton(
-                                  onPressed: () => controller.load(),
-                                  child: const Text('加载更多'),
-                                )
-                              : Text(
-                                  state.current.items.length >= 500
-                                      ? '已显示 500 条，请通过搜索或排序查找更多'
-                                      : '已显示全部可见内容',
-                                ),
-                        ),
-                      Align(
-                        alignment: Alignment.center,
-                        child: TextButton.icon(
-                          onPressed: () {
-                            controller.refresh();
-                          },
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('刷新'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
-      ],
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver:
+                state.section == ProfileSection.dynamics &&
+                    entries.every((entry) => entry.dynamicPost != null)
+                ? SliverDynamicPostList(
+                    posts: [for (final entry in entries) ?entry.dynamicPost],
+                    spacing: 12,
+                    onOpenUser: widget.onOpenUser,
+                    onOpenVideo: widget.onOpenVideo,
+                    onOpenLink: (uri) =>
+                        ref.read(externalLinkOpenerProvider)(uri),
+                  )
+                : SliverLayoutBuilder(
+                    builder: (context, constraints) {
+                      if (state.section == ProfileSection.folders &&
+                          state.folderId != null) {
+                        return SliverResponsiveCardGrid(
+                          itemCount: entries.length,
+                          itemBuilder: (context, index) => _entry(
+                            entries[index],
+                            controller,
+                            sharedVideoCard: true,
+                          ),
+                        );
+                      }
+                      final isVideoList =
+                          entries.isNotEmpty &&
+                          entries.every(
+                            (e) =>
+                                e.kind == ProfileEntryKind.video &&
+                                e.video != null,
+                          );
+                      if (!isVideoList) {
+                        return SliverList.builder(
+                          itemCount: entries.length,
+                          itemBuilder: (context, index) => Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxWidth:
+                                      state.section == ProfileSection.dynamics
+                                      ? 780
+                                      : double.infinity,
+                                ),
+                                child: _entry(entries[index], controller),
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+                      final columns = (constraints.crossAxisExtent / 560)
+                          .floor()
+                          .clamp(1, 3);
+                      final cardWidth =
+                          (constraints.crossAxisExtent - (columns - 1) * 24) /
+                          columns;
+                      return SliverGrid.builder(
+                        itemCount: entries.length,
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: columns,
+                          mainAxisExtent: ProfileVideoCard.heightFor(
+                            cardWidth,
+                            MediaQuery.textScalerOf(context),
+                          ),
+                          crossAxisSpacing: 24,
+                          mainAxisSpacing: 24,
+                        ),
+                        itemBuilder: (context, index) =>
+                            _video(entries[index].video!),
+                      );
+                    },
+                  ),
+          ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  if (state.current.items.isNotEmpty &&
+                      state.current.message == null &&
+                      (state.current.loading || !state.current.hasMore))
+                    Center(
+                      child: state.current.loading
+                          ? const CircularProgressIndicator()
+                          : Text(
+                              state.current.items.length >= 500
+                                  ? '已显示 500 条，请通过搜索或排序查找更多'
+                                  : '已显示全部可见内容',
+                            ),
+                    ),
+                  Align(
+                    alignment: Alignment.center,
+                    child: TextButton.icon(
+                      onPressed: () {
+                        controller.refresh();
+                      },
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('刷新'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -527,34 +538,6 @@ class _ProfileVideoFiltersState extends State<_ProfileVideoFilters> {
   @override
   void dispose() {
     _keyword.dispose();
-    super.dispose();
-  }
-}
-
-/// Each retained tab owns its list position and desktop scrollbar.
-class _ProfileSectionScrollView extends StatefulWidget {
-  const _ProfileSectionScrollView({super.key, required this.slivers});
-
-  final List<Widget> slivers;
-
-  @override
-  State<_ProfileSectionScrollView> createState() =>
-      _ProfileSectionScrollViewState();
-}
-
-class _ProfileSectionScrollViewState extends State<_ProfileSectionScrollView> {
-  final _controller = ScrollController();
-
-  @override
-  Widget build(BuildContext context) => CustomScrollView(
-    controller: _controller,
-    primary: false,
-    slivers: widget.slivers,
-  );
-
-  @override
-  void dispose() {
-    _controller.dispose();
     super.dispose();
   }
 }

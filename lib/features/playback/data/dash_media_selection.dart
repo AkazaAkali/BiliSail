@@ -1,6 +1,7 @@
 import 'package:bili_api/bili_api.dart';
 
 import '../../../domain/app_failure.dart';
+import '../../../domain/audio_normalization.dart';
 import '../../../domain/media_cdn.dart';
 import '../domain/playback_repository.dart';
 
@@ -64,7 +65,16 @@ PlaybackMedia selectDashMedia(
     videoMouthShapeChange: voice.videoMouthShapeChange,
   );
   final voices = List<PlaybackVoice>.unmodifiable(info.voices.map(mapVoice));
+  final loudness = videoOnly ? null : info.loudness;
   return PlaybackMedia(
+    loudness: loudness == null
+        ? null
+        : AudioLoudness(
+            measuredI: loudness.measuredI,
+            normalTargetI: loudness.normalTargetI,
+            highDynamicTargetI: loudness.highDynamicTargetI,
+            undersizedTargetI: loudness.undersizedTargetI,
+          ),
     video: map(candidates.first),
     audio: videoOnly ? null : map(audios.first),
     quality: selectedQuality,

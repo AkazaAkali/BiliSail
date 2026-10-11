@@ -475,6 +475,7 @@ void main() {
     tester,
   ) async {
     repo.items = const [];
+    repo.hasMore = false;
     await controller.load(refresh: true);
     await tester.pumpWidget(
       UncontrolledProviderScope(
@@ -511,6 +512,7 @@ class _Repo implements ProfileRepository {
   int epoch = 0;
   int listReads = 0;
   bool isHidden = false;
+  bool hasMore = true;
   List<ProfileEntry> items = const [entry];
   Completer<ProfilePage>? pending;
   RequestCancellation? read;
@@ -551,7 +553,7 @@ class _Repo implements ProfileRepository {
     return pending?.future ??
         (isHidden
             ? const ProfilePage.hidden()
-            : ProfilePage(items: items, hasMore: true, cursor: '$page'));
+            : ProfilePage(items: items, hasMore: hasMore, cursor: '$page'));
   }
 }
 

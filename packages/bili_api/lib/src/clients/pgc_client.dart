@@ -44,6 +44,7 @@ final class PgcClient {
           'fnval': '4048',
           'fourk': '1',
           'module': 'bangumi',
+          'voice_balance': '1',
         }),
         endpoint,
         context: context,
@@ -93,6 +94,7 @@ final class PgcClient {
     return ApiPlayInfo(
       duration: Duration(milliseconds: durationMs.clamp(0, 86400000)),
       dashVideo: List.unmodifiable(videos),
+      loudness: ApiAudioLoudness.parse(data['volume']),
       dashAudio: List.unmodifiable(audios),
       isPreview: data['is_preview'] == true || _int(data['is_preview']) == 1,
       acceptQuality: List.unmodifiable(

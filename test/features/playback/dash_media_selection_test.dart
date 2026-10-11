@@ -5,6 +5,33 @@ import 'package:bilisail/features/playback/domain/playback_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'both DASH repositories share loudness mapping; muted preview omits it',
+    () {
+      final info = ApiPlayInfo(
+        duration: const Duration(seconds: 60),
+        dashVideo: [_track(80, 'avc1')],
+        dashAudio: [_track(30280, 'mp4a.40.2')],
+        acceptQuality: const [80],
+        loudness: const ApiAudioLoudness(
+          measuredI: -16.7,
+          normalTargetI: -14,
+          highDynamicTargetI: -24,
+          undersizedTargetI: -28,
+        ),
+      );
+      PlaybackMedia resolve(bool videoOnly) => selectDashMedia(
+        info,
+        quality: 80,
+        preferredCodec: VideoCodecPreference.h264,
+        headers: const {},
+        videoOnly: videoOnly,
+      );
+      expect(resolve(false).loudness?.measuredI, -16.7);
+      expect(resolve(false).loudness?.highDynamicTargetI, -24);
+      expect(resolve(true).loudness, isNull);
+    },
+  );
   test('DASH mapping preserves voice options, associated subtitles and selected voice', () {
     final media = selectDashMedia(
       ApiPlayInfo(

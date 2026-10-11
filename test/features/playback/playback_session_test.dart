@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:bilisail/domain/playback_rates.dart';
+import 'package:bilisail/domain/audio_normalization.dart';
 import 'package:bilisail/core/input/input_stroke.dart';
 import 'package:bilisail/features/settings/domain/shortcut_settings.dart';
 import 'package:bilisail/features/playback/application/playback_shortcut_controller.dart';
@@ -25,6 +26,151 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  const loudness = AudioLoudness(
+    measuredI: -16.7,
+    normalTargetI: -14,
+    highDynamicTargetI: -24,
+    undersizedTargetI: -28,
+  );
+  for (final pgc in [false, true]) {
+    test(
+      'normalization preserves playback and follows source changes: PGC=$pgc',
+      () async {
+        final engine = _FakeEngine();
+        final repository = _FakeRepository(autoResolve: true)
+          ..loudness = loudness;
+        final content = _FakeContentRepository()..loudness = loudness;
+        final session = PlaybackSession(
+          engine: engine,
+          repository: repository,
+          contentRepository: content,
+          progress: _FakeProgress(),
+          accountScope: () => 'guest',
+        );
+        addTearDown(session.close);
+        var settings = AppSettings(
+          audioNormalization: AudioNormalizationMode.standard,
+        );
+        session.configureSettings(settings);
+        Future<void> open(String id) => pgc
+            ? session.open(null, null, target: PgcPlaybackTarget(id))
+            : session.open(_detail(id), _part(id));
+        await open('one');
+        expect(engine.openOptions.last.audioGainDb, closeTo(2.7, 1e-9));
+        expect(engine.audioGainDb, closeTo(2.7, 1e-9));
+        await session.setVolume(35);
+        await session.setRate(1.5);
+        await session.seek(const Duration(seconds: 9));
+        await session.pause();
+        final generation = engine.currentSnapshot.generation;
+        settings = settings.copyWith(
+          audioNormalization: AudioNormalizationMode.highDynamic,
+        );
+        session.configureSettings(settings);
+        await _flush();
+        expect(engine.audioGainDb, closeTo(-7.3, 1e-9));
+        expect(engine.openOptions.length, 1);
+        expect(engine.currentSnapshot.generation, generation);
+        expect(engine.currentSnapshot.volume, 35);
+        expect(engine.currentSnapshot.rate, 1.5);
+        expect(engine.currentSnapshot.position, const Duration(seconds: 9));
+        expect(engine.currentSnapshot.desiredPlaying, isFalse);
+        await session.changeQuality(64);
+        expect(engine.openOptions.last.audioGainDb, closeTo(-7.3, 1e-9));
+        expect(engine.currentSnapshot.volume, 35);
+        repository.loudness = null;
+        content.loudness = null;
+        await open('two');
+        expect(engine.audioGainDb, 0);
+        expect(engine.openOptions.last.audioGainDb, 0);
+        await session.open(null, null, target: const LivePlaybackTarget('3'));
+        expect(engine.audioGainDb, 0);
+      },
+    );
+  }
+
+  test(
+    'settings changed during native open win before playback begins',
+    () async {
+      final gate = Completer<void>();
+      final engine = _FakeEngine()..nextOpen = gate;
+      final repository = _FakeRepository(autoResolve: true)
+        ..loudness = loudness;
+      final session = PlaybackSession(
+        engine: engine,
+        repository: repository,
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      session.configureSettings(
+        AppSettings(audioNormalization: AudioNormalizationMode.standard),
+      );
+      final opening = session.open(_detail('one'), _part('one'));
+      await _flush();
+      expect(engine.openOptions.single.audioGainDb, closeTo(2.7, 1e-9));
+      session.configureSettings(
+        AppSettings(audioNormalization: AudioNormalizationMode.highDynamic),
+      );
+      gate.complete();
+      await opening;
+      expect(engine.audioGainDb, closeTo(-7.3, 1e-9));
+      expect(engine.playCount, 1);
+    },
+  );
+
+  test('rapid gain changes coalesce and stale completion cannot affect a new source', () async {
+    final engine = _FakeEngine();
+    final repository = _FakeRepository(autoResolve: true)..loudness = loudness;
+    var scope = 'first';
+    final session = PlaybackSession(
+      engine: engine,
+      repository: repository,
+      progress: _FakeProgress(),
+      accountScope: () => scope,
+    );
+    addTearDown(session.close);
+    await session.open(_detail('one'), _part('one'));
+    engine.gainCalls.clear();
+    final gate = Completer<void>();
+    engine.nextGain = gate;
+    session.configureSettings(
+      AppSettings(audioNormalization: AudioNormalizationMode.standard),
+    );
+    session.configureSettings(
+      AppSettings(audioNormalization: AudioNormalizationMode.highDynamic),
+    );
+    session.configureSettings(
+      AppSettings(audioNormalization: AudioNormalizationMode.off),
+    );
+    expect(engine.gainCalls.length, 1);
+    gate.complete();
+    await _flush();
+    expect(engine.gainCalls.length, 2);
+    expect(engine.audioGainDb, 0);
+    final stale = Completer<void>();
+    engine.nextGain = stale;
+    session.configureSettings(
+      AppSettings(audioNormalization: AudioNormalizationMode.standard),
+    );
+    await _flush();
+    scope = 'second';
+    await session.stop();
+    repository.loudness = null;
+    final opening = session.open(_detail('two'), _part('two'));
+    await _flush();
+    stale.completeError(
+      const PlayerFailure(
+        PlayerFailureKind.nativePlayback,
+        'old gain failure',
+        1,
+      ),
+    );
+    await opening;
+    expect(engine.audioGainDb, 0);
+    expect(session.error, isNull);
+  });
 
   test(
     'startup overlaps independent stages but waits before native open',
@@ -4068,23 +4214,28 @@ VideoPart _part(String id) => VideoPart(
   duration: const Duration(minutes: 2),
 );
 
-PlaybackMedia _media(String id, int quality, Duration duration) =>
-    PlaybackMedia(
-      video: PlaybackTrack(
-        urls: [Uri.parse('https://cdn.example/$id-video.m4s')],
-        codec: 'avc1',
-        bandwidth: 1000,
-      ),
-      audio: PlaybackTrack(
-        urls: [Uri.parse('https://cdn.example/$id-audio.m4s')],
-        codec: 'mp4a',
-        bandwidth: 128,
-      ),
-      quality: quality,
-      qualities: const [64, 80],
-      duration: duration,
-      headers: const {'Referer': 'https://www.bilibili.com'},
-    );
+PlaybackMedia _media(
+  String id,
+  int quality,
+  Duration duration, {
+  AudioLoudness? loudness,
+}) => PlaybackMedia(
+  loudness: loudness,
+  video: PlaybackTrack(
+    urls: [Uri.parse('https://cdn.example/$id-video.m4s')],
+    codec: 'avc1',
+    bandwidth: 1000,
+  ),
+  audio: PlaybackTrack(
+    urls: [Uri.parse('https://cdn.example/$id-audio.m4s')],
+    codec: 'mp4a',
+    bandwidth: 128,
+  ),
+  quality: quality,
+  qualities: const [64, 80],
+  duration: duration,
+  headers: const {'Referer': 'https://www.bilibili.com'},
+);
 
 PlaybackMedia _backupMedia() => PlaybackMedia(
   video: PlaybackTrack(
@@ -4117,6 +4268,7 @@ final class _FakeRepository implements PlaybackRepository {
     this.mediaDuration = const Duration(minutes: 2),
   });
   final bool autoResolve;
+  AudioLoudness? loudness;
   bool failNextResolve = false;
   final Duration mediaDuration;
   final pendingResolves = <String, Completer<PlaybackMedia>>{};
@@ -4128,7 +4280,7 @@ final class _FakeRepository implements PlaybackRepository {
   final codecs = <VideoCodecPreference>[];
 
   void completeResolve(String cid) => pendingResolves[cid]?.complete(
-    _media(cid, qualities.last, mediaDuration),
+    _media(cid, qualities.last, mediaDuration, loudness: loudness),
   );
 
   @override
@@ -4146,7 +4298,11 @@ final class _FakeRepository implements PlaybackRepository {
       failNextResolve = false;
       return Future.error(StateError('resolution failed'));
     }
-    if (autoResolve) return Future.value(_media(cid, quality, mediaDuration));
+    if (autoResolve) {
+      return Future.value(
+        _media(cid, quality, mediaDuration, loudness: loudness),
+      );
+    }
     final gate = Completer<PlaybackMedia>();
     pendingResolves[cid] = gate;
     return gate.future;
@@ -4356,7 +4512,7 @@ final class _FakeProgress implements PlaybackProgressStore {
   }
 }
 
-final class _FakeEngine implements PlayerEngine {
+final class _FakeEngine implements PlayerEngine, AudioGainControl {
   _FakeEngine({this.openDuration = const Duration(minutes: 2)});
   final Duration openDuration;
   final _snapshots = StreamController<PlaybackSnapshot>.broadcast(sync: true);
@@ -4379,6 +4535,19 @@ final class _FakeEngine implements PlayerEngine {
   final seekTargets = <Duration>[];
   Completer<void>? nextRate;
   Completer<void>? nextVolume;
+  Completer<void>? nextGain;
+  final gainCalls = <double>[];
+  double audioGainDb = 0;
+  @override
+  Future<void> setAudioGain(double value) async {
+    final generation = _current.generation;
+    final pending = nextGain;
+    nextGain = null;
+    gainCalls.add(value);
+    if (pending != null) await pending.future;
+    if (!disposed && generation == _current.generation) audioGainDb = value;
+  }
+
   int volumeCalls = 0;
   Completer<void>? nextPause;
   Completer<void>? nextOpen;
@@ -4417,6 +4586,7 @@ final class _FakeEngine implements PlayerEngine {
       ProgressiveSource(:final media) => media.uri,
     });
     openOptions.add(options);
+    audioGainDb = options.audioGainDb;
     final pending = nextOpen;
     nextOpen = null;
     final generation = _current.generation;
@@ -4543,6 +4713,7 @@ final class _FakeSponsor implements SponsorRepository {
 final class _FakeContentRepository implements ContentPlaybackRepository {
   _FakeContentRepository({this.duration = const Duration(minutes: 2)});
   final Duration duration;
+  AudioLoudness? loudness;
   final targets = <ContentPlaybackTarget>[];
   final qualities = <int>[];
   final codecs = <VideoCodecPreference>[];
@@ -4566,7 +4737,9 @@ final class _FakeContentRepository implements ContentPlaybackRepository {
       return Future.value(_media('offline', quality, duration));
     }
     if (target is PgcPlaybackTarget) {
-      return Future.value(_media(target.episodeId, quality, duration));
+      return Future.value(
+        _media(target.episodeId, quality, duration, loudness: loudness),
+      );
     }
     return Future.value(
       PlaybackMedia(

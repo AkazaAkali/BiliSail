@@ -1,4 +1,7 @@
 import '../../../domain/playback_rates.dart';
+import '../../../domain/audio_normalization.dart';
+export '../../../domain/audio_normalization.dart'
+    show AudioNormalizationMode, AudioNormalizationLabel;
 import '../../../domain/video_codec.dart';
 import '../../../domain/media_cdn.dart';
 import 'shortcut_settings.dart';
@@ -61,6 +64,7 @@ final class AppSettings {
     this.videoDecoding = VideoDecodingPreference.automatic,
     this.defaultPlaybackRate = 1.0,
     this.defaultVolume = 100.0,
+    this.audioNormalization = AudioNormalizationMode.off,
     this.danmakuArea = 0.75,
     this.danmakuTopMargin = 0,
     this.danmakuLineSpacing = 5,
@@ -111,6 +115,7 @@ final class AppSettings {
        videoDecoding = VideoDecodingPreference.automatic,
        defaultPlaybackRate = 1.0,
        defaultVolume = 100.0,
+       audioNormalization = AudioNormalizationMode.off,
        danmakuArea = 0.75,
        danmakuTopMargin = 0,
        danmakuLineSpacing = 5,
@@ -161,6 +166,7 @@ final class AppSettings {
   final VideoDecodingPreference videoDecoding;
   final double defaultPlaybackRate;
   final double defaultVolume;
+  final AudioNormalizationMode audioNormalization;
   final double danmakuArea;
 
   /// Distance from the video surface top, in Flutter logical pixels.
@@ -222,6 +228,7 @@ final class AppSettings {
     VideoDecodingPreference? videoDecoding,
     double? defaultPlaybackRate,
     double? defaultVolume,
+    AudioNormalizationMode? audioNormalization,
     double? danmakuArea,
     double? danmakuTopMargin,
     double? danmakuLineSpacing,
@@ -269,6 +276,7 @@ final class AppSettings {
     videoDecoding: videoDecoding ?? this.videoDecoding,
     defaultPlaybackRate: defaultPlaybackRate ?? this.defaultPlaybackRate,
     defaultVolume: defaultVolume ?? this.defaultVolume,
+    audioNormalization: audioNormalization ?? this.audioNormalization,
     danmakuArea: danmakuArea ?? this.danmakuArea,
     danmakuTopMargin: danmakuTopMargin ?? this.danmakuTopMargin,
     danmakuLineSpacing: danmakuLineSpacing ?? this.danmakuLineSpacing,

@@ -10,6 +10,7 @@ import 'player_diagnostics.dart';
 import 'native_readiness.dart';
 import 'native_media_options.dart';
 import 'native_error_monitor.dart';
+import 'native_audio_gain.dart';
 import 'video_dimensions.dart';
 
 /// Call at application startup before creating an engine.
@@ -17,7 +18,8 @@ void initializePlayerBackend() => mk.MediaKit.ensureInitialized();
 
 /// Owns at most one native Player. Each source change replaces it, so events
 /// retained by the previous backend cannot enter the next source generation.
-final class MediaKitEngine implements PlayerEngine, VideoSurfaceSource {
+final class MediaKitEngine
+    implements PlayerEngine, VideoSurfaceSource, AudioGainControl {
   MediaKitEngine({this.onDiagnostic}) {
     _nativeErrors = NativeErrorMonitor(
       onStalled: (generation) => _fail(
@@ -58,6 +60,10 @@ final class MediaKitEngine implements PlayerEngine, VideoSurfaceSource {
   final List<StreamSubscription<Object?>> _subscriptions = [];
   Future<void> _commands = Future.value();
   mk.Player? _player;
+  NativeAudioGain? _audioGain;
+
+  /// Last verified native normalization gain, for playback diagnostics.
+  double get appliedAudioGainDb => _audioGain?.gainDb ?? 0;
   bool _disposed = false;
   bool _requiresDecodedAudio = false;
   int _generation = 0;
@@ -361,6 +367,17 @@ final class MediaKitEngine implements PlayerEngine, VideoSurfaceSource {
           ),
         );
         _player = player;
+        final platform = player.platform;
+        if (platform is mk.NativePlayer) {
+          _audioGain = NativeAudioGain(
+            write: platform.setProperty,
+            read: platform.getProperty,
+            isCurrent: () =>
+                generation == _generation &&
+                !_disposed &&
+                identical(_player, player),
+          );
+        }
         _subscribe(player, generation);
         final controller = mkv.VideoController(
           player,
@@ -454,6 +471,15 @@ final class MediaKitEngine implements PlayerEngine, VideoSurfaceSource {
         await player
             .setVolume(options.volume)
             .timeout(_remaining(watch, openBudget));
+        if (options.audioGainDb != 0) {
+          final gain = _audioGain;
+          if (gain == null) {
+            throw StateError('Native audio gain is unavailable.');
+          }
+          await gain
+              .apply(options.audioGainDb, smooth: false)
+              .timeout(_remaining(watch, openBudget));
+        }
         if (options.startPosition > Duration.zero) {
           _publish(_snapshot.copyWith(isSeeking: true));
           await player
@@ -560,6 +586,7 @@ final class MediaKitEngine implements PlayerEngine, VideoSurfaceSource {
         !options.volume.isFinite ||
         options.volume < 0 ||
         options.volume > 100 ||
+        !NativeAudioGain.valid(options.audioGainDb) ||
         options.openTimeout <= Duration.zero ||
         maxBufferAhead <= Duration.zero ||
         maxBufferAhead > OpenOptions.maximumBufferAhead) {
@@ -770,6 +797,8 @@ final class MediaKitEngine implements PlayerEngine, VideoSurfaceSource {
   }
 
   Future<void> _releasePlayer() async {
+    _audioGain?.cancel();
+    _audioGain = null;
     _nativeErrors.reset();
     _requiresDecodedAudio = false;
     for (final subscription in _subscriptions) {
@@ -882,6 +911,18 @@ final class MediaKitEngine implements PlayerEngine, VideoSurfaceSource {
       (player) => player.setVolume(volume),
       optimistic: (s) => s.copyWith(volume: volume),
     );
+  }
+
+  @override
+  Future<void> setAudioGain(double gainDb) {
+    if (!NativeAudioGain.valid(gainDb)) {
+      throw ArgumentError.value(gainDb, 'gainDb');
+    }
+    return _command((player) async {
+      final gain = _audioGain;
+      if (gain == null) throw StateError('Native audio gain is unavailable.');
+      await gain.apply(gainDb);
+    });
   }
 
   @override

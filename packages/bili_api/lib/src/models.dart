@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'models/video_access.dart';
+import 'models/audio_loudness.dart';
+export 'models/audio_loudness.dart';
 export 'models/video_access.dart';
 
 enum ApiFailureCategory {
@@ -304,10 +306,12 @@ final class ApiPlayInfo {
     this.voices = const [],
     this.currentLanguage = '',
     this.productionType = 0,
+    this.loudness,
   });
   final Duration duration;
   final List<ApiMediaTrack> dashVideo;
   final List<ApiMediaTrack> dashAudio;
+  final ApiAudioLoudness? loudness;
   final List<int> acceptQuality;
 
   /// The server supplied only a preview clip, not a complete episode.

@@ -759,6 +759,7 @@ class PlaybackSession extends ChangeNotifier {
                 play: false,
                 rate: isLive ? 1 : oldRate,
                 volume: oldVolume,
+                audioGainDb: _audioGainFor(resolved),
                 videoDecoding: videoDecoding,
                 openTimeout: attemptBudget,
               ),
@@ -782,6 +783,10 @@ class PlaybackSession extends ChangeNotifier {
       }
       _mediaGeneration = generation;
       _resolving = false;
+      // Settings may have changed while the native source was opening.
+      // Apply the latest mode before restoring the user's play intent.
+      await _applyAudioGain();
+      if (!isCurrent()) return;
       danmaku.seekConfirmed(engine.currentSnapshot.position);
       await startupDiagnostics.measure(
         generation,
@@ -1161,6 +1166,9 @@ class PlaybackSession extends ChangeNotifier {
       _ensureComments(snapshots.value.position);
     }
     if (media != null) {
+      if (previous.audioNormalization != _settings.audioNormalization) {
+        unawaited(_applyAudioGain());
+      }
       if (previous.defaultPlaybackRate != _settings.defaultPlaybackRate) {
         unawaited(
           _applyRate(_rateMemory.rateFor(_settings.defaultPlaybackRate)),
@@ -1756,6 +1764,33 @@ class PlaybackSession extends ChangeNotifier {
   int? _pendingRateMemoryRevision;
   final _rateCommands = MediaCommandPump();
   final _volumeCommands = MediaCommandPump();
+  final _audioGainCommands = MediaCommandPump();
+
+  double _audioGainFor(PlaybackMedia source) =>
+      isLive || contentTarget is OfflinePlaybackTarget
+      ? 0
+      : source.loudness?.gainDb(_settings.audioNormalization) ?? 0;
+
+  Future<void> _applyAudioGain() {
+    final control = engine;
+    if (control is! AudioGainControl) return Future.value();
+    final generation = _generation;
+    return _audioGainCommands.submit(
+      () => _command(() async {
+        final source = media;
+        if (_disposed ||
+            _closing ||
+            generation != _generation ||
+            _scope != accountScope() ||
+            _epoch != sessionEpoch() ||
+            source == null) {
+          return;
+        }
+        await (control as AudioGainControl).setAudioGain(_audioGainFor(source));
+      }),
+    );
+  }
+
   double get commandRate => _rateTargetGeneration == _generation
       ? _rateTarget ?? _temporaryRateOriginal ?? snapshots.value.rate
       : _temporaryRateOriginal ?? snapshots.value.rate;

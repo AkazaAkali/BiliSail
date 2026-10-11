@@ -206,6 +206,36 @@ class _PlayerSettingsDialogState extends ConsumerState<_PlayerSettingsDialog> {
                             },
                           ),
                         ),
+                        ListTile(
+                          title: const Text('音量均衡'),
+                          subtitle: DropdownButton<AudioNormalizationMode>(
+                            key: const ValueKey('player-audio-normalization'),
+                            isExpanded: true,
+                            value: s.audioNormalization,
+                            items: [
+                              for (final mode in AudioNormalizationMode.values)
+                                DropdownMenuItem(
+                                  value: mode,
+                                  child: Text(mode.label),
+                                ),
+                            ],
+                            onChanged: (mode) {
+                              if (mode != null) {
+                                unawaited(
+                                  _update(
+                                    (c) => c.copyWith(audioNormalization: mode),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 16),
+                          child: Text(
+                            '适用于普通视频和影视，切换后立即生效。标准适合日常观看，高动态音量较低，适合安静环境；没有有效响度数据时保持原声。',
+                          ),
+                        ),
                         _slider(
                           '默认音量',
                           s.defaultVolume,

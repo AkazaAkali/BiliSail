@@ -16,6 +16,39 @@ void main() {
   });
   tearDown(() => database.close());
   test(
+    'normalization migrates off and each mode survives save and reload',
+    () async {
+      expect(
+        (await repository.load()).audioNormalization,
+        AudioNormalizationMode.off,
+      );
+      for (final old in [null, 'future', 2, true]) {
+        await database.writeSetting(
+          'preferences.v1',
+          jsonEncode({
+            'schemaVersion': 17,
+            'audioNormalization': old,
+            'defaultVolume': 35.5,
+          }),
+        );
+        final settings = await repository.load();
+        expect(settings.audioNormalization, AudioNormalizationMode.off);
+        expect(settings.defaultVolume, 35.5);
+      }
+      for (final mode in AudioNormalizationMode.values) {
+        await repository.save(
+          AppSettings(audioNormalization: mode)
+              .copyWith(defaultVolume: 30)
+              .normalized(),
+        );
+        final loaded = await repository.load();
+        expect(loaded.audioNormalization, mode);
+        expect(loaded.defaultVolume, 30);
+      }
+      expect(database.schemaVersion, 3);
+    },
+  );
+  test(
     'continuous playback migrates off and survives save and reload',
     () async {
       expect((await repository.load()).continuousPlayback, isFalse);
@@ -78,7 +111,7 @@ void main() {
         final snapshot = jsonDecode(
           (await database.readSetting('preferences.v1')) ?? '{}',
         ) as Map<String, Object?>;
-        expect(snapshot['schemaVersion'], 17);
+        expect(snapshot['schemaVersion'], 18);
         expect(snapshot['playerControlsMode'], mode.name);
       }
       expect(database.schemaVersion, 3);
@@ -145,7 +178,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 17);
+          expect(snapshot['schemaVersion'], 18);
           expect(snapshot['navigationMode'], mode.name);
         }
         for (final selected in WorkspaceNavigationMode.values) {
@@ -193,7 +226,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 17);
+      expect(snapshot['schemaVersion'], 18);
       expect(snapshot['theme'], 'dark');
       expect(database.schemaVersion, 3);
     },
@@ -235,7 +268,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 17);
+      expect(snapshot['schemaVersion'], 18);
       expect(snapshot['allowConcurrentPlayback'], allowed);
       expect(snapshot['navigationMode'], 'singlePage');
       final reloaded = await repository.load();
