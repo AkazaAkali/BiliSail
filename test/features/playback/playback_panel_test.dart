@@ -1250,7 +1250,7 @@ void main() {
     await _pumpFrames(tester);
   });
   testWidgets(
-    'collapsed progress tracks confirmed position, setting and content kind',
+    'collapsed progress tracks confirmed position, buffer, setting and content kind',
     (tester) async {
       final engine = _FakeEngine();
       final session = _session(engine);
@@ -1265,7 +1265,9 @@ void main() {
       );
       await tester.pump();
       const progressKey = ValueKey('player-collapsed-progress');
+      const bufferKey = ValueKey('player-collapsed-buffer');
       expect(find.byKey(progressKey), findsNothing);
+      expect(find.byKey(bufferKey), findsNothing);
       await tester.tapAt(
         tester.getTopLeft(
               find.byKey(const ValueKey('player-surface-tap-target')),
@@ -1277,20 +1279,66 @@ void main() {
         tester.widget<LinearProgressIndicator>(find.byKey(progressKey)).value,
         .5,
       );
+      expect(
+        tester.widget<LinearProgressIndicator>(find.byKey(bufferKey)).value,
+        0,
+      );
+      engine._emit(
+        engine.currentSnapshot.copyWith(buffered: const Duration(seconds: 135)),
+      );
+      await tester.pump();
+      expect(
+        tester.widget<LinearProgressIndicator>(find.byKey(bufferKey)).value,
+        .75,
+      );
+      expect(
+        tester.widget<LinearProgressIndicator>(find.byKey(progressKey)).value,
+        .5,
+      );
       session.contentTarget = const PgcPlaybackTarget('7', cid: '123');
       engine._emit(
-        engine.currentSnapshot.copyWith(position: const Duration(seconds: 180)),
+        engine.currentSnapshot.copyWith(
+          position: const Duration(seconds: 180),
+          buffered: const Duration(seconds: 240),
+        ),
       );
       await tester.pump();
       expect(
         tester.widget<LinearProgressIndicator>(find.byKey(progressKey)).value,
         1,
       );
+      expect(
+        tester.widget<LinearProgressIndicator>(find.byKey(bufferKey)).value,
+        1,
+      );
+      await tester.tapAt(_surfacePoint(tester));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byTooltip('全屏（F）'));
+      await _pumpFrames(tester);
+      await tester.tapAt(_surfacePoint(tester));
+      await tester.pump(const Duration(milliseconds: 400));
+      engine._emit(
+        engine.currentSnapshot.copyWith(buffered: const Duration(seconds: 90)),
+      );
+      await tester.pump();
+      expect(
+        tester.widget<LinearProgressIndicator>(find.byKey(bufferKey)).value,
+        .5,
+      );
+      expect(engine.opens, 1);
+      expect(engine.maxSurfaces, 1);
+      await tester.tapAt(_surfacePoint(tester));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byTooltip('退出全屏（Esc）'));
+      await _pumpFrames(tester);
+      await tester.tapAt(_surfacePoint(tester));
+      await tester.pump(const Duration(milliseconds: 400));
       await tester.pumpWidget(
         _app(session, window, AppSettings(showCollapsedProgress: false)),
       );
       await _pumpFrames(tester);
       expect(find.byKey(progressKey), findsNothing);
+      expect(find.byKey(bufferKey), findsNothing);
       await tester.pumpWidget(
         _app(session, window, const AppSettings.defaults()),
       );
@@ -1301,6 +1349,12 @@ void main() {
       );
       await tester.pump();
       expect(find.byKey(progressKey), findsNothing);
+      expect(find.byKey(bufferKey), findsNothing);
+      session.contentTarget = const PgcPlaybackTarget('7', cid: '123');
+      engine._emit(engine.currentSnapshot.copyWith(duration: Duration.zero));
+      await tester.pump();
+      expect(find.byKey(progressKey), findsNothing);
+      expect(find.byKey(bufferKey), findsNothing);
       await tester.pumpWidget(const SizedBox());
       await _pumpFrames(tester);
     },

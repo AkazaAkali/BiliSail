@@ -1244,8 +1244,11 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                 snapshot.duration.inMilliseconds > 0)
                               PlaybackSnapshotBuilder(
                                 snapshots: session.snapshots,
-                                select: (snapshot) =>
-                                    (snapshot.position, snapshot.duration),
+                                select: (snapshot) => (
+                                  snapshot.position,
+                                  snapshot.duration,
+                                  snapshot.buffered,
+                                ),
                                 builder: (context, snapshot) => Positioned(
                                   left: 0,
                                   right: 0,
@@ -1259,20 +1262,48 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                           context,
                                         ),
                                       ),
-                                      child: LinearProgressIndicator(
-                                        key: const ValueKey(
-                                          'player-collapsed-progress',
+                                      child: SizedBox(
+                                        height: 2,
+                                        child: Stack(
+                                          fit: StackFit.expand,
+                                          children: [
+                                            LinearProgressIndicator(
+                                              key: const ValueKey(
+                                                'player-collapsed-buffer',
+                                              ),
+                                              minHeight: 2,
+                                              borderRadius: BorderRadius.zero,
+                                              value:
+                                                  (snapshot
+                                                              .buffered
+                                                              .inMilliseconds /
+                                                          snapshot
+                                                              .duration
+                                                              .inMilliseconds)
+                                                      .clamp(0, 1),
+                                              color: Colors.white38,
+                                              backgroundColor: Colors.white24,
+                                            ),
+                                            LinearProgressIndicator(
+                                              key: const ValueKey(
+                                                'player-collapsed-progress',
+                                              ),
+                                              minHeight: 2,
+                                              borderRadius: BorderRadius.zero,
+                                              value:
+                                                  (snapshot
+                                                              .position
+                                                              .inMilliseconds /
+                                                          snapshot
+                                                              .duration
+                                                              .inMilliseconds)
+                                                      .clamp(0, 1),
+                                              color: const Color(0xffdf6589),
+                                              backgroundColor:
+                                                  Colors.transparent,
+                                            ),
+                                          ],
                                         ),
-                                        minHeight: 2,
-                                        borderRadius: BorderRadius.zero,
-                                        value:
-                                            (snapshot.position.inMilliseconds /
-                                                    snapshot
-                                                        .duration
-                                                        .inMilliseconds)
-                                                .clamp(0, 1),
-                                        color: const Color(0xffdf6589),
-                                        backgroundColor: Colors.white24,
                                       ),
                                     ),
                                   ),
