@@ -17,6 +17,7 @@ import 'package:bilisail/features/playback/data/api_playback_repository.dart';
 import 'package:bilisail/features/playback/application/playback_session.dart';
 import 'package:bilisail/features/playback/application/playback_manager.dart';
 import 'package:bilisail/features/playback/application/playback_rate_memory.dart';
+import 'package:bilisail/features/playback/application/playback_volume_memory.dart';
 import 'package:bilisail/features/playback/domain/playback_repository.dart';
 import 'package:bilisail/features/playback/domain/playback_history_repository.dart';
 import 'package:bilisail/features/playback/presentation/playback_panel.dart';
@@ -37,16 +38,18 @@ void main() {
       LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
 
   testWidgets(
-    'Windows native playback inherits the run rate and a new run restores the default',
+    'Windows native playback inherits run rate and volume and a new run restores defaults',
     (tester) async {
       initializePlayerBackend();
       final fixturePath = Platform.environment['BILI_TEST_MEDIA_DIR'];
       expect(fixturePath, isNotNull, reason: 'Use tool/test-windows-media.ps1');
       PlaybackManager createManager() {
         final rates = PlaybackRateMemory();
+        final volumes = PlaybackVolumeMemory();
         return PlaybackManager(
           createSession: () => PlaybackSession(
             rateMemory: rates,
+            volumeMemory: volumes,
             engine: MediaKitEngine(),
             repository: _FakePlaybackRepository(
               File('$fixturePath/video.mp4').uri,
@@ -61,7 +64,7 @@ void main() {
       final detail = VideoDetail(
         summary: const VideoSummary(
           id: VideoId('BV1abc123456'),
-          title: '会话倍速本地视频',
+          title: '会话倍速与音量本地视频',
           coverUrl: '',
           author: 'fixture',
           duration: Duration(seconds: 12),
@@ -79,7 +82,7 @@ void main() {
       final settings = AppSettings(
         autoPlay: false,
         defaultPlaybackRate: 1.25,
-        defaultVolume: 0,
+        defaultVolume: 60,
       );
       Future<void> open(PlaybackSession session) async {
         session.configureSettings(settings);
@@ -98,24 +101,32 @@ void main() {
         final first = manager.acquire('first');
         await open(first);
         await _until(tester, () => first.engine.currentSnapshot.rate == 1.25);
+        expect(first.engine.currentSnapshot.volume, 60);
         await first.setRate(2);
+        await first.setVolume(32.5);
         await first.beginTemporaryRate(3);
         final second = manager.acquire('second');
         await open(second);
         await _until(tester, () => second.engine.currentSnapshot.rate == 2);
+        expect(second.engine.currentSnapshot.volume, 32.5);
         await second.setRate(1.5);
+        await second.setVolume(0);
         await first.endTemporaryRate();
         await _until(tester, () => first.engine.currentSnapshot.rate == 2);
+        expect(first.engine.currentSnapshot.volume, 32.5);
         manager.release('first', first);
         manager.release('second', second);
         final third = manager.acquire('third');
         await open(third);
         await _until(tester, () => third.engine.currentSnapshot.rate == 1.5);
+        expect(third.engine.currentSnapshot.volume, 0);
         await manager.close();
         final fresh = restarted.acquire('fresh');
         await open(fresh);
         await _until(tester, () => fresh.engine.currentSnapshot.rate == 1.25);
+        expect(fresh.engine.currentSnapshot.volume, 60);
         expect(settings.defaultPlaybackRate, 1.25);
+        expect(settings.defaultVolume, 60);
         expect(tester.takeException(), isNull);
       } finally {
         await manager.close();

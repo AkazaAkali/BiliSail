@@ -12,6 +12,7 @@ import 'package:bilisail/features/playback/application/playback_session.dart';
 import 'package:bilisail/features/playback/application/playback_startup_diagnostics.dart';
 import 'package:bilisail/features/playback/application/playback_manager.dart';
 import 'package:bilisail/features/playback/application/playback_rate_memory.dart';
+import 'package:bilisail/features/playback/application/playback_volume_memory.dart';
 import 'package:bilisail/features/video/application/watch_later_queue_playback.dart';
 import 'package:bilisail/features/video/domain/watch_later_queue.dart';
 import 'package:bilisail/features/playback/domain/playback_repository.dart';
@@ -1019,6 +1020,241 @@ void main() {
     await second.open(_detail('2'), _part('2'));
     expect(second.snapshots.value.rate, 2);
   });
+
+  for (final concurrent in [false, true]) {
+    test(
+      'later sources inherit run volume with concurrent playback $concurrent',
+      () async {
+        final manager = _manager();
+        addTearDown(manager.close);
+        final first = manager.acquire('first');
+        // Existing empty pages read the shared volume only when opening media.
+        final second = manager.acquire('second');
+        final owner = Object();
+        first.attach(owner);
+        final settings = AppSettings(defaultVolume: 60);
+        first.configureSettings(settings);
+        second.configureSettings(settings);
+        await manager.updateWorkspace(
+          allowConcurrent: concurrent,
+          activeTabId: 'first',
+        );
+        await first.activate(owner, _detail('1'), _part('1'));
+        expect(first.snapshots.value.volume, 60);
+        await first.setVolume(32.5);
+        await manager.updateWorkspace(
+          allowConcurrent: concurrent,
+          activeTabId: 'second',
+        );
+        await second.open(_detail('2'), _part('2'));
+        expect(second.snapshots.value.volume, 32.5);
+        await second.setVolume(0);
+        expect(first.snapshots.value.volume, 32.5);
+        await first.changeQuality(64);
+        expect(first.snapshots.value.volume, 32.5);
+        await first.retry();
+        expect(first.snapshots.value.volume, 32.5);
+        await first.activate(owner, _detail('1'), _part('next-part'));
+        expect(first.snapshots.value.volume, 0);
+        manager.release('first', first);
+        manager.release('second', second);
+        await _flush();
+        final third = manager.acquire('third');
+        third.configureSettings(settings);
+        await third.open(_detail('3'), _part('3'));
+        expect(third.snapshots.value.volume, 0);
+        expect(settings.defaultVolume, 60);
+      },
+    );
+  }
+
+  test('a fresh application run restores default volume', () async {
+    final settings = AppSettings(defaultVolume: 60);
+    final previousRun = _manager();
+    addTearDown(previousRun.close);
+    final previous = previousRun.acquire('video');
+    previous.configureSettings(settings);
+    await previous.open(_detail('1'), _part('1'));
+    expect(previous.snapshots.value.volume, 60);
+    await previous.setVolume(25);
+    await previousRun.close();
+
+    final newRun = _manager();
+    addTearDown(newRun.close);
+    final current = newRun.acquire('video');
+    current.configureSettings(settings);
+    await current.open(_detail('2'), _part('2'));
+    expect(current.snapshots.value.volume, 60);
+    expect(settings.defaultVolume, 60);
+  });
+
+  test(
+    'restoring an owner preserves its volume without replacing run volume',
+    () async {
+      final manager = _manager();
+      addTearDown(manager.close);
+      final session = manager.acquire('video');
+      final firstOwner = Object();
+      final secondOwner = Object();
+      session.attach(firstOwner);
+      session.attach(secondOwner);
+      await session.activate(firstOwner, _detail('1'), _part('1'));
+      await session.setVolume(25);
+      await session.activate(secondOwner, _detail('2'), _part('2'));
+      expect(session.snapshots.value.volume, 25);
+      await session.setVolume(40);
+      await session.activate(firstOwner, _detail('1'), _part('1'));
+      expect(session.snapshots.value.volume, 25);
+      await session.open(_detail('3'), _part('3'));
+      expect(session.snapshots.value.volume, 40);
+      await session.stop();
+      await session.open(_detail('4'), _part('4'));
+      expect(session.snapshots.value.volume, 40);
+    },
+  );
+
+  test(
+    'late volume completion cannot replace a newer choice in another tab',
+    () async {
+      final manager = _manager();
+      addTearDown(manager.close);
+      final first = manager.acquire('first');
+      final second = manager.acquire('second');
+      await first.open(_detail('1'), _part('1'));
+      await second.open(_detail('2'), _part('2'));
+      final gate = Completer<void>();
+      (first.engine as _FakeEngine).nextVolume = gate;
+      final slowChange = first.setVolume(25);
+      await second.setVolume(40);
+      gate.complete();
+      await slowChange;
+      final third = manager.acquire('third');
+      await third.open(_detail('3'), _part('3'));
+      expect(first.snapshots.value.volume, 25);
+      expect(third.snapshots.value.volume, 40);
+    },
+  );
+
+  test(
+    'coalesced volume changes remember the latest successful target',
+    () async {
+      final manager = _manager();
+      addTearDown(manager.close);
+      final first = manager.acquire('first');
+      await first.open(_detail('1'), _part('1'));
+      final engine = first.engine as _FakeEngine;
+      final gate = Completer<void>();
+      engine.nextVolume = gate;
+      final changes = [first.setVolume(25)];
+      for (var volume = 30.0; volume <= 100; volume += 5) {
+        changes.add(first.setVolume(volume));
+      }
+      expect(first.commandVolume, 100);
+      gate.complete();
+      await Future.wait(changes);
+      expect(engine.volumeCalls, 2);
+      final second = manager.acquire('second');
+      await second.open(_detail('2'), _part('2'));
+      expect(second.snapshots.value.volume, 100);
+    },
+  );
+
+  test(
+    'failed, stale and closed volume commands preserve the last shared choice',
+    () async {
+      final manager = _manager();
+      addTearDown(manager.close);
+      final first = manager.acquire('first');
+      await first.open(_detail('1'), _part('1'));
+      await first.setVolume(25);
+      final engine = first.engine as _FakeEngine;
+      final failure = Completer<void>();
+      engine.nextVolume = failure;
+      final failedChange = first.setVolume(40);
+      final discardedChange = first.setVolume(50);
+      failure.completeError(
+        PlayerFailure(
+          PlayerFailureKind.nativePlayback,
+          'volume failed',
+          engine.currentSnapshot.generation,
+        ),
+      );
+      await Future.wait([failedChange, discardedChange]);
+      expect(engine.volumeCalls, 2);
+      final stale = Completer<void>();
+      engine.nextVolume = stale;
+      final staleChange = first.setVolume(60);
+      await first.open(_detail('next'), _part('next'));
+      stale.complete();
+      await staleChange;
+      expect(first.snapshots.value.volume, 25);
+      final closed = Completer<void>();
+      engine.nextVolume = closed;
+      final closedChange = first.setVolume(70);
+      await first.close();
+      closed.complete();
+      await closedChange;
+      await first.setVolume(80);
+      final second = manager.acquire('second');
+      await second.open(_detail('2'), _part('2'));
+      expect(second.snapshots.value.volume, 25);
+    },
+  );
+
+  test('PGC and live share manual volume with ordinary videos', () async {
+    final volumes = PlaybackVolumeMemory();
+    final manager = _manager(volumeMemory: volumes);
+    addTearDown(manager.close);
+    final video = manager.acquire('video');
+    await video.open(_detail('video'), _part('video'));
+    await video.setVolume(25);
+    final content = PlaybackSession(
+      engine: _FakeEngine(),
+      repository: _FakeRepository(autoResolve: true),
+      contentRepository: _FakeContentRepository(),
+      progress: _FakeProgress(),
+      accountScope: () => 'guest',
+      volumeMemory: volumes,
+    );
+    addTearDown(content.close);
+    await content.open(null, null, target: const PgcPlaybackTarget('1'));
+    expect(content.snapshots.value.volume, 25);
+    await content.setVolume(40);
+    await content.open(null, null, target: const LivePlaybackTarget('42'));
+    expect(content.snapshots.value.volume, 40);
+    await content.setVolume(0);
+    await content.open(null, null, target: const PgcPlaybackTarget('2'));
+    expect(content.snapshots.value.volume, 0);
+    await video.open(_detail('next'), _part('next'));
+    expect(video.snapshots.value.volume, 0);
+  });
+
+  test(
+    'volume defaults apply until a manual choice and do not become overrides',
+    () async {
+      final manager = _manager();
+      addTearDown(manager.close);
+      final first = manager.acquire('first');
+      await first.open(_detail('1'), _part('1'));
+      first.configureSettings(AppSettings(defaultVolume: 25));
+      await _flush();
+      expect(first.snapshots.value.volume, 25);
+      final second = manager.acquire('second');
+      second.configureSettings(AppSettings(defaultVolume: 40));
+      await second.open(_detail('2'), _part('2'));
+      expect(second.snapshots.value.volume, 40);
+      await second.setVolume(60);
+      final changedSettings = AppSettings(defaultVolume: 80);
+      second.configureSettings(changedSettings);
+      await _flush();
+      expect(second.snapshots.value.volume, 60);
+      final third = manager.acquire('third');
+      third.configureSettings(changedSettings);
+      await third.open(_detail('3'), _part('3'));
+      expect(third.snapshots.value.volume, 60);
+      expect(changedSettings.defaultVolume, 80);
+    },
+  );
 
   test(
     'multiple tabs keep independent sources and release only the closed tab',
@@ -3676,8 +3912,10 @@ Future<void> _flush() async {
 PlaybackManager _manager({
   PlaybackRepository? repository,
   PlaybackRateMemory? rateMemory,
+  PlaybackVolumeMemory? volumeMemory,
 }) {
   final rates = rateMemory ?? PlaybackRateMemory();
+  final volumes = volumeMemory ?? PlaybackVolumeMemory();
   return PlaybackManager(
     createSession: () => PlaybackSession(
       engine: _FakeEngine(),
@@ -3685,6 +3923,7 @@ PlaybackManager _manager({
       progress: _FakeProgress(),
       accountScope: () => 'guest',
       rateMemory: rates,
+      volumeMemory: volumes,
     ),
   );
 }

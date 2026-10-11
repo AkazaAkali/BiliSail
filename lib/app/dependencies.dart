@@ -69,6 +69,7 @@ import '../features/library/data/api_library_repository.dart';
 import '../features/playback/application/playback_session.dart';
 import '../features/playback/application/playback_manager.dart';
 import '../features/playback/application/playback_rate_memory.dart';
+import '../features/playback/application/playback_volume_memory.dart';
 import '../features/playback/data/api_playback_repository.dart';
 import '../features/playback/data/api_video_preview_repository.dart';
 import '../features/playback/data/api_playback_history_repository.dart';
@@ -188,6 +189,7 @@ class AppDependencies {
       createEngine: () => MediaKitEngine(onDiagnostic: playbackLog?.record),
     );
     final playbackRateMemory = PlaybackRateMemory();
+    final playbackVolumeMemory = PlaybackVolumeMemory();
     final playback = PlaybackManager(
       createSession: () {
         final repository = OfflinePlaybackRepository(
@@ -203,6 +205,7 @@ class AppDependencies {
         );
         return PlaybackSession(
           rateMemory: playbackRateMemory,
+          volumeMemory: playbackVolumeMemory,
           sponsorRepository: ApiSponsorRepository(
             SponsorBlockClient(sponsorTransport),
           ),

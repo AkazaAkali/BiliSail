@@ -1,4 +1,4 @@
-# 应用会话内继承播放倍速
+# 应用会话内继承播放倍速与音量
 
 日期：2026-10-06。
 
@@ -26,3 +26,22 @@
 - `flutter build apk --debug --target-platform android-arm64 --no-pub -t lib/main.dart` 成功，产物为 `build/app/outputs/flutter-apk/app-debug.apk`，见 [Android 构建日志](../../artifacts/session-playback-rate-build-android.log)。
 
 Android/macOS 原生运行未测，当前 Windows 主机不构建 macOS。本轮不使用真实账号，不发 Bilibili 在线请求，不作性能结论。
+
+## 音量继承（2026-10-11）
+
+- 播放页音量滑条和快捷键调节成功后，本次应用运行中后续打开的普通视频、分 P、影视、直播与离线播放继承最近选择，包含 0% 静音、小数音量及 100%。
+- 记录只存内存，关闭全部播放页或停止播放后仍保留；重新启动应用后使用设置中的默认音量。播放页调节不改写持久化默认值。
+- 已有播放页保持自己的音量；原源恢复、换清晰度、重试沿用源快照。切换到新视频或分 P 时读取共享记录。
+- 未手动调节时，修改默认音量作用于当前和后续播放，且不建立临时记录；已有手动选择时，后续播放继续使用本次运行的选择，新的默认值用于下次启动。
+
+[PlaybackVolumeMemory](../../lib/features/playback/application/playback_volume_memory.dart) 由 [app/dependencies.dart](../../lib/app/dependencies.dart) 创建并注入所有正式播放会话，与倍速记录分别维护 revision。只有当前源成功完成的手动音量命令写入记录；失败、已关闭会话、旧源和较早动作的迟到完成不能覆盖新选择。默认设置应用走独立路径，不写入记录。继续复用既有的音量命令合并机制；静音悬停预览不参与正式播放会话，也不更新这份记录。
+
+本次未修改原生适配器、持久化设置格式或数据库结构。
+
+验证：
+
+- 播放会话测试 **137 项通过**，其中新增 9 项覆盖单／多标签、新分 P、清晰度／重试／原源恢复、静音、小数音量、关闭所有标签、模拟重启、命令合并、乱序／失败／旧源／关闭隔离、影视与直播及默认值更新。日志：[会话测试](../../artifacts/session-playback-volume-unit.log)。
+- `tool/check.ps1 -SkipPub` 通过：根应用 1810、`bili_api` 388、`bili_player` 35、`bili_danmaku` 86、`bili_mux` 2，共 **2321 项通过**；根应用及四个包的格式和静态分析通过。`bili_mux` 的 7 项原生封装测试因未配置 `BILI_MUX_LIBRARY` 按原有条件跳过。日志：[全量检查](../../artifacts/session-playback-volume-check.log)。
+- Windows 真实 `MediaKitEngine` 专项通过：默认 60% → 手动 32.5% → 新页继承 32.5% → 新页静音，旧页仍为 32.5% → 关闭全部页后继承 0% → 重建应用运行状态后恢复 60%。既有倍速和长按隔离断言同测通过。使用本地音视频分轨 fixture、暂停打开，验证了引擎音量状态；不作为主观响度或系统音量验证。命令为设置 `BILI_TEST_MEDIA_DIR=test/fixtures/media` 后运行 `flutter test integration_test/windows_playback_test.dart -d windows --plain-name "Windows native playback inherits run rate and volume and a new run restores defaults"`；Windows Debug 测试入口构建成功，仅运行此专项，未复跑整套原生测试。日志：[Windows 原生专项](../../artifacts/session-playback-volume-windows.log)。
+
+Android/macOS 原生运行、跨进程真实退出重启及 Release 构建本轮未测；重启语义通过重建共享内存状态验证。本轮无在线账户请求。

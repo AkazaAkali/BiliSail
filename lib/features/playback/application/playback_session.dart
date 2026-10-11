@@ -20,6 +20,7 @@ import '../domain/sponsor_repository.dart';
 import '../domain/playback_history_repository.dart';
 import 'playback_history_reporter.dart';
 import 'playback_rate_memory.dart';
+import 'playback_volume_memory.dart';
 import 'playback_startup_diagnostics.dart';
 import '../../settings/domain/app_settings.dart';
 
@@ -45,10 +46,12 @@ class PlaybackSession extends ChangeNotifier {
     Duration Function()? danmakuNow,
     Duration Function()? storyboardNow,
     PlaybackRateMemory? rateMemory,
+    PlaybackVolumeMemory? volumeMemory,
     PlaybackStartupDiagnostics? startupDiagnostics,
   }) : sessionEpoch = sessionEpoch ?? _zeroEpoch,
        startupDiagnostics = startupDiagnostics ?? PlaybackStartupDiagnostics(),
-       _rateMemory = rateMemory ?? PlaybackRateMemory() {
+       _rateMemory = rateMemory ?? PlaybackRateMemory(),
+       _volumeMemory = volumeMemory ?? PlaybackVolumeMemory() {
     _clock.start();
     _storyboardNow = storyboardNow ?? () => _clock.elapsed;
     final history = historyRepository;
@@ -94,6 +97,7 @@ class PlaybackSession extends ChangeNotifier {
 
   final SponsorRepository? sponsorRepository;
   final PlaybackRateMemory _rateMemory;
+  final PlaybackVolumeMemory _volumeMemory;
   AppSettings _settings = const AppSettings.defaults();
   RequestCancellation? _sponsorCancellation;
   List<SponsorSegment> sponsorSegments = const [];
@@ -367,8 +371,7 @@ class PlaybackSession extends ChangeNotifier {
       rate:
           restored?.rate ?? _rateMemory.rateFor(_settings.defaultPlaybackRate),
       volume:
-          restored?.volume ??
-          (sameOwner ? snapshots.value.volume : _settings.defaultVolume),
+          restored?.volume ?? _volumeMemory.volumeFor(_settings.defaultVolume),
       target: target,
       title: title,
       voice: restored?.voice ?? const PlaybackVoice.original(),
@@ -536,7 +539,11 @@ class PlaybackSession extends ChangeNotifier {
     _temporaryRateOriginal = null;
     _temporaryRateGeneration = null;
     _temporaryRateRevision++;
-    final oldVolume = volume ?? snapshots.value.volume;
+    final oldVolume =
+        volume ??
+        (samePart && media != null
+            ? snapshots.value.volume
+            : _volumeMemory.volumeFor(_settings.defaultVolume));
     _openingPosition = position;
     _openingRate = oldRate;
     _openingVolume = oldVolume;
@@ -1160,7 +1167,9 @@ class PlaybackSession extends ChangeNotifier {
         );
       }
       if (previous.defaultVolume != _settings.defaultVolume) {
-        unawaited(setVolume(_settings.defaultVolume));
+        unawaited(
+          _applyVolume(_volumeMemory.volumeFor(_settings.defaultVolume)),
+        );
       }
       if (previous.subtitlesEnabled != _settings.subtitlesEnabled) {
         unawaited(
@@ -1824,16 +1833,24 @@ class PlaybackSession extends ChangeNotifier {
     );
   }
 
-  Future<void> setVolume(double volume) {
+  Future<void> setVolume(double volume) => _applyVolume(volume, remember: true);
+
+  Future<void> _applyVolume(double volume, {bool remember = false}) {
+    if (_disposed || _closing) return Future.value();
     final generation = _generation;
     final revision = ++_volumeTargetRevision;
     _volumeTargetGeneration = generation;
     _volumeTarget = volume;
+    final memoryRevision = remember ? _volumeMemory.beginChange() : null;
     return _volumeCommands.submit(
       () => _command(() async {
         if (_disposed || _closing || generation != _generation) return;
         try {
           await engine.setVolume(volume);
+          if (_disposed || _closing || generation != _generation) return;
+          if (memoryRevision != null) {
+            _volumeMemory.remember(volume, revision: memoryRevision);
+          }
         } on PlayerFailure {
           if (generation == _generation) {
             _volumeCommands.discardPending();

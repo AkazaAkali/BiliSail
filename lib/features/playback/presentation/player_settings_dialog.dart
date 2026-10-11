@@ -207,7 +207,7 @@ class _PlayerSettingsDialogState extends ConsumerState<_PlayerSettingsDialog> {
                           ),
                         ),
                         _slider(
-                          '音量',
+                          '默认音量',
                           s.defaultVolume,
                           0,
                           100,
@@ -217,7 +217,7 @@ class _PlayerSettingsDialogState extends ConsumerState<_PlayerSettingsDialog> {
                         const Padding(
                           padding: EdgeInsets.all(16),
                           child: Text(
-                            '默认清晰度、自动播放和续播用于新视频；本次运行中选择的倍速由后续视频继承，重启后使用默认倍速。音量也会应用到当前播放。',
+                            '默认清晰度、自动播放和续播用于新视频；播放页调整的倍速和音量由本次运行中的后续播放继承，重启后使用默认值。未在播放页调整时，修改默认值也会应用到当前播放。',
                           ),
                         ),
                       ],

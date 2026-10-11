@@ -311,6 +311,10 @@ final class _SettingsCategoryPageState
                             '%',
                             true,
                           ),
+                          const Text(
+                            '启动时使用默认音量；播放页修改后，本次运行中的后续播放继承修改后的音量',
+                            style: TextStyle(fontSize: 12),
+                          ),
                         ]),
                       if (widget.category == SettingsCategory.playback)
                         _section('CDN 线路', [
