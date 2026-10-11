@@ -17,6 +17,7 @@ final class WatchLaterQueuePanel extends StatefulWidget {
     required this.onSelect,
     this.onRemove,
     this.pendingRemovals = const {},
+    this.collapsedChild,
   });
 
   final WatchLaterQueue queue;
@@ -26,6 +27,9 @@ final class WatchLaterQueuePanel extends StatefulWidget {
   final ValueChanged<VideoId> onSelect;
   final ValueChanged<WatchLaterQueueItem>? onRemove;
   final Set<String> pendingRemovals;
+
+  /// Lazily mount the details on first collapse, then retain their state.
+  final Widget? collapsedChild;
 
   @override
   State<WatchLaterQueuePanel> createState() => _WatchLaterQueuePanelState();
@@ -86,11 +90,13 @@ final class _WatchLaterQueuePanelState extends State<WatchLaterQueuePanel> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    Icon(
-                      widget.expanded
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
-                      size: 20,
+                    AnimatedRotation(
+                      turns: widget.expanded ? .5 : 0,
+                      duration: MediaQuery.disableAnimationsOf(context)
+                          ? Duration.zero
+                          : const Duration(milliseconds: 180),
+                      curve: Curves.easeOutCubic,
+                      child: const Icon(Icons.keyboard_arrow_down, size: 20),
                     ),
                     const SizedBox(width: 4),
                     Text('稍后再看', style: Theme.of(context).textTheme.titleSmall),
@@ -108,91 +114,208 @@ final class _WatchLaterQueuePanelState extends State<WatchLaterQueuePanel> {
             ),
           ),
         ),
-        if (widget.expanded)
+        if (widget.collapsedChild case final Widget details)
           Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final coverWidth =
-                    (constraints.maxWidth - 50 - 160 * textScale.clamp(1, 1.5))
-                        .clamp(96.0, 141.0);
-                final typography = Theme.of(context).textTheme;
-                final titleHeight = _measureLines(
-                  context,
-                  (typography.bodyMedium ?? const TextStyle()).copyWith(
-                    fontSize: 14,
-                    height: 1.3,
-                  ),
-                  '汉字Ag\n汉字Ag',
-                  2,
-                );
-                final authorHeight = _measureLines(
-                  context,
-                  typography.bodySmall ?? const TextStyle(),
-                  '汉字Ag',
-                  1,
-                );
-                final countHeight = _measureLines(
-                  context,
-                  (typography.bodySmall ?? const TextStyle()).copyWith(
-                    fontSize: 12,
-                  ),
-                  '9999.9万',
-                  1,
-                );
-                final rowHeight =
-                    (coverWidth * 9 / 16).clamp(
-                      titleHeight +
-                          authorHeight +
-                          countHeight.clamp(28.0, double.infinity) +
-                          4 * textScale,
-                      double.infinity,
-                    ) +
-                    20;
-                if (index >= 0 && _positionedIndex != index) {
-                  _positionedIndex = index;
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (!mounted || !_scroll.hasClients) return;
-                    final start = index * rowHeight;
-                    final end = start + rowHeight;
-                    final visibleStart = _scroll.offset;
-                    final visibleEnd =
-                        visibleStart + _scroll.position.viewportDimension;
-                    if (start < visibleStart || end > visibleEnd) {
-                      _scroll.jumpTo(
-                        start.clamp(0.0, _scroll.position.maxScrollExtent),
-                      );
-                    }
-                  });
-                }
-                return ListView.builder(
-                  key: const ValueKey('watch-later-queue-list'),
-                  controller: _scroll,
-                  itemExtent: rowHeight,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: widget.queue.items.length,
-                  itemBuilder: (context, itemIndex) => _QueueRow(
-                    key: ValueKey(widget.queue.items[itemIndex].removalId),
-                    item: widget.queue.items[itemIndex],
-                    selected: itemIndex == index,
-                    coverWidth: coverWidth,
-                    onTap: () =>
-                        widget.onSelect(widget.queue.items[itemIndex].video.id),
-                    onRemove: itemIndex == index || widget.onRemove == null
-                        ? null
-                        : () => widget.onRemove?.call(
-                            widget.queue.items[itemIndex],
-                          ),
-                    removing: widget.pendingRemovals.contains(
-                      widget.queue.items[itemIndex].removalId,
-                    ),
-                  ),
-                );
-              },
+            child: _QueueBodyTransition(
+              expanded: widget.expanded,
+              queue: _buildList(context, index, textScale),
+              details: details,
             ),
-          ),
+          )
+        else if (widget.expanded)
+          Expanded(child: _buildList(context, index, textScale)),
       ],
     );
   }
+
+  Widget _buildList(
+    BuildContext context,
+    int index,
+    double textScale,
+  ) => LayoutBuilder(
+    builder: (context, constraints) {
+      final coverWidth =
+          (constraints.maxWidth - 50 - 160 * textScale.clamp(1, 1.5)).clamp(
+            96.0,
+            141.0,
+          );
+      final typography = Theme.of(context).textTheme;
+      final titleHeight = _measureLines(
+        context,
+        (typography.bodyMedium ?? const TextStyle()).copyWith(
+          fontSize: 14,
+          height: 1.3,
+        ),
+        '汉字Ag\n汉字Ag',
+        2,
+      );
+      final authorHeight = _measureLines(
+        context,
+        typography.bodySmall ?? const TextStyle(),
+        '汉字Ag',
+        1,
+      );
+      final countHeight = _measureLines(
+        context,
+        (typography.bodySmall ?? const TextStyle()).copyWith(fontSize: 12),
+        '9999.9万',
+        1,
+      );
+      final rowHeight =
+          (coverWidth * 9 / 16).clamp(
+            titleHeight +
+                authorHeight +
+                countHeight.clamp(28.0, double.infinity) +
+                4 * textScale,
+            double.infinity,
+          ) +
+          20;
+      if (index >= 0 && _positionedIndex != index) {
+        _positionedIndex = index;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !_scroll.hasClients) return;
+          final start = index * rowHeight;
+          final end = start + rowHeight;
+          final visibleStart = _scroll.offset;
+          final visibleEnd = visibleStart + _scroll.position.viewportDimension;
+          if (start < visibleStart || end > visibleEnd) {
+            _scroll.jumpTo(start.clamp(0.0, _scroll.position.maxScrollExtent));
+          }
+        });
+      }
+      return ListView.builder(
+        key: const ValueKey('watch-later-queue-list'),
+        controller: _scroll,
+        itemExtent: rowHeight,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: widget.queue.items.length,
+        itemBuilder: (context, itemIndex) => _QueueRow(
+          key: ValueKey(widget.queue.items[itemIndex].removalId),
+          item: widget.queue.items[itemIndex],
+          selected: itemIndex == index,
+          coverWidth: coverWidth,
+          onTap: () => widget.onSelect(widget.queue.items[itemIndex].video.id),
+          onRemove: itemIndex == index || widget.onRemove == null
+              ? null
+              : () => widget.onRemove?.call(widget.queue.items[itemIndex]),
+          removing: widget.pendingRemovals.contains(
+            widget.queue.items[itemIndex].removalId,
+          ),
+        ),
+      );
+    },
+  );
+}
+
+final class _QueueBodyTransition extends StatefulWidget {
+  const _QueueBodyTransition({
+    required this.expanded,
+    required this.queue,
+    required this.details,
+  });
+
+  final bool expanded;
+  final Widget queue, details;
+
+  @override
+  State<_QueueBodyTransition> createState() => _QueueBodyTransitionState();
+}
+
+final class _QueueBodyTransitionState extends State<_QueueBodyTransition>
+    with SingleTickerProviderStateMixin {
+  late final _controller = AnimationController(
+    vsync: this,
+    value: widget.expanded ? 1 : 0,
+  )..addStatusListener(_settled);
+  late final _opacity = _controller.drive(
+    CurveTween(curve: Curves.easeOutCubic),
+  );
+  late final _offset = _opacity.drive(
+    Tween(begin: const Offset(0, -.04), end: Offset.zero),
+  );
+  late bool _detailsVisited = !widget.expanded;
+
+  void _settled(AnimationStatus status) {
+    if (status == AnimationStatus.completed ||
+        status == AnimationStatus.dismissed) {
+      setState(() {});
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _controller.duration = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : const Duration(milliseconds: 180);
+  }
+
+  @override
+  void didUpdateWidget(covariant _QueueBodyTransition oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.expanded) _detailsVisited = true;
+    if (oldWidget.expanded != widget.expanded) {
+      widget.expanded ? _controller.forward() : _controller.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ClipRect(
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        // Offstage retains the providers and scroll state after first viewing.
+        // Fade/slide only update painting; the fixed viewport never resizes.
+        Offstage(
+          offstage: widget.expanded && !_controller.isAnimating,
+          child: IgnorePointer(
+            ignoring: widget.expanded,
+            child: ExcludeFocus(
+              excluding: widget.expanded,
+              child: ExcludeSemantics(
+                excluding: widget.expanded,
+                child: TickerMode(
+                  enabled: !widget.expanded,
+                  child: FadeTransition(
+                    opacity: ReverseAnimation(_opacity),
+                    child: RepaintBoundary(
+                      child: _detailsVisited
+                          ? widget.details
+                          : const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        // Release list rows and image leases once the exit animation completes.
+        if (widget.expanded || _controller.isAnimating)
+          IgnorePointer(
+            ignoring: !widget.expanded,
+            child: ExcludeFocus(
+              excluding: !widget.expanded,
+              child: ExcludeSemantics(
+                excluding: !widget.expanded,
+                child: FadeTransition(
+                  opacity: _opacity,
+                  child: SlideTransition(
+                    position: _offset,
+                    child: RepaintBoundary(child: widget.queue),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
 }
 
 final class _QueueRow extends StatelessWidget {
@@ -217,10 +340,14 @@ final class _QueueRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
-    final viewText = item.playCountText.isEmpty ? '—' : item.playCountText;
-    final danmakuText = item.danmakuCountText.isEmpty
-        ? '—'
-        : item.danmakuCountText;
+    final viewText = compactCountLabel(
+      item.video.playCount,
+      item.playCountText,
+    );
+    final danmakuText = compactCountLabel(
+      item.video.danmakuCount,
+      item.danmakuCountText,
+    );
     return Material(
       color: selected
           ? scheme.primary.withValues(alpha: .10)

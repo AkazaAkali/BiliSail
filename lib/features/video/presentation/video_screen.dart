@@ -360,125 +360,94 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                         ],
                       ),
                     );
+                    final detailsVisible =
+                        showInfo && (queue == null || !_queueExpanded);
+                    final infoTabs = WorkspaceActivity(
+                      active:
+                          detailsVisible && WorkspaceActivity.isActive(context),
+                      child: CommentDetailBuilder(
+                        target: switch (video.aid) {
+                          final String aid => CommentTarget(
+                            aid,
+                            CommentTargetType.video,
+                          ),
+                          null => null,
+                        },
+                        enabled: _tab == 1,
+                        builder: (context, detailOpen) => PlaybackInfoTabs(
+                          showNavigation: !detailOpen,
+                          value: _tab,
+                          onChanged: (tab) => setState(() => _tab = tab),
+                          viewKey: const ValueKey('video-info-swipe'),
+                          labels: [
+                            const Text('简介'),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text('评论'),
+                                const SizedBox(width: 4),
+                                Text(
+                                  compactCount(video.replyCount),
+                                  style: Theme.of(context).textTheme.labelSmall,
+                                ),
+                              ],
+                            ),
+                          ],
+                          trailing: widget.menuBuilder?.call(
+                            context,
+                            video,
+                            selected,
+                          ),
+                          pageBuilder: (context, tab, active) => TickerMode(
+                            enabled: detailsVisible && active,
+                            child: tab == 0
+                                ? CustomScrollView(
+                                    key: const ValueKey('video-intro-scroll'),
+                                    controller: _introScroll,
+                                    slivers: [
+                                      SliverToBoxAdapter(child: content),
+                                      SliverPadding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          12,
+                                          0,
+                                          12,
+                                          12,
+                                        ),
+                                        sliver: _RelatedVideosSliver(
+                                          id: widget.id,
+                                          onOpenVideo: widget.onOpenVideo,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : VideoCommentsPanel(
+                                    detail: video,
+                                    onLogin: widget.onLogin,
+                                    onOpenUser: widget.onOpenUser,
+                                  ),
+                          ),
+                        ),
+                      ),
+                    );
                     final info = Material(
                       key: _infoKey,
                       color: Theme.of(context).colorScheme.surface,
                       borderRadius: BorderRadius.circular(6),
                       clipBehavior: Clip.antiAlias,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (queue != null)
-                            if (_queueExpanded)
-                              Expanded(
-                                child: WatchLaterQueuePanel(
-                                  queue: queue,
-                                  current: widget.id,
-                                  expanded: true,
-                                  onToggle: () =>
-                                      setState(() => _queueExpanded = false),
-                                  onSelect: _openQueueVideo,
-                                  onRemove: _removeQueueItem,
-                                  pendingRemovals:
-                                      removals?.pending ?? const {},
-                                ),
-                              )
-                            else
-                              WatchLaterQueuePanel(
-                                queue: queue,
-                                current: widget.id,
-                                expanded: false,
-                                onToggle: () =>
-                                    setState(() => _queueExpanded = true),
-                                onSelect: _openQueueVideo,
-                                onRemove: _removeQueueItem,
-                                pendingRemovals: removals?.pending ?? const {},
+                      child: queue == null
+                          ? infoTabs
+                          : WatchLaterQueuePanel(
+                              queue: queue,
+                              current: widget.id,
+                              expanded: _queueExpanded,
+                              onToggle: () => setState(
+                                () => _queueExpanded = !_queueExpanded,
                               ),
-                          if (queue == null || !_queueExpanded) ...[
-                            Expanded(
-                              child: WorkspaceActivity(
-                                active:
-                                    showInfo &&
-                                    WorkspaceActivity.isActive(context),
-                                child: CommentDetailBuilder(
-                                  target: switch (video.aid) {
-                                    final String aid => CommentTarget(
-                                      aid,
-                                      CommentTargetType.video,
-                                    ),
-                                    null => null,
-                                  },
-                                  enabled: _tab == 1,
-                                  builder: (context, detailOpen) => PlaybackInfoTabs(
-                                    showNavigation: !detailOpen,
-                                    value: _tab,
-                                    onChanged: (tab) =>
-                                        setState(() => _tab = tab),
-                                    viewKey: const ValueKey('video-info-swipe'),
-                                    labels: [
-                                      const Text('简介'),
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Text('评论'),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            compactCount(video.replyCount),
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .labelSmall,
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                    trailing: widget.menuBuilder?.call(
-                                      context,
-                                      video,
-                                      selected,
-                                    ),
-                                    pageBuilder: (context, tab, active) =>
-                                        TickerMode(
-                                          enabled: showInfo && active,
-                                          child: tab == 0
-                                              ? CustomScrollView(
-                                                  key: const ValueKey(
-                                                    'video-intro-scroll',
-                                                  ),
-                                                  controller: _introScroll,
-                                                  slivers: [
-                                                    SliverToBoxAdapter(
-                                                      child: content,
-                                                    ),
-                                                    SliverPadding(
-                                                      padding:
-                                                          const EdgeInsets.fromLTRB(
-                                                            12,
-                                                            0,
-                                                            12,
-                                                            12,
-                                                          ),
-                                                      sliver:
-                                                          _RelatedVideosSliver(
-                                                            id: widget.id,
-                                                            onOpenVideo: widget
-                                                                .onOpenVideo,
-                                                          ),
-                                                    ),
-                                                  ],
-                                                )
-                                              : VideoCommentsPanel(
-                                                  detail: video,
-                                                  onLogin: widget.onLogin,
-                                                  onOpenUser: widget.onOpenUser,
-                                                ),
-                                        ),
-                                  ),
-                                ),
-                              ),
+                              onSelect: _openQueueVideo,
+                              onRemove: _removeQueueItem,
+                              pendingRemovals: removals?.pending ?? const {},
+                              collapsedChild: infoTabs,
                             ),
-                          ],
-                        ],
-                      ),
                     );
                     return LayoutBuilder(
                       builder: (context, constraints) {

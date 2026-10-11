@@ -6,15 +6,16 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets(
-    'live popularity decimal text uses thousand, ten-thousand and hundred-million units',
+    'live popularity uses the shared video count units without thousands',
     (tester) async {
       final semantics = tester.ensureSemantics();
       try {
         for (final (text, label) in [
           ('0', '0'),
           ('999', '999'),
-          ('1000', '1.0千'),
-          ('1234', '1.2千'),
+          ('1000', '1000'),
+          ('1234', '1234'),
+          ('9999', '9999'),
           ('10000', '1.0万'),
           ('12345', '1.2万'),
           ('100000000', '1.0亿'),

@@ -22,6 +22,9 @@ import 'package:bilisail/features/video/domain/video_actions_repository.dart';
 import 'package:bilisail/shared/ui/app_notice.dart';
 import 'package:bilisail/domain/video.dart';
 import 'package:bilisail/features/video/application/video_controller.dart';
+import 'package:bilisail/features/video/application/video_author_controller.dart';
+import 'package:bilisail/features/video/domain/video_author_repository.dart';
+import 'package:bilisail/features/video/presentation/video_author_header.dart';
 import 'package:bilisail/features/video/domain/video_repository.dart';
 import 'package:bilisail/features/video/presentation/video_screen.dart';
 import 'package:bilisail/features/video/presentation/video_collection_panel.dart';
@@ -296,6 +299,125 @@ void main() {
       'MaterialIcons',
     )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
   });
+
+  for (final width in [390.0, 1200.0]) {
+    testWidgets('queue toggles retain author state and player at $width', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = Size(width, 800);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final authors = _QueueAuthors();
+      final session = PlaybackSession(
+        engine: CardFakeEngine(),
+        repository: _UnusedPlaybackRepository(),
+        progress: _UnusedProgressStore(),
+        accountScope: () => 'user:7',
+      );
+      addTearDown(session.close);
+      var playerCreates = 0;
+      var playerBuilds = 0;
+      var playerDisposes = 0;
+      final queue = WatchLaterQueue(
+        id: 'author-retention',
+        scope: 'user:7',
+        sessionEpoch: 0,
+        items: [
+          WatchLaterQueueItem(
+            video: VideoSummary(
+              id: const VideoId('BV1abc123456'),
+              title: '队列视频',
+              coverUrl: '',
+              author: 'UP',
+              duration: const Duration(minutes: 1),
+            ),
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            playbackSessionProvider.overrideWithValue(session),
+            authControllerProvider.overrideWith(_QueueSignedInAuth.new),
+            videoRepositoryProvider.overrideWithValue(
+              const _VideoRepository(authorMid: '42', includeCollection: false),
+            ),
+            videoAuthorRepositoryProvider.overrideWithValue(authors),
+            videoExtrasRepositoryProvider.overrideWithValue(
+              _ExtrasRepository(related: _manyRelated()),
+            ),
+          ],
+          child: InputTestApp(
+            home: Scaffold(
+              body: VideoScreen(
+                id: const VideoId('BV1abc123456'),
+                queue: queue,
+                playerBuilder: (_, _, _) {
+                  playerBuilds++;
+                  return _TrackedPlayer(
+                    onCreate: () => playerCreates++,
+                    onDispose: () => playerDisposes++,
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(authors.reads, 0, reason: 'Details load on first viewing');
+      await tester.tap(find.text('稍后再看'));
+      await tester.pumpAndSettle();
+      expect(authors.reads, 1);
+      expect(find.text('7.1万粉丝 · 1.2万获赞'), findsOneWidget);
+      expect(find.text('已关注'), findsOneWidget);
+      final header = tester.element(find.byType(VideoAuthorHeader));
+      final container = ProviderScope.containerOf(header);
+      final provider = videoAuthorControllerProvider(const VideoAuthorId('42'));
+      final controller = container.read(provider.notifier);
+      final scroll = tester.state<ScrollableState>(_introScrollable()).position;
+      expect(scroll.maxScrollExtent, greaterThan(50));
+      scroll.jumpTo(50);
+      await tester.pump();
+      final offset = scroll.pixels;
+      for (var i = 0; i < 3; i++) {
+        await tester.tap(find.text('稍后再看'));
+        await tester.pump();
+        final builds = playerBuilds;
+        for (var frame = 0; frame < 3; frame++) {
+          await tester.pump(const Duration(milliseconds: 40));
+          expect(
+            playerBuilds,
+            builds,
+            reason: 'Animation must not rebuild player',
+          );
+        }
+        await tester.pumpAndSettle();
+        expect(header.mounted, isTrue);
+        expect(container.read(provider.notifier), same(controller));
+        expect(authors.reads, 1);
+        expect(find.text('已关注'), findsNothing);
+        await tester.tap(find.text('稍后再看'));
+        await tester.pumpAndSettle();
+        expect(authors.reads, 1);
+        expect(find.text('7.1万粉丝 · 1.2万获赞'), findsOneWidget);
+        expect(find.text('已关注'), findsOneWidget);
+        expect(
+          tester.state<ScrollableState>(_introScrollable()).position.pixels,
+          offset,
+        );
+      }
+      expect(playerCreates, 1);
+      expect(playerDisposes, 0);
+      expect(authors.cancellation?.isCancelled, isFalse);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      expect(authors.cancellation?.isCancelled, isTrue);
+      expect(playerDisposes, 1);
+    });
+  }
 
   testWidgets('watch-later queue occupies sidebar and folds above intro', (
     tester,
@@ -1450,6 +1572,30 @@ final class _GuestAuthController extends AuthController {
   AuthState build() => const AuthState();
 }
 
+final class _QueueSignedInAuth extends AuthController {
+  @override
+  AuthState build() => const AuthState(status: AuthStatus.signedIn, mid: '7');
+}
+
+final class _QueueAuthors extends Fake implements VideoAuthorRepository {
+  int reads = 0;
+  RequestCancellation? cancellation;
+  @override
+  String get accountScope => 'user:7';
+  @override
+  int get sessionEpoch => 0;
+  @override
+  Future<VideoAuthor> load(VideoAuthorId id, RequestCancellation token) async {
+    reads++;
+    cancellation = token;
+    return const VideoAuthor(
+      following: true,
+      followerCount: 70700,
+      likeCount: 12345,
+    );
+  }
+}
+
 Widget _relatedCardApp(
   _RelatedCardOperations operations, {
   required VoidCallback onOpen,
@@ -1620,9 +1766,16 @@ final class _TrackedPlayerState extends State<_TrackedPlayer> {
 }
 
 final class _VideoRepository implements VideoRepository {
-  const _VideoRepository({this.access = const VideoAccess(), this.parts});
+  const _VideoRepository({
+    this.access = const VideoAccess(),
+    this.parts,
+    this.authorMid,
+    this.includeCollection = true,
+  });
   final VideoAccess access;
   final List<VideoPart>? parts;
+  final String? authorMid;
+  final bool includeCollection;
   @override
   Future<VideoDetail> loadDetail(
     VideoId id, {
@@ -1636,31 +1789,34 @@ final class _VideoRepository implements VideoRepository {
       author: 'UP',
       duration: Duration(minutes: 6),
     ),
+    authorMid: authorMid,
     description: '测试简介',
-    collection: VideoCollection(
-      id: '1',
-      title: '测试合集',
-      entries: [
-        VideoCollectionEntry(
-          id: VideoId('BV1xyz123456'),
-          title: '合集视频',
-          parts: [
-            VideoPart(
-              cid: '33',
-              page: 1,
-              title: '合集第一 P',
-              duration: Duration(minutes: 1),
-            ),
-            VideoPart(
-              cid: '44',
-              page: 2,
-              title: '合集第二 P',
-              duration: Duration(minutes: 1),
-            ),
-          ],
-        ),
-      ],
-    ),
+    collection: !includeCollection
+        ? null
+        : VideoCollection(
+            id: '1',
+            title: '测试合集',
+            entries: [
+              VideoCollectionEntry(
+                id: VideoId('BV1xyz123456'),
+                title: '合集视频',
+                parts: [
+                  VideoPart(
+                    cid: '33',
+                    page: 1,
+                    title: '合集第一 P',
+                    duration: Duration(minutes: 1),
+                  ),
+                  VideoPart(
+                    cid: '44',
+                    page: 2,
+                    title: '合集第二 P',
+                    duration: Duration(minutes: 1),
+                  ),
+                ],
+              ),
+            ],
+          ),
     parts:
         parts ??
         [

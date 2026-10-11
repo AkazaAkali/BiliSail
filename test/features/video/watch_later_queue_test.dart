@@ -194,6 +194,148 @@ void main() {
   );
 
   testWidgets(
+    'queue counts share numeric text, fallback and abbreviation formatting',
+    (tester) async {
+      for (final (text, count, expected) in <(String, int?, String)>[
+        ('0', 12345, '0'),
+        ('9999', null, '9999'),
+        ('10000', null, '1.0万'),
+        ('12345', null, '1.2万'),
+        ('100000000', null, '1.0亿'),
+        ('123456789', null, '1.2亿'),
+        ('  ', 12345, '1.2万'),
+        ('', null, '—'),
+        ('2.34亿', 12345, '2.34亿'),
+      ]) {
+        final queue = WatchLaterQueue(
+          id: 'counts',
+          scope: 'user:7',
+          sessionEpoch: 0,
+          items: [
+            WatchLaterQueueItem(
+              video: VideoSummary(
+                id: _firstId,
+                title: '计数测试',
+                coverUrl: '',
+                author: 'UP',
+                duration: const Duration(minutes: 1),
+                playCount: count,
+                danmakuCount: count,
+              ),
+              playCountText: text,
+              danmakuCountText: text,
+            ),
+          ],
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                width: 380,
+                height: 600,
+                child: WatchLaterQueuePanel(
+                  queue: queue,
+                  current: _firstId,
+                  expanded: true,
+                  onToggle: () {},
+                  onSelect: (_) {},
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text(expected), findsNWidgets(2), reason: '$text / $count');
+        expect(tester.takeException(), isNull);
+      }
+    },
+  );
+
+  for (final reducedMotion in [false, true]) {
+    testWidgets(
+      'queue transition retains details and reverses safely, reducedMotion=$reducedMotion',
+      (tester) async {
+        var expanded = true;
+        var detailBuilds = 0;
+        final queue = WatchLaterQueue(
+          id: 'motion',
+          scope: 'user:7',
+          sessionEpoch: 0,
+          items: List.generate(1000, _item),
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: MediaQuery(
+                data: MediaQueryData(disableAnimations: reducedMotion),
+                child: SizedBox(
+                  width: 380,
+                  height: 600,
+                  child: StatefulBuilder(
+                    builder: (context, setState) => WatchLaterQueuePanel(
+                      queue: queue,
+                      current: _firstId,
+                      expanded: expanded,
+                      onToggle: () => setState(() => expanded = !expanded),
+                      onSelect: (_) {},
+                      collapsedChild: Builder(
+                        builder: (_) {
+                          detailBuilds++;
+                          return const Text('保留的简介');
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(detailBuilds, 0);
+        expect(
+          find.byKey(
+            ValueKey('watch-later-queue-${queue.items.last.video.id.value}'),
+          ),
+          findsNothing,
+        );
+        await tester.tap(find.text('稍后再看'));
+        await tester.pump();
+        final details = tester.element(find.text('保留的简介'));
+        final builds = detailBuilds;
+        if (!reducedMotion) {
+          final fade = tester.widget<FadeTransition>(
+            find
+                .ancestor(
+                  of: find.byKey(const ValueKey('watch-later-queue-list')),
+                  matching: find.byType(FadeTransition),
+                )
+                .first,
+          );
+          await tester.pump(const Duration(milliseconds: 60));
+          expect(fade.opacity.value, inExclusiveRange(0, 1));
+          expect(detailBuilds, builds);
+          // Reverse before settling; retain one details element and one list.
+          await tester.tap(find.text('稍后再看'));
+          await tester.pump();
+          await tester.pumpAndSettle();
+          expect(details.mounted, isTrue);
+          expect(find.text('保留的简介'), findsNothing);
+          await tester.tap(find.text('稍后再看'));
+        }
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('watch-later-queue-list')),
+          findsNothing,
+        );
+        expect(details.mounted, isTrue);
+        expect(find.text('保留的简介'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets(
     'queue renders theme and narrow large-text previews without overflow',
     (tester) async {
       tester.view.devicePixelRatio = 1;

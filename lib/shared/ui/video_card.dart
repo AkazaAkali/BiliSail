@@ -14,30 +14,21 @@ import 'package:flutter/material.dart';
 
 import '../../domain/video.dart';
 
-String compactCount(int? count, {bool abbreviateThousands = false}) {
+String compactCount(int? count) {
   if (count == null) return '—';
   if (count >= 100000000) return '${(count / 100000000).toStringAsFixed(1)}亿';
   if (count >= 10000) return '${(count / 10000).toStringAsFixed(1)}万';
-  if (abbreviateThousands && count >= 1000) {
-    return '${(count / 1000).toStringAsFixed(1)}千';
-  }
   return '$count';
 }
 
-String compactCountLabel(
-  int? count,
-  String text, {
-  bool abbreviateThousands = false,
-}) {
+String compactCountLabel(int? count, String text) {
   final value = text.trim();
   if (value.isEmpty) {
-    return compactCount(count, abbreviateThousands: abbreviateThousands);
+    return compactCount(count);
   }
   // Keep server-provided abbreviations; format decimal count text locally.
   final numericCount = int.tryParse(value, radix: 10);
-  return numericCount == null
-      ? text
-      : compactCount(numericCount, abbreviateThousands: abbreviateThousands);
+  return numericCount == null ? text : compactCount(numericCount);
 }
 
 String durationLabel(Duration duration) {
