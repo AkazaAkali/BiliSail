@@ -43,6 +43,8 @@
 
 2026-10-08 Windows 预览和主视频继续共用 GPU 渲染队列；尺寸检查改为消费原生适配器的显示尺寸事件，移除渲染线程对 mpv 核心的同步查询，避免预览启动时约 200 毫秒的等待阻塞主视频。原因、Profile 对照及剩余 GPU 创建开销见 [悬停预览与主视频出帧争用](validation/video-preview-contention.md)。
 
+2026-10-11 Windows 增加可选 `VideoViewportSource`，由共享 surface 按可见区域和 DPR 发送中间纹理上限；保持源分辨率和硬解，放大立即恢复、缩小延迟 300ms，surface 所有权与原生 revision 隔离旧尺寸请求。原生更新通知合并但保留渲染期间的新唤醒和队列公平性。两轮 720p/1080p Profile 已确认纹理面积下降；GPU 百分比仍有波动，未证明固定降幅或转换流畅度提升，详见 [Windows 输出性能](validation/windows-video-render-performance-2026-10-11.md)。
+
 `media_kit` 文档列出了三端、外部音轨、字幕和 HTTP headers 等能力，适合作为首选；这些能力组合后的行为仍需项目验证。[media_kit](https://pub.dev/packages/media_kit)
 
 ## 2. 通用播放契约
@@ -89,6 +91,8 @@ Bilibili playurl 的 DASH 响应通常提供 representation 信息而非可以�
 若首选不满足三端需求，再在适配层评估完整 MPD：从实际返回的 codec、timescale、init/index range、duration 等构造，不凭空填写；优先会话临时文件。只有后端确实需要时才加入本地 loopback 服务，绑定回环地址、随机端口和会话 token，正确处理 Range、Content-Type、清理与访问边界。首版不默认引入本地代理。
 
 如果两条路径都失败，使用相同契约验证 `fvp`；它基于 libmdk，提供额外后端 API，但仍须验证分轨请求头和许可/打包依赖。[fvp 文档](https://pub.dev/packages/fvp)
+
+2026-10-11 进一步比较硬解与画面交付路径，仍保留现有生产后端。后续隔离对照优先考虑三端 fvp/libmdk，以及 Android Media3；硬解支持、解码到渲染器零复制和 Flutter 最终合成属于不同边界。候选的单会话分轨、逐轨请求策略、音画时钟、许可与生命周期门槛见 [硬解后端调研](validation/playback-backend-research-2026-10-11.md)，文档能力不作为本项目实测结果。
 
 ### 点播打开流程
 

@@ -13,6 +13,8 @@ import 'bili_icons.dart';
 import 'video_card_interaction_scope.dart';
 import 'video_access_badge.dart';
 
+const _coverHoverScale = 1.05;
+
 /// Desktop cover interaction shared by grid and horizontal video cards.
 class VideoCardCover extends StatefulWidget {
   const VideoCardCover({
@@ -247,7 +249,7 @@ class _VideoCardCoverState extends State<VideoCardCover>
         onExit: widget.hovered == null ? (_) => _hoverCover(false) : null,
         child: AnimatedScale(
           key: const ValueKey('video-card-cover-scale'),
-          scale: _coverHovered ? 1.05 : 1,
+          scale: _coverHovered ? _coverHoverScale : 1,
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
           child: ClipRRect(
@@ -356,7 +358,10 @@ class _VideoCardPlaybackPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final surface = VideoSurface(engine: preview.engine);
+    final surface = VideoSurface(
+      engine: preview.engine,
+      paintScale: _coverHoverScale,
+    );
     return StreamBuilder<PlaybackSnapshot>(
       stream: preview.engine.snapshots,
       initialData: preview.engine.currentSnapshot,

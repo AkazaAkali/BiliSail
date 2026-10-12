@@ -24,9 +24,9 @@ try {
     throw 'Preview contention probe did not retain main and silent preview playback.'
   }
   Copy-Item -LiteralPath 'build/validation/video-preview-contention.json' -Destination "build/validation/video-preview-contention-$Label.json"
-  $renderRows = @(Select-String -LiteralPath $log -Pattern 'VIDEO_RENDER_TRACE frames=(\d+) maxGapMs=(\d+) hardware=(\d)' | ForEach-Object {
+  $renderRows = @(Select-String -LiteralPath $log -Pattern 'VIDEO_RENDER_TRACE frames=(\d+) maxGapMs=(\d+) callbacks=(\d+) hardware=(\d)' | ForEach-Object {
     $match = $_.Matches[0]
-    [pscustomobject]@{ frames = [int]$match.Groups[1].Value; maxGapMs = [int]$match.Groups[2].Value; hardware = [int]$match.Groups[3].Value }
+    [pscustomobject]@{ frames = [int]$match.Groups[1].Value; maxGapMs = [int]$match.Groups[2].Value; callbacks = [int]$match.Groups[3].Value; hardware = [int]$match.Groups[4].Value }
   })
   $gpuCreates = @(Select-String -LiteralPath $log -Pattern 'VideoOutput: Using H/W rendering\.').Count
   if ($renderRows.Count -ne 5 -or $gpuCreates -ne 5 -or @($renderRows | Where-Object { $_.hardware -ne 1 }).Count -ne 0) {

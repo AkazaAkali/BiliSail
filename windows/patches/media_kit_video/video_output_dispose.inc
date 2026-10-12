@@ -68,6 +68,39 @@ void VideoOutput::NotifyRender() {
   if (destroyed_) {
     return;
   }
-  thread_pool_ref_->Post(std::bind(&VideoOutput::CheckAndResize, this));
-  thread_pool_ref_->Post(std::bind(&VideoOutput::Render, this));
+  if (rendering_) {
+    // mpv may report another update while Render is consuming the previous
+    // one. Keep one more pass so that wakeup is not lost.
+    render_again_ = true;
+    return;
+  }
+  if (render_task_queued_) {
+    // The queued pass will consume the newest available frame.
+    return;
+  }
+  render_task_queued_ = true;
+  thread_pool_ref_->Post(std::bind(&VideoOutput::RenderQueued, this));
+}
+
+void VideoOutput::RenderQueued() {
+  {
+    std::lock_guard<std::mutex> lock(render_tasks_mutex_);
+    render_task_queued_ = false;
+    if (destroyed_) {
+      return;
+    }
+    rendering_ = true;
+  }
+  CheckAndResize();
+  Render();
+  std::lock_guard<std::mutex> lock(render_tasks_mutex_);
+  rendering_ = false;
+  if (destroyed_ || !render_again_) {
+    render_again_ = false;
+    return;
+  }
+  render_again_ = false;
+  render_task_queued_ = true;
+  // Enqueue at the tail so another player's frame/size task can run first.
+  thread_pool_ref_->Post(std::bind(&VideoOutput::RenderQueued, this));
 }

@@ -42,17 +42,31 @@ function(bilisail_patch_video_sources source output)
     configure_file("${source}/${file}" "${output}/${file}" COPYONLY)
   endforeach()
   foreach(file video_output_dispose.inc video_output_manager_dispose.inc
-    video_output_dimensions.inc)
+    video_output_dimensions.inc video_output_viewport.inc)
     configure_file("${BILISAIL_VIDEO_PATCH_DIR}/${file}" "${output}/${file}" COPYONLY)
   endforeach()
 
   bilisail_replace_once("${output}/video_output.h" "#include <optional>"
-    "#include <optional>\n#include <atomic>\n#include <condition_variable>")
+    "#include <optional>\n#include <atomic>\n#include <cmath>\n#include <condition_variable>\n#include <utility>")
   bilisail_replace_once("${output}/video_output.h" "  void NotifyRender();"
-    "  void UnregisterTexture(int64_t id, std::function<void()> callback);\n\n  void NotifyRender();")
+    "  void UnregisterTexture(int64_t id, std::function<void()> callback);\n\n  void NotifyRender();\n  void RenderQueued();")
+  bilisail_replace_once("${output}/video_output.h"
+    "  void SetSize(std::optional<int64_t> width, std::optional<int64_t> height);"
+    "  void SetSize(std::optional<int64_t> width, std::optional<int64_t> height);\n  void SetViewportSize(std::optional<int64_t> width, std::optional<int64_t> height, uint64_t revision);")
+  bilisail_replace_once("${output}/video_output.h" "  int64_t GetVideoWidth();"
+    "  std::pair<int64_t, int64_t> GetOutputDimensions() const;\n\n  int64_t GetVideoWidth();")
+  bilisail_replace_once("${output}/video_output.h"
+    "  std::optional<int64_t> width_ = std::nullopt;"
+    "  std::optional<int64_t> width_ = std::nullopt;\n  std::optional<int64_t> viewport_width_ = std::nullopt;\n  std::optional<int64_t> viewport_height_ = std::nullopt;")
+  bilisail_replace_once("${output}/video_output.h"
+    "  std::optional<int64_t> viewport_height_ = std::nullopt;"
+    "  std::optional<int64_t> viewport_height_ = std::nullopt;\n  uint64_t viewport_revision_ = 0;")
   bilisail_replace_once("${output}/video_output.h" "  bool destroyed_ = false;" [=[
   std::atomic<bool> destroyed_{false};
   std::mutex render_tasks_mutex_;
+  bool render_task_queued_ = false;
+  bool rendering_ = false;
+  bool render_again_ = false;
   std::mutex texture_release_mutex_;
   std::condition_variable textures_released_;
   size_t pending_texture_releases_ = 0;]=])
@@ -86,6 +100,9 @@ function(bilisail_patch_video_sources source output)
     CheckAndResize();
     Render();
   });]=])
+  bilisail_replace_once("${output}/video_output.cc"
+    "void VideoOutput::CheckAndResize() {"
+    "#include \"video_output_viewport.inc\"\n\nvoid VideoOutput::CheckAndResize() {")
   bilisail_replace_once("${output}/video_output.cc"
     "registrar_->texture_registrar()->UnregisterTexture(" "UnregisterTexture(")
   if("$ENV{BILISAIL_VIDEO_RENDER_TRACE}" STREQUAL "1")
@@ -123,7 +140,11 @@ class VideoOutput {]=])
   std::chrono::steady_clock::time_point trace_last_render_{};
   int64_t trace_frames_ = 0;
   int64_t trace_max_gap_ms_ = 0;
+  std::atomic<int64_t> trace_update_callbacks_{0};
   std::mutex render_tasks_mutex_;]=])
+    bilisail_replace_once("${output}/video_output_dispose.inc"
+      "void VideoOutput::NotifyRender() {" [=[void VideoOutput::NotifyRender() {
+  ++trace_update_callbacks_;]=])
     bilisail_replace_once("${output}/video_output.cc" "void VideoOutput::Render() {" [=[
 void VideoOutput::Render() {
   const auto now = std::chrono::steady_clock::now();
@@ -146,6 +167,7 @@ void VideoOutput::Render() {
   thread_pool_ref_->Post([] {}).get();
   std::cout << "VIDEO_RENDER_TRACE frames=" << trace_frames_
             << " maxGapMs=" << trace_max_gap_ms_
+            << " callbacks=" << trace_update_callbacks_
             << " hardware=" << configuration_.enable_hardware_acceleration
             << std::endl;]=])
   endif()
@@ -156,6 +178,9 @@ void VideoOutput::Render() {
 
   bilisail_replace_once("${output}/video_output_manager.h" "  void Dispose(int64_t handle);"
     "  void Dispose(int64_t handle, std::function<void()> on_disposed);")
+  bilisail_replace_once("${output}/video_output_manager.h"
+    "  void Dispose(int64_t handle, std::function<void()> on_disposed);"
+    "  void SetViewportSize(int64_t handle, std::optional<int64_t> width, std::optional<int64_t> height, uint64_t revision);\n  void Dispose(int64_t handle, std::function<void()> on_disposed);")
   bilisail_replace_once("${output}/video_output_manager.cc" [=[void VideoOutputManager::Dispose(int64_t handle) {
   std::thread([=]() {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -164,6 +189,20 @@ void VideoOutput::Render() {
     }
   }).detach();
 }]=] "#include \"video_output_manager_dispose.inc\"")
+  bilisail_replace_once("${output}/video_output_manager.cc"
+    "#include \"video_output_manager_dispose.inc\"" [=[void VideoOutputManager::SetViewportSize(
+    int64_t handle, std::optional<int64_t> width,
+    std::optional<int64_t> height, uint64_t revision) {
+  std::thread([=]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto output = video_outputs_.find(handle);
+    if (output != video_outputs_.end()) {
+      output->second->SetViewportSize(width, height, revision);
+    }
+  }).detach();
+}
+
+#include "video_output_manager_dispose.inc"]=])
   bilisail_replace_once("${output}/media_kit_video_plugin.cc" [=[    video_output_manager_->Dispose(handle_value);
     result->Success(flutter::EncodableValue(std::monostate{}));]=] [=[    auto reply = std::shared_ptr<flutter::MethodResult<flutter::EncodableValue>>(
         std::move(result));
@@ -172,6 +211,28 @@ void VideoOutput::Render() {
         reply->Success(flutter::EncodableValue(std::monostate{}));
       });
     });]=])
+  bilisail_replace_once("${output}/media_kit_video_plugin.cc"
+    [=[  } else if (method_call.method_name().compare("Utils.EnterNativeFullscreen") ==]=]
+    [=[  } else if (method_call.method_name().compare("VideoOutputManager.SetViewportSize") ==
+             0) {
+    auto arguments = std::get<flutter::EncodableMap>(*method_call.arguments());
+    const auto handle =
+        std::get<std::string>(arguments[flutter::EncodableValue("handle")]);
+    const auto width =
+        std::get<std::string>(arguments[flutter::EncodableValue("width")]);
+    const auto height =
+        std::get<std::string>(arguments[flutter::EncodableValue("height")]);
+    const auto revision =
+        std::get<std::string>(arguments[flutter::EncodableValue("revision")]);
+    video_output_manager_->SetViewportSize(
+        static_cast<int64_t>(std::stoll(handle)),
+        width == "null" ? std::nullopt
+                        : std::optional<int64_t>(std::stoll(width)),
+        height == "null" ? std::nullopt
+                         : std::optional<int64_t>(std::stoll(height)),
+        static_cast<uint64_t>(std::stoull(revision)));
+    result->Success(flutter::EncodableValue(std::monostate{}));
+  } else if (method_call.method_name().compare("Utils.EnterNativeFullscreen") ==]=])
 endfunction()
 
 function(bilisail_patch_video_target)

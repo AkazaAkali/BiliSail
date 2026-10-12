@@ -262,3 +262,16 @@ abstract interface class AudioGainControl {
 abstract interface class VideoSurfaceSource {
   Widget buildVideoSurface();
 }
+
+/// Optional output sizing for a mounted surface. The owner prevents an old
+/// fullscreen or inline surface from applying a delayed layout update.
+abstract interface class VideoViewportSource {
+  void attachVideoViewport(Object owner);
+  void updateVideoViewport(
+    Object owner, {
+    required double logicalWidth,
+    required double logicalHeight,
+    required double devicePixelRatio,
+  });
+  void detachVideoViewport(Object owner);
+}

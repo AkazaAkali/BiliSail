@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart' as mk;
 import 'package:media_kit_video/media_kit_video.dart' as mkv;
@@ -20,7 +22,11 @@ void initializePlayerBackend() => mk.MediaKit.ensureInitialized();
 /// Owns at most one native Player. Each source change replaces it, so events
 /// retained by the previous backend cannot enter the next source generation.
 final class MediaKitEngine
-    implements PlayerEngine, VideoSurfaceSource, AudioGainControl {
+    implements
+        PlayerEngine,
+        VideoSurfaceSource,
+        VideoViewportSource,
+        AudioGainControl {
   MediaKitEngine({this.onDiagnostic}) {
     _nativeErrors = NativeErrorMonitor(
       onStalled: (generation) => _fail(
@@ -61,6 +67,18 @@ final class MediaKitEngine
   final ValueNotifier<mkv.VideoController?> _videoController = ValueNotifier(
     null,
   );
+  static const _viewportChannel = MethodChannel(
+    'com.alexmercerind/media_kit_video',
+  );
+  Object? _viewportOwner;
+  ({double width, double height, double dpr})? _viewportLayout;
+  ({int? width, int? height})? _requestedViewport;
+  @visibleForTesting
+  ({int? width, int? height})? get debugRequestedVideoViewport =>
+      _requestedViewport;
+  Timer? _viewportShrinkTimer;
+  int _viewportRevision = 0;
+  bool _viewportFailureLogged = false;
   final List<StreamSubscription<Object?>> _subscriptions = [];
   Future<void> _commands = Future.value();
   mk.Player? _player;
@@ -131,6 +149,8 @@ final class MediaKitEngine
           outputRect != null &&
           outputRect.width > 0 &&
           outputRect.height > 0,
+      outputWidth: outputRect?.width.toInt(),
+      outputHeight: outputRect?.height.toInt(),
       videoWidth: width,
       videoHeight: height,
       audioChannels: channels,
@@ -162,9 +182,185 @@ final class MediaKitEngine
     }
   }
 
+  /// Native clock and drop counters for bounded playback validation probes.
+  /// Values are absent when mpv has not established both streams yet.
+  Future<({double? avsyncSeconds, int? frameDrops, int? decoderDrops})>
+  inspectNativePlaybackTiming() async {
+    final player = _player;
+    final platform = player?.platform;
+    final generation = _generation;
+    if (platform is! mk.NativePlayer || _disposed) {
+      return (avsyncSeconds: null, frameDrops: null, decoderDrops: null);
+    }
+    Future<String?> read(String property) async {
+      try {
+        return await platform
+            .getProperty(property)
+            .timeout(const Duration(seconds: 2));
+      } on Object {
+        return null;
+      }
+    }
+
+    final avsync = double.tryParse(await read('avsync') ?? '');
+    final frameDrops = int.tryParse(await read('frame-drop-count') ?? '');
+    final decoderDrops = int.tryParse(
+      await read('decoder-frame-drop-count') ?? '',
+    );
+    if (_disposed || generation != _generation || !identical(_player, player)) {
+      return (avsyncSeconds: null, frameDrops: null, decoderDrops: null);
+    }
+    return (
+      avsyncSeconds: avsync?.isFinite == true ? avsync : null,
+      frameDrops: frameDrops,
+      decoderDrops: decoderDrops,
+    );
+  }
+
+  @override
+  void attachVideoViewport(Object owner) {
+    if (!Platform.isWindows || _disposed) return;
+    _viewportOwner = owner;
+    _viewportLayout = null;
+    _viewportShrinkTimer?.cancel();
+    // An inline surface may have left a small cap. Remove it immediately when
+    // a new surface claims the same player, before its first layout callback.
+    _requestViewport((width: null, height: null), force: true);
+  }
+
+  @override
+  void updateVideoViewport(
+    Object owner, {
+    required double logicalWidth,
+    required double logicalHeight,
+    required double devicePixelRatio,
+  }) {
+    if (!Platform.isWindows ||
+        _disposed ||
+        !identical(_viewportOwner, owner) ||
+        !logicalWidth.isFinite ||
+        !logicalHeight.isFinite ||
+        !devicePixelRatio.isFinite ||
+        logicalWidth <= 0 ||
+        logicalHeight <= 0 ||
+        devicePixelRatio <= 0) {
+      return;
+    }
+    _viewportLayout = (
+      width: logicalWidth,
+      height: logicalHeight,
+      dpr: devicePixelRatio,
+    );
+    _updateViewportCap();
+  }
+
+  @override
+  void detachVideoViewport(Object owner) {
+    if (!identical(_viewportOwner, owner)) return;
+    _viewportOwner = null;
+    _viewportLayout = null;
+    _viewportShrinkTimer?.cancel();
+  }
+
+  void _updateViewportCap() {
+    final layout = _viewportLayout;
+    if (!Platform.isWindows || layout == null || _viewportOwner == null) return;
+    final physicalWidth = (layout.width * layout.dpr).ceil().clamp(1, 16384);
+    final physicalHeight = (layout.height * layout.dpr).ceil().clamp(1, 16384);
+    final source = _snapshot.videoDimensions;
+    var neededWidth = physicalWidth;
+    var neededHeight = physicalHeight;
+    if (source != null && source.width > 0 && source.height > 0) {
+      final scale = math.min(
+        1.0,
+        math.min(physicalWidth / source.width, physicalHeight / source.height),
+      );
+      neededWidth = (source.width * scale).ceil();
+      neededHeight = (source.height * scale).ceil();
+    }
+    int roundUp(int value) => ((value + 63) ~/ 64) * 64;
+    final cap = (
+      width: source == null
+          ? roundUp(neededWidth)
+          : math.min(source.width, roundUp(neededWidth)),
+      height: source == null
+          ? roundUp(neededHeight)
+          : math.min(source.height, roundUp(neededHeight)),
+    );
+    _requestViewport(cap);
+  }
+
+  void _requestViewport(({int? width, int? height}) cap, {bool force = false}) {
+    _viewportShrinkTimer?.cancel();
+    final previous = _requestedViewport;
+    if (!force && previous == cap) return;
+    if (!force &&
+        previous?.width != null &&
+        previous?.height != null &&
+        cap.width != null &&
+        cap.height != null &&
+        cap.width! <= previous!.width! &&
+        cap.height! <= previous.height!) {
+      final owner = _viewportOwner;
+      _viewportShrinkTimer = Timer(const Duration(milliseconds: 300), () {
+        if (identical(_viewportOwner, owner)) _commitViewport(cap);
+      });
+      return;
+    }
+    _commitViewport(cap);
+  }
+
+  void _commitViewport(({int? width, int? height}) cap) {
+    if (_disposed) return;
+    _requestedViewport = cap;
+    final controller = _videoController.value;
+    final player = _player;
+    if (controller == null || player == null) return;
+    final revision = ++_viewportRevision;
+    final generation = _generation;
+    unawaited(_applyViewport(controller, player, generation, cap, revision));
+  }
+
+  Future<void> _applyViewport(
+    mkv.VideoController controller,
+    mk.Player player,
+    int generation,
+    ({int? width, int? height}) cap,
+    int revision,
+  ) async {
+    try {
+      const deadline = Duration(seconds: 5);
+      await controller.platform.future.timeout(deadline);
+      final handle = await player.handle.timeout(deadline);
+      if (_disposed ||
+          generation != _generation ||
+          !identical(_player, player) ||
+          !identical(_videoController.value, controller)) {
+        return;
+      }
+      await _viewportChannel
+          .invokeMethod<void>('VideoOutputManager.SetViewportSize', {
+            'handle': handle.toString(),
+            'width': cap.width?.toString() ?? 'null',
+            'height': cap.height?.toString() ?? 'null',
+            'revision': revision.toString(),
+          })
+          .timeout(deadline);
+    } on Object catch (error) {
+      if (!_viewportFailureLogged) {
+        _viewportFailureLogged = true;
+        debugPrint(
+          'Windows video viewport update failed: ${error.runtimeType}',
+        );
+      }
+    }
+  }
+
   void _publish(PlaybackSnapshot value) {
     if (_disposed || _snapshots.isClosed) return;
+    final previousDimensions = _snapshot.videoDimensions;
     _snapshot = value;
+    if (value.videoDimensions != previousDimensions) _updateViewportCap();
     _nativeErrors.update(value);
     _snapshots.add(value);
   }
@@ -410,6 +606,10 @@ final class MediaKitEngine
           ),
         );
         _videoController.value = controller;
+        final cap = _requestedViewport;
+        if (Platform.isWindows && cap != null) {
+          _commitViewport(cap);
+        }
         // VideoController initializes in a post-frame callback, which does not
         // request a frame. A hover has no mounted surface until open completes,
         // so an idle window otherwise waits forever for output initialization
@@ -988,6 +1188,7 @@ final class MediaKitEngine
   Future<void> dispose() async {
     if (_disposed) return;
     _advanceGeneration();
+    _viewportShrinkTimer?.cancel();
     await _serial(_releasePlayer);
     _disposed = true;
     _videoController.dispose();
