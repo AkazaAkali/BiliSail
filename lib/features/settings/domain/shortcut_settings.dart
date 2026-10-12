@@ -7,7 +7,7 @@ final class ShortcutSettings {
   const ShortcutSettings.defaults()
     : seekSeconds = 3,
       holdDelayMs = 400,
-      holdRate = 3,
+      holdRate = 2,
       enabled = true,
       _disabled = const {},
       _overrides = const {},
@@ -16,7 +16,7 @@ final class ShortcutSettings {
   ShortcutSettings({
     this.seekSeconds = 3,
     this.holdDelayMs = 400,
-    this.holdRate = 3,
+    this.holdRate = 2,
     this.enabled = true,
     List<String> issues = const [],
     this.storedJson,
@@ -95,7 +95,7 @@ final class ShortcutSettings {
           ? PlaybackRates.nearest(
               (value['holdRate'] as num).toDouble().clamp(1.25, 3),
             )
-          : 3,
+          : 2,
       enabled: value['enabled'] != false,
       overrides: overrides,
       disabled: ShortcutAction.values

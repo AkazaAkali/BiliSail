@@ -42,6 +42,10 @@ void main() {
   });
   test('defaults mirror UWP and immutable caller bindings', () {
     const defaults = ShortcutSettings.defaults();
+    expect(defaults.holdRate, 2);
+    expect(ShortcutSettings().holdRate, 2);
+    expect(ShortcutSettings.fromJson(null).holdRate, 2);
+    expect(ShortcutSettings.fromJson({}).holdRate, 2);
     expect(defaults.actionFor('F11'), ShortcutAction.fullscreen);
     expect(defaults.actionFor('Ctrl+T'), ShortcutAction.newTab);
     final keys = ['Ctrl+K'];
@@ -96,7 +100,7 @@ void main() {
     });
     expect(restored.actionFor('Space'), isNull);
     expect(restored.issues, isNotEmpty);
-    expect(restored.holdRate, 3);
+    expect(restored.holdRate, 2);
     expect(restored.seekSeconds, 1);
     expect(ShortcutSettings.canonicalKey(' shift+ctrl+k '), 'Ctrl+Shift+K');
   });

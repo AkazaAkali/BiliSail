@@ -1762,7 +1762,7 @@ void main() {
           expect(engine.currentSnapshot.rate, 2);
           await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
           await tester.pump(const Duration(milliseconds: 450));
-          expect(engine.currentSnapshot.rate, 3);
+          expect(engine.currentSnapshot.rate, 2);
           await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
           await _pumpFrames(tester);
           expect(engine.currentSnapshot.rate, 2);
@@ -2587,7 +2587,7 @@ void main() {
           await session.setRate(1.5);
           final gesture = await tester.startGesture(_surfacePoint(tester));
           await tester.pump(Duration(milliseconds: started ? 450 : 150));
-          expect(engine.currentSnapshot.rate, started ? 3 : 1.5);
+          expect(engine.currentSnapshot.rate, started ? 2 : 1.5);
           switch (cancel) {
             case 'pointer':
               await gesture.cancel();
@@ -2663,7 +2663,7 @@ void main() {
           await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
         }
         await tester.pump(const Duration(milliseconds: 450));
-        expect(engine.currentSnapshot.rate, 3);
+        expect(engine.currentSnapshot.rate, 2);
         if (touchFirst) {
           await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
           await touch.up();
@@ -2672,7 +2672,7 @@ void main() {
           await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
         }
         await tester.pump(const Duration(milliseconds: 450));
-        expect(engine.currentSnapshot.rate, 3);
+        expect(engine.currentSnapshot.rate, 2);
         if (touchFirst) {
           await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
         } else {
@@ -3744,14 +3744,14 @@ void main() {
       await session.setRate(1.5);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
       await tester.pump(const Duration(milliseconds: 450));
-      expect(engine.currentSnapshot.rate, 3);
+      expect(engine.currentSnapshot.rate, 2);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
       await _pumpFrames(tester);
       expect(engine.currentSnapshot.rate, 1.5);
       expect(engine.currentSnapshot.position, const Duration(seconds: 3));
       await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
       await tester.pump(const Duration(milliseconds: 450));
-      expect(engine.currentSnapshot.rate, 3);
+      expect(engine.currentSnapshot.rate, 2);
       await tester.tap(find.byKey(const Key('search-field')));
       await _pumpFrames(tester);
       expect(engine.currentSnapshot.rate, 1.5);

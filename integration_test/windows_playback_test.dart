@@ -836,7 +836,7 @@ void main() {
         await _until(tester, () => engine.currentSnapshot.rate == 1.5);
         final pausedPosition = engine.currentSnapshot.position;
         await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
-        await _until(tester, () => engine.currentSnapshot.rate == 3);
+        await _until(tester, () => engine.currentSnapshot.rate == 2);
         await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
         await _until(tester, () => engine.currentSnapshot.rate == 1.5);
         expect(engine.currentSnapshot.phase, PlaybackPhase.paused);
@@ -855,10 +855,10 @@ void main() {
           await _until(
             tester,
             () =>
-                engine.currentSnapshot.rate == 3 &&
-                find.text('长按倍速 3.0x').evaluate().isNotEmpty,
+                engine.currentSnapshot.rate == 2 &&
+                find.text('长按倍速 2.0x').evaluate().isNotEmpty,
           );
-          expect(find.text('长按倍速 3.0x'), findsOneWidget);
+          expect(find.text('长按倍速 2.0x'), findsOneWidget);
           if (cancel) {
             await gesture.cancel();
           } else {
