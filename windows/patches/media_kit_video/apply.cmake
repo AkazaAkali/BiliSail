@@ -22,14 +22,17 @@ function(bilisail_patch_video_sources source output)
     message(FATAL_ERROR "media_kit_video patch requires a separate build directory")
   endif()
   set(files video_output.h video_output.cc video_output_manager.h
-    video_output_manager.cc media_kit_video_plugin.cc)
+    video_output_manager.cc media_kit_video_plugin.cc
+    angle_surface_manager.h angle_surface_manager.cc)
   set(hashes
     e276c8b80e9e117d60713b3b25b12ddb0df1878a2c076fe946847ac7eec7c17a
     198cb59a97070b61df5ee8ae35ac3e0bc344f3174f6e4aaf7b77e7357d606548
     42228d0f1bb2cb99cf31a3b12422d4246207ad227298c723744a1806f1ebfc65
     bfdd46d2bf19094af5b912f6ac922d91f41fd3b3e6202a11a9c2012ce59461be
-    00ecd361cd61791bf4cb9c6beb84f82614ef5788dcb1ae51e70c66d347a080a0)
-  foreach(index RANGE 0 4)
+    00ecd361cd61791bf4cb9c6beb84f82614ef5788dcb1ae51e70c66d347a080a0
+    3c7f24a94a8f7e8b551877142ea12b92d1543d4f8384370d55c3b5147eefe6ef
+    04eadbea88ce1d825a732c8ea96f9557bb19c275330f4abf7836950e7efd2e2a)
+  foreach(index RANGE 0 6)
     list(GET files ${index} file)
     list(GET hashes ${index} expected)
     file(SHA256 "${source}/${file}" actual)
@@ -42,9 +45,55 @@ function(bilisail_patch_video_sources source output)
     configure_file("${source}/${file}" "${output}/${file}" COPYONLY)
   endforeach()
   foreach(file video_output_dispose.inc video_output_manager_dispose.inc
-    video_output_dimensions.inc video_output_viewport.inc)
+    video_output_dimensions.inc video_output_viewport.inc angle_gpu_queue.inc)
     configure_file("${BILISAIL_VIDEO_PATCH_DIR}/${file}" "${output}/${file}" COPYONLY)
   endforeach()
+
+  bilisail_replace_once("${output}/angle_surface_manager.h" "#include <d3d11.h>"
+    "#include <d3d11.h>\n#include <d3d10.h>\n#include <optional>")
+  bilisail_replace_once("${output}/angle_surface_manager.h" "  void Read();"
+    "  HANDLE Read();")
+  bilisail_replace_once("${output}/angle_surface_manager.h" "  bool CreateD3DTexture();"
+    "  bool CreateD3DTexture();\n  bool UseAngleDevice();")
+  bilisail_replace_once("${output}/angle_surface_manager.h"
+    "  ID3D11Device* d3d_11_device_ = nullptr;"
+    "  bool uses_angle_device_ = false;\n  uint64_t draw_revision_ = 0;\n  std::optional<uint64_t> copied_revision_;\n  std::optional<bool> last_direct_;\n  ID3D11Device* d3d_11_device_ = nullptr;")
+  file(READ "${output}/angle_surface_manager.cc" angle_text)
+  string(FIND "${angle_text}" "void ANGLESurfaceManager::Draw(" angle_begin)
+  string(FIND "${angle_text}" "void ANGLESurfaceManager::MakeCurrent(" angle_end)
+  math(EXPR angle_count "${angle_end} - ${angle_begin}")
+  string(SUBSTRING "${angle_text}" ${angle_begin} ${angle_count} angle_old)
+  bilisail_replace_once("${output}/angle_surface_manager.cc" "${angle_old}"
+    "#include \"angle_gpu_queue.inc\"\n\n")
+  bilisail_replace_once("${output}/angle_surface_manager.cc" [=[void ANGLESurfaceManager::SwapBuffers() {
+  glFinish();
+}
+
+]=] "")
+  bilisail_replace_once("${output}/angle_surface_manager.cc" [=[  if (!CreateD3DTexture()) {
+    throw std::runtime_error("Unable to create Windows Direct3D device.");
+    return;
+  }
+  if (!CreateEGLDisplay()) {
+    throw std::runtime_error("Unable to create ANGLE EGL display.");
+    return;
+  }]=] [=[  if (!CreateEGLDisplay()) {
+    throw std::runtime_error("Unable to create ANGLE EGL display.");
+  }
+  if (!CreateD3DTexture()) {
+    throw std::runtime_error("Unable to create Windows Direct3D device.");
+  }]=])
+  bilisail_replace_once("${output}/angle_surface_manager.cc"
+    "  if (d3d_11_device_ == nullptr) {"
+    "  if (d3d_11_device_ == nullptr) UseAngleDevice();\n  copied_revision_.reset();\n  if (d3d_11_device_ == nullptr) {")
+  bilisail_replace_once("${output}/angle_surface_manager.cc" [=[    if (instance_count_ == 1) {
+      eglTerminate(display_);
+    }]=] [=[    // EGL's default display can also belong to Flutter. Contexts and surfaces
+    // are released above; do not terminate another component's live display.]=])
+  bilisail_replace_once("${output}/video_output.cc" [=[                surface_manager_->Read();
+                return textures_.at(texture_id_).get();]=] [=[                auto* descriptor = textures_.at(texture_id_).get();
+                descriptor->handle = surface_manager_->Read();
+                return descriptor;]=])
 
   bilisail_replace_once("${output}/video_output.h" "#include <optional>"
     "#include <optional>\n#include <atomic>\n#include <cmath>\n#include <condition_variable>\n#include <utility>")

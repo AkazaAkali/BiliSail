@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -21,6 +23,8 @@ final class _DanmakuOverlayState extends State<DanmakuOverlay>
     with SingleTickerProviderStateMixin {
   late final Ticker _ticker;
   final ValueNotifier<int> _repaint = ValueNotifier(0);
+  Timer? _arrivalWake;
+  bool _paintedContent = false;
 
   @override
   void initState() {
@@ -30,6 +34,7 @@ final class _DanmakuOverlayState extends State<DanmakuOverlay>
         _repaint.value++;
       } else {
         _ticker.stop();
+        _scheduleArrival();
       }
     });
     widget.controller.addListener(_onControllerChanged);
@@ -37,12 +42,30 @@ final class _DanmakuOverlayState extends State<DanmakuOverlay>
   }
 
   void _onControllerChanged() {
+    _arrivalWake?.cancel();
     if (widget.controller.needsFrame) {
       if (!_ticker.isActive) _ticker.start();
     } else {
       _ticker.stop();
     }
-    _repaint.value++;
+    // Clock confirmations can retime the one-shot arrival without repainting
+    // an empty layer. Keep the clearing frame after visible content is removed.
+    if (widget.controller.needsFrame ||
+        widget.controller.visibleCount > 0 ||
+        _paintedContent) {
+      _repaint.value++;
+    }
+    _scheduleArrival();
+  }
+
+  void _scheduleArrival() {
+    _arrivalWake?.cancel();
+    final delay = widget.controller.nextFrameDelay;
+    if (delay != null) {
+      _arrivalWake = Timer(delay, () {
+        if (mounted) _onControllerChanged();
+      });
+    }
   }
 
   @override
@@ -57,6 +80,7 @@ final class _DanmakuOverlayState extends State<DanmakuOverlay>
 
   @override
   void dispose() {
+    _arrivalWake?.cancel();
     widget.controller.removeListener(_onControllerChanged);
     _ticker.dispose();
     _repaint.dispose();
@@ -82,9 +106,10 @@ final class _DanmakuOverlayState extends State<DanmakuOverlay>
           child: CustomPaint(
             painter: _DanmakuPainter(
               widget.controller,
-              Listenable.merge([widget.controller, _repaint]),
+              _repaint,
               MediaQuery.maybeDevicePixelRatioOf(context) ??
                   View.of(context).devicePixelRatio,
+              (visible) => _paintedContent = visible,
             ),
             size: Size.infinite,
           ),
@@ -95,15 +120,21 @@ final class _DanmakuOverlayState extends State<DanmakuOverlay>
 }
 
 final class _DanmakuPainter extends CustomPainter {
-  _DanmakuPainter(this.controller, Listenable repaint, this.pixelRatio)
-    : super(repaint: repaint);
+  _DanmakuPainter(
+    this.controller,
+    Listenable repaint,
+    this.pixelRatio,
+    this.onPainted,
+  ) : super(repaint: repaint);
   final DanmakuController controller;
   final double pixelRatio;
+  final void Function(bool visible) onPainted;
 
   @override
   void paint(Canvas canvas, Size size) {
     canvas.clipRect(Offset.zero & size);
-    for (final placement in controller.frame()) {
+    final placements = controller.frame();
+    for (final placement in placements) {
       controller.paintText(
         placement.event,
         canvas,
@@ -111,6 +142,7 @@ final class _DanmakuPainter extends CustomPainter {
         pixelRatio: pixelRatio,
       );
     }
+    onPainted(placements.isNotEmpty);
   }
 
   @override

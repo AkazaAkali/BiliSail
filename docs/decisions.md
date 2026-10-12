@@ -329,3 +329,11 @@ FRB 支持跨平台是可行性依据，但平台构建、取消、错误和流�
 **原生选择**：当前 Windows mpv 不提供所需 FFmpeg `volume` 滤镜及新 `volume-gain` 属性，采用现有 `replaygain=no`／`replaygain-fallback`，写后读回确认，切换以有界短时平滑完成。不更换二进制或增加运行时依赖。
 
 **验证边界**：UGC 在线元数据、UGC／PGC 本机分轨会话及工程回归见 [播放器音量均衡](validation/audio-normalization.md)。抽查的公开影视未返回响度数据，按缺失降级；Android／macOS 原生行为及极端素材听感仍待验证。
+
+## D41：Windows 硬解使用已修复的图形互操作并按 GPU 设备交付
+
+**决定（2026-10-13）**：Windows x64 单独固定带 ANGLE 扩展检查修复的 LGPL libmpv 构建，继续使用 `media_kit` 的自动／软件解码选择与既有 PlayerEngine/VideoSurface 契约。不强制所有硬件支持 D3D11，不修改 Android/macOS native 库或 Pub 缓存。
+
+**交付与生命周期**：原生输出借用 ANGLE D3D11 device，让绘制和必要复制共享即时上下文，以有序提交替代每帧 CPU 等待 GPU。仅在确认消费者为同一设备时直接共享；其他情况保留独立复制纹理，按 draw revision 避免重复复制。保留窗口视口上限、队列公平性、旧纹理注销与 render-context 销毁屏障，不终止其他组件共用的 EGL display。
+
+**弹幕与测量**：空／未来事件窗口不连续重绘；到期事件在既有有界插值范围内由单次唤醒触发，暂停、缓冲、seek、换控制器与 dispose 取消或重新锚定。GPU 比较固定素材、物理输出尺寸、解码器实值及进程/适配器，同时记录频率与功耗，不把百分比降低写成全平台或固定收益。来源、测试、前后数据与未测项见 [Windows GPU 优化结果](validation/windows-gpu-optimization-2026-10-13.md)。

@@ -35,13 +35,13 @@ Windows MSI/EXE 打包使用固定 [WiX Toolset 6.0.2](https://github.com/wixtoo
 
 新增外部内容入口采用固定的 [url_launcher 6.3.2](https://pub.dev/packages/url_launcher/versions/6.3.2)，由 Flutter 团队维护，BSD-3-Clause。Android、Windows、macOS 的平台实现随根锁文件固定；插件调用系统 URL 打开能力，不增加媒体解码二进制。仅在用户点击明确的“在浏览器打开”内容入口后打开 Bilibili HTTPS 页面，不向外部浏览器传递应用 Cookie。
 
-当前锁文件解析 `media_kit_libs_windows_video 1.0.11`。本机成功下载并校验：
+当前锁文件解析 `media_kit_libs_windows_video 1.0.11`。SDK 默认资产本机成功下载并校验：
 
 | 资产 | 固定来源 | 已核对 MD5 |
 | --- | --- | --- |
 | mpv/FFmpeg 组合 DLL | [libmpv-win32-video-build 2023-09-24](https://github.com/media-kit/libmpv-win32-video-build/releases/tag/2023-09-24)，`mpv-dev-x86_64-20230924-git-652a1dd.7z` | `a832ef24b3a6ff97cd2560b5b9d04cd8` |
 | ANGLE DLL | [flutter-windows-ANGLE-OpenGL-ES v1.0.1](https://github.com/alexmercerind/flutter-windows-ANGLE-OpenGL-ES/releases/tag/v1.0.1)，`ANGLE.7z` | `e866f13e8d552348058afaafe869b1ed` |
 
-校验值来自插件构建脚本，并与本地下载文件重新计算结果一致；它们用于记录上游固定资产的一致性。当前 Windows native 资产较旧，对外发行前需要重新评估维护状态、编解码组件、修复版本以及相应源码/许可材料。
+上述 MD5 记录 SDK 默认下载内容的一致性。2026-10-13 Windows x64 的实际 bundle 改用固定 LGPL 构建 `mpv-dev-lgpl-x86_64-20261012-git-88eb9f2e73.7z`，修复旧版 ANGLE 硬解扩展检查并避免回读；ANGLE 默认资产保持。归档 SHA-256 为 `d1a3f57dfb3c7f07e5456e32e9ecc9e406f6457f2560ff5801c9b37a8036f507`，DLL SHA-256 为 `222da57d12a47680df84a8d0ad06f713fbbce4da923784ddeebe9d666135e943`，构建时分别校验。来源、实际 `gpl=false` 配置、对应 mpv 源码/构建记录及 LGPL-2.1-or-later 许可见 [Windows 原生资产](windows/native/mpv/SOURCE.md)，许可和来源说明随 bundle 保留于 `data/licenses/mpv`。公开发行仍需完整归档其子依赖的源码与许可材料。
 
 media_kit 的 Dart 包许可不能替代 mpv、FFmpeg、ANGLE 和其子依赖的分发条件。当前仅生成用户本机可运行预览，尚未对外发布、签名或宣称许可审核完成。Android/macOS 原生来源及预期校验在 [媒体包验证](docs/validation/media-packages.md)；未构建下载的资产不能记为已校验。

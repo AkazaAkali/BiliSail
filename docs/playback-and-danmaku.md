@@ -47,6 +47,8 @@
 
 `media_kit` 文档列出了三端、外部音轨、字幕和 HTTP headers 等能力，适合作为首选；这些能力组合后的行为仍需项目验证。[media_kit](https://pub.dev/packages/media_kit)
 
+2026-10-13 Windows x64 使用固定、已修复 ANGLE 扩展检查的 LGPL libmpv 构建，本机 H.264/HEVC/AV1 自动解码实值为 `d3d11va`。输出借用 ANGLE D3D11 device，使绘制和必要复制在同一即时上下文有序提交，以 `glFlush` 代替每帧 CPU 等待；明确相同消费者设备才直接共享，否则保留保护性复制。空点播弹幕不连续刷新，未来事件在有界插值内单次唤醒，播放时钟和暂停/seek 语义保留。前后 GPU 数据、原生回归、Release 构建与未测边界见 [Windows GPU 优化结果](validation/windows-gpu-optimization-2026-10-13.md)。
+
 ## 2. 通用播放契约
 
 以下为完整目标契约示意；实际公共接口见 `packages/bili_player/lib/bili_player.dart`，现有 DASH/progressive 和 manifest 源；Windows 已验证点播分轨、直播 HLS/FLV。字幕由应用解析并叠加，尚未开放 native 字幕选择和离线源。本轮三类页面及未测项见 [影视与直播内置播放](validation/content-playback.md)：

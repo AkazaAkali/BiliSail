@@ -177,12 +177,35 @@ final class DanmakuController extends ChangeNotifier {
       _now() - _anchorTime < maxInterpolation;
 
   /// Finish bounded admission after a paused seek without advancing either clock.
-  bool get needsFrame =>
-      isAnimating ||
+  bool get needsFrame => (isAnimating && _active.isNotEmpty) || _hasDueEvents;
+
+  bool get _hasDueEvents =>
       (_width > 0 &&
-          _height > 0 &&
-          _next < _events.length &&
-          _events[_next].at <= _displayPosition);
+      _height > 0 &&
+      _next < _events.length &&
+      _events[_next].at <= _displayPosition);
+
+  /// Wake an idle overlay once at the next arrival between confirmed samples.
+  /// Never extrapolate beyond the existing bounded interpolation window.
+  Duration? get nextFrameDelay {
+    if (!isAnimating ||
+        _active.isNotEmpty ||
+        _hasDueEvents ||
+        _width <= 0 ||
+        _height <= 0 ||
+        _next >= _events.length) {
+      return null;
+    }
+    final delayMicros =
+        (_events[_next].at - _displayPosition).inMicroseconds / _rate;
+    final remaining = maxInterpolation - (_now() - _anchorTime);
+    if (!delayMicros.isFinite ||
+        delayMicros <= 0 ||
+        delayMicros >= remaining.inMicroseconds) {
+      return null;
+    }
+    return Duration(microseconds: delayMicros.ceil());
+  }
 
   Duration _elapsed(Duration now) {
     if (!_playing || _buffering || _seeking) return Duration.zero;
