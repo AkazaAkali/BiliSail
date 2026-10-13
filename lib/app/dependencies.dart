@@ -162,6 +162,8 @@ class AppDependencies {
       database,
       defaultNavigationMode: defaultWorkspaceNavigationMode,
       defaultHighEnergyProgressEnabled: defaultHighEnergyProgressEnabled,
+      defaultDanmakuArea: defaultDanmakuArea,
+      defaultDanmakuFontScale: defaultDanmakuFontScale,
     );
     Future<MediaCdnPreference> cdnPreference() async =>
         (await settings.load()).mediaCdn;

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 
+import 'danmaku_frame_driver.dart';
 import 'live_danmaku_controller.dart';
 
 final class LiveDanmakuOverlay extends StatefulWidget {
@@ -15,48 +15,46 @@ final class LiveDanmakuOverlay extends StatefulWidget {
   State<LiveDanmakuOverlay> createState() => _LiveDanmakuOverlayState();
 }
 
-final class _LiveDanmakuOverlayState extends State<LiveDanmakuOverlay>
-    with SingleTickerProviderStateMixin {
-  late final Ticker _ticker;
-  final ValueNotifier<int> _repaint = ValueNotifier(0);
+final class _LiveDanmakuOverlayState extends State<LiveDanmakuOverlay> {
+  late DanmakuFrameDriver<LiveDanmakuPlacement> _driver;
   @override
   void initState() {
     super.initState();
-    _ticker = createTicker((_) {
-      if (widget.controller.isAnimating) {
-        _repaint.value++;
-      } else {
-        _ticker.stop();
-      }
-    });
-    widget.controller.addListener(_changed);
-    _changed();
+    _driver = _createDriver();
   }
 
-  void _changed() {
-    if (widget.controller.isAnimating) {
-      if (!_ticker.isActive) _ticker.start();
-    } else {
-      _ticker.stop();
-    }
-    _repaint.value++;
+  DanmakuFrameDriver<LiveDanmakuPlacement> _createDriver() {
+    final controller = widget.controller;
+    return DanmakuFrameDriver(
+      controller: controller,
+      readFrame: controller.frame,
+      needsFrame: () => controller.needsFrame,
+      nextFrameDelay: () => controller.nextFrameDelay,
+      appearance: () => controller.textStyle,
+      equivalent: (a, b) =>
+          identical(a.event, b.event) && a.x == b.x && a.y == b.y,
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _driver.setEnabled(TickerMode.valuesOf(context).enabled);
   }
 
   @override
   void didUpdateWidget(covariant LiveDanmakuOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(widget.controller, oldWidget.controller)) {
-      oldWidget.controller.removeListener(_changed);
-      widget.controller.addListener(_changed);
-      _changed();
+      _driver.dispose();
+      _driver = _createDriver()
+        ..setEnabled(TickerMode.valuesOf(context).enabled);
     }
   }
 
   @override
   void dispose() {
-    widget.controller.removeListener(_changed);
-    _ticker.dispose();
-    _repaint.dispose();
+    _driver.dispose();
     super.dispose();
   }
 
@@ -79,7 +77,7 @@ final class _LiveDanmakuOverlayState extends State<LiveDanmakuOverlay>
           child: CustomPaint(
             painter: _LivePainter(
               widget.controller,
-              Listenable.merge([widget.controller, _repaint]),
+              _driver,
               MediaQuery.maybeDevicePixelRatioOf(context) ??
                   View.of(context).devicePixelRatio,
             ),
@@ -92,14 +90,15 @@ final class _LiveDanmakuOverlayState extends State<LiveDanmakuOverlay>
 }
 
 final class _LivePainter extends CustomPainter {
-  _LivePainter(this.controller, Listenable repaint, this.pixelRatio)
-    : super(repaint: repaint);
+  _LivePainter(this.controller, this.driver, this.pixelRatio)
+    : super(repaint: driver);
   final LiveDanmakuController controller;
+  final DanmakuFrameDriver<LiveDanmakuPlacement> driver;
   final double pixelRatio;
   @override
   void paint(Canvas canvas, Size size) {
     canvas.clipRect(Offset.zero & size);
-    for (final item in controller.frame()) {
+    for (final item in driver.frame) {
       controller.paintText(
         item.event,
         canvas,
@@ -112,5 +111,6 @@ final class _LivePainter extends CustomPainter {
   @override
   bool shouldRepaint(_LivePainter oldDelegate) =>
       !identical(controller, oldDelegate.controller) ||
+      !identical(driver, oldDelegate.driver) ||
       pixelRatio != oldDelegate.pixelRatio;
 }

@@ -21,6 +21,11 @@
 | [首页推荐与三类播放性能热点](validation/performance-hotspots-2026-10-11.md) | 当前源码定位、图片／播放器／影视／直播结构探针、优化优先级与验收方案 |
 | [Windows 播放器与网页 GPU 对照分析](validation/windows-player-gpu-analysis-2026-10-12.md) | copy-back、ANGLE／纹理复制、空弹幕调度、纯视频 GPU 实测与优化顺序 |
 | [Windows GPU 优化结果](validation/windows-gpu-optimization-2026-10-13.md) | 非 copy-back 硬解、GPU 有序提交、空弹幕单次唤醒与同素材前后实测 |
+| [Windows 弹幕 GPU 对照](validation/windows-danmaku-gpu-analysis-2026-10-13.md) | 弹幕密度、固定文字、合成帧率与同素材测量边界 |
+| [官方弹幕合成检查](validation/official-danmaku-composition-2026-10-13.md) | 官网 DOM、图层和录制行为的参考证据 |
+| [真实首页视频 GPU 复测](validation/windows-real-video-gpu-2026-10-13.md) | 正式播放页面、真实弹幕、持久偏好与完整采样 |
+| [弹幕高刷合成修复](validation/danmaku-frame-cadence-2026-10-13.md) | 共用有界帧驱动、固定项单次唤醒和高刷回归 |
+| [倍速 seek 供帧缓冲实验](validation/video-frame-queue-experiment-2026-10-13.md) | 构建开关、小容量解码帧队列、Windows 原生兼容性及手动对照方法 |
 | [性能热点第一批优化结果](validation/performance-hotspots-results-2026-10-11.md) | 九项 P1 的图片任务、局部订阅、弹幕窗口、影视懒创建修复与验证边界 |
 | [性能热点 P2 优化结果](validation/performance-p2-results-2026-10-11.md) | 图片连接复用、分页索引、启动并发、字幕与评论、影视缓存／解码、直播对账及待实机测量项 |
 | [连续播放与下一集](validation/continuous-playback.md) | 分 P／合集／影视顺序、完播推进、设置持久化与全屏控件 |

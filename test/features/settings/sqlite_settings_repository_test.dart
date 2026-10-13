@@ -15,6 +15,60 @@ void main() {
     repository = SqliteSettingsRepository(database);
   });
   tearDown(() => database.close());
+  for (final defaults in [
+    (area: .5, fontScale: .6),
+    (area: .75, fontScale: 1.0),
+  ]) {
+    group('danmaku defaults $defaults', () {
+      setUp(() {
+        repository = SqliteSettingsRepository(
+          database,
+          defaultDanmakuArea: defaults.area,
+          defaultDanmakuFontScale: defaults.fontScale,
+        );
+      });
+      test('empty settings use platform defaults', () async {
+        final loaded = await repository.load();
+        expect(loaded.danmakuArea, defaults.area);
+        expect(loaded.danmakuFontScale, defaults.fontScale);
+      });
+      test('missing and invalid fields use platform defaults', () async {
+        for (final snapshot in [
+          '{"theme":"dark"}',
+          for (final invalid in ['null', '"invalid"', 'true', '1e999'])
+            '{"theme":"dark","danmakuArea":$invalid,'
+                '"danmakuFontScale":$invalid}',
+        ]) {
+          await database.writeSetting('preferences.v1', snapshot);
+          final loaded = await repository.load();
+          expect(loaded.danmakuArea, defaults.area);
+          expect(loaded.danmakuFontScale, defaults.fontScale);
+          expect(loaded.theme, AppThemePreference.dark);
+        }
+      });
+      test(
+        'saved values survive reload regardless of platform defaults',
+        () async {
+          for (final chosen in [
+            (area: .75, fontScale: 1.0),
+            (area: 1.0, fontScale: .2),
+          ]) {
+            await repository.save(
+              AppSettings(
+                danmakuArea: chosen.area,
+                danmakuFontScale: chosen.fontScale,
+                theme: AppThemePreference.dark,
+              ),
+            );
+            final loaded = await repository.load();
+            expect(loaded.danmakuArea, chosen.area);
+            expect(loaded.danmakuFontScale, chosen.fontScale);
+            expect(loaded.theme, AppThemePreference.dark);
+          }
+        },
+      );
+    });
+  }
   test(
     'high energy platform fallback migrates and explicit preferences win',
     () async {

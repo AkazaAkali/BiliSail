@@ -49,6 +49,8 @@
 
 2026-10-13 Windows x64 使用固定、已修复 ANGLE 扩展检查的 LGPL libmpv 构建，本机 H.264/HEVC/AV1 自动解码实值为 `d3d11va`。输出借用 ANGLE D3D11 device，使绘制和必要复制在同一即时上下文有序提交，以 `glFlush` 代替每帧 CPU 等待；明确相同消费者设备才直接共享，否则保留保护性复制。空点播弹幕不连续刷新，未来事件在有界插值内单次唤醒，播放时钟和暂停/seek 语义保留。前后 GPU 数据、原生回归、Release 构建与未测边界见 [Windows GPU 优化结果](validation/windows-gpu-optimization-2026-10-13.md)。
 
+同日增加 `BILISAIL_VIDEO_FRAME_QUEUE` 构建实验，后续按用户要求改为 Android 默认开启、macOS 和 Windows 默认关闭，显式构建参数可覆盖默认值：DASH 播放可额外启用 8 帧／100 毫秒媒体时间／64 MiB 的解码队列，保留当前解码选择与 seek 策略。硬解兼容性和跳转后掉帧改善须另行实测；容量与启用方法见 [供帧缓冲实验](validation/video-frame-queue-experiment-2026-10-13.md)。
+
 ## 2. 通用播放契约
 
 以下为完整目标契约示意；实际公共接口见 `packages/bili_player/lib/bili_player.dart`，现有 DASH/progressive 和 manifest 源；Windows 已验证点播分轨、直播 HLS/FLV。字幕由应用解析并叠加，尚未开放 native 字幕选择和离线源。本轮三类页面及未测项见 [影视与直播内置播放](validation/content-playback.md)：

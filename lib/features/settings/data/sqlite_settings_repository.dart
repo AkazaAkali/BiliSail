@@ -10,10 +10,14 @@ class SqliteSettingsRepository implements SettingsRepository {
     this.database, {
     this.defaultNavigationMode = WorkspaceNavigationMode.multipleTabs,
     this.defaultHighEnergyProgressEnabled = false,
+    this.defaultDanmakuArea = 0.75,
+    this.defaultDanmakuFontScale = 1.0,
   });
   final AppDatabase database;
   final WorkspaceNavigationMode defaultNavigationMode;
   final bool defaultHighEnergyProgressEnabled;
+  final double defaultDanmakuArea;
+  final double defaultDanmakuFontScale;
   @override
   Future<AppSettings> load() async {
     final value = await database.readSetting('preferences.v1');
@@ -21,6 +25,8 @@ class SqliteSettingsRepository implements SettingsRepository {
       return AppSettings.defaults(
         navigationMode: defaultNavigationMode,
         highEnergyProgressEnabled: defaultHighEnergyProgressEnabled,
+        danmakuArea: defaultDanmakuArea,
+        danmakuFontScale: defaultDanmakuFontScale,
       );
     }
     final Object? decoded = jsonDecode(value);
@@ -39,6 +45,11 @@ class SqliteSettingsRepository implements SettingsRepository {
       return value is List ? value.whereType<String>().toList() : fallback;
     }
 
+    final danmakuArea = number('danmakuArea', defaultDanmakuArea);
+    final danmakuFontScale = number(
+      'danmakuFontScale',
+      defaultDanmakuFontScale,
+    );
     return AppSettings(
       navigationMode:
           WorkspaceNavigationMode.values
@@ -66,7 +77,9 @@ class SqliteSettingsRepository implements SettingsRepository {
           AppThemePreference.system,
       danmakuEnabled: boolean('danmakuEnabled', true),
       danmakuOpacity: number('danmakuOpacity', 0.8),
-      danmakuFontScale: number('danmakuFontScale', 1.0),
+      danmakuFontScale: danmakuFontScale.isFinite
+          ? danmakuFontScale
+          : defaultDanmakuFontScale,
       autoPlay: boolean('autoPlay', true),
       continuousPlayback: boolean('continuousPlayback', false),
       resumePlayback: boolean('resumePlayback', true),
@@ -109,7 +122,7 @@ class SqliteSettingsRepository implements SettingsRepository {
               .where((item) => item.name == decoded['audioNormalization'])
               .firstOrNull ??
           AudioNormalizationMode.off,
-      danmakuArea: number('danmakuArea', 0.75),
+      danmakuArea: danmakuArea.isFinite ? danmakuArea : defaultDanmakuArea,
       danmakuTopMargin: number('danmakuTopMargin', 0),
       danmakuLineSpacing: number('danmakuLineSpacing', 5),
       danmakuSpeed: number('danmakuSpeed', 1.0),

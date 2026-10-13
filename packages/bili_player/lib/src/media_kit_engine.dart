@@ -14,6 +14,7 @@ import 'native_media_options.dart';
 import 'native_error_monitor.dart';
 import 'native_load_observer.dart';
 import 'native_audio_gain.dart';
+import 'native_video_frame_queue.dart';
 import 'video_dimensions.dart';
 
 /// Call at application startup before creating an engine.
@@ -27,7 +28,11 @@ final class MediaKitEngine
         VideoSurfaceSource,
         VideoViewportSource,
         AudioGainControl {
-  MediaKitEngine({this.onDiagnostic}) {
+  MediaKitEngine({this.onDiagnostic, bool? experimentalVideoFrameQueue})
+    : experimentalVideoFrameQueue = resolveVideoFrameQueueEnabled(
+        isAndroid: Platform.isAndroid,
+        enabledOverride: experimentalVideoFrameQueue,
+      ) {
     _nativeErrors = NativeErrorMonitor(
       onStalled: (generation) => _fail(
         PlayerFailure(
@@ -41,6 +46,15 @@ final class MediaKitEngine
   }
 
   final void Function(PlayerDiagnosticEvent)? onDiagnostic;
+
+  /// DASH frame queue, Android-on / desktop-off unless explicitly overridden.
+  /// Keeps the selected decoder; hardware-decoder compatibility is experimental.
+  final bool experimentalVideoFrameQueue;
+  bool _videoFrameQueueActive = false;
+
+  /// True only after the native queue properties have been read back successfully.
+  /// This reports configuration, not the number of frames currently buffered.
+  bool get videoFrameQueueActive => _videoFrameQueueActive;
   late final NativeErrorMonitor _nativeErrors;
   NativeLoadObserver? _nativeLoad;
 
@@ -622,6 +636,25 @@ final class MediaKitEngine
           watch,
           openBudget,
         );
+        if (experimentalVideoFrameQueue && source is DashPairSource) {
+          if (platform is! mk.NativePlayer) {
+            throw PlayerFailure(
+              PlayerFailureKind.nativePlayback,
+              'The playback backend cannot configure video frame buffering.',
+              generation,
+            );
+          }
+          await configureNativeVideoFrameQueue(
+            write: platform.setProperty,
+            read: platform.getProperty,
+            isCurrent: () =>
+                generation == _generation &&
+                !_disposed &&
+                identical(_player, player),
+            timeout: _remaining(watch, openBudget),
+          );
+          _videoFrameQueueActive = true;
+        }
         if (generation != _generation || _disposed) return;
         // Register the track before loadfile. mpv loads it in its cancellable
         // file-loading worker, instead of holding media_kit's command lock in
@@ -1043,6 +1076,7 @@ final class MediaKitEngine
   }
 
   Future<void> _releasePlayer() async {
+    _videoFrameQueueActive = false;
     final load = _nativeLoad;
     _nativeLoad = null;
     await load?.dispose();

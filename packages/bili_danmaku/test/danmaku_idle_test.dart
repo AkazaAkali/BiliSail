@@ -46,7 +46,12 @@ void main() {
     await tester.pump();
     expect(controller.visibleCount, 1);
     expect(controller.needsFrame, isTrue);
-    expect(tester.binding.hasScheduledFrame, isTrue);
+    // Animation waits for its bounded timer rather than requesting every vsync.
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    final paints = controller.rasterStatistics.imagePaints;
+    now += const Duration(milliseconds: 17);
+    await tester.pump(const Duration(milliseconds: 17));
+    expect(controller.rasterStatistics.imagePaints, greaterThan(paints));
     controller.replaceEvents(const []);
     await tester.pump();
     expect(controller.visibleCount, 0);

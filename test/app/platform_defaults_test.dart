@@ -4,6 +4,17 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('Android uses half-area and smaller danmaku defaults', () {
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    for (final platform in TargetPlatform.values) {
+      debugDefaultTargetPlatformOverride = platform;
+      expect(defaultDanmakuArea, platform == TargetPlatform.android ? .5 : .75);
+      expect(
+        defaultDanmakuFontScale,
+        platform == TargetPlatform.android ? .6 : 1.0,
+      );
+    }
+  });
   test('high energy defaults on only for Windows and macOS', () {
     for (final platform in TargetPlatform.values) {
       expect(

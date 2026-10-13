@@ -24,3 +24,14 @@ bool highEnergyProgressEnabledForPlatform(TargetPlatform platform) =>
 
 bool get defaultHighEnergyProgressEnabled =>
     highEnergyProgressEnabledForPlatform(defaultTargetPlatform);
+
+double danmakuAreaForPlatform(TargetPlatform platform) =>
+    platform == TargetPlatform.android ? .5 : .75;
+
+double get defaultDanmakuArea => danmakuAreaForPlatform(defaultTargetPlatform);
+
+double danmakuFontScaleForPlatform(TargetPlatform platform) =>
+    platform == TargetPlatform.android ? .6 : 1.0;
+
+double get defaultDanmakuFontScale =>
+    danmakuFontScaleForPlatform(defaultTargetPlatform);

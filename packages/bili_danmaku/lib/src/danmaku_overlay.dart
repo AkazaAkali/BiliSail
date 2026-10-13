@@ -1,11 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 
 import 'danmaku_controller.dart';
+import 'danmaku_frame_driver.dart';
 
-/// A single ticker repaints only this layer; no per-comment animation widgets.
+/// One bounded frame driver repaints this layer when placements change.
 final class DanmakuOverlay extends StatefulWidget {
   const DanmakuOverlay({
     super.key,
@@ -19,71 +17,47 @@ final class DanmakuOverlay extends StatefulWidget {
   State<DanmakuOverlay> createState() => _DanmakuOverlayState();
 }
 
-final class _DanmakuOverlayState extends State<DanmakuOverlay>
-    with SingleTickerProviderStateMixin {
-  late final Ticker _ticker;
-  final ValueNotifier<int> _repaint = ValueNotifier(0);
-  Timer? _arrivalWake;
-  bool _paintedContent = false;
+final class _DanmakuOverlayState extends State<DanmakuOverlay> {
+  late DanmakuFrameDriver<DanmakuPlacement> _driver;
 
   @override
   void initState() {
     super.initState();
-    _ticker = createTicker((_) {
-      if (widget.controller.needsFrame) {
-        _repaint.value++;
-      } else {
-        _ticker.stop();
-        _scheduleArrival();
-      }
-    });
-    widget.controller.addListener(_onControllerChanged);
-    _onControllerChanged();
+    _driver = _createDriver();
   }
 
-  void _onControllerChanged() {
-    _arrivalWake?.cancel();
-    if (widget.controller.needsFrame) {
-      if (!_ticker.isActive) _ticker.start();
-    } else {
-      _ticker.stop();
-    }
-    // Clock confirmations can retime the one-shot arrival without repainting
-    // an empty layer. Keep the clearing frame after visible content is removed.
-    if (widget.controller.needsFrame ||
-        widget.controller.visibleCount > 0 ||
-        _paintedContent) {
-      _repaint.value++;
-    }
-    _scheduleArrival();
+  DanmakuFrameDriver<DanmakuPlacement> _createDriver() {
+    final controller = widget.controller;
+    return DanmakuFrameDriver(
+      controller: controller,
+      readFrame: controller.frame,
+      needsFrame: () => controller.needsFrame,
+      nextFrameDelay: () => controller.nextFrameDelay,
+      appearance: () => controller.textStyle,
+      equivalent: (a, b) =>
+          identical(a.event, b.event) && a.x == b.x && a.y == b.y,
+    );
   }
 
-  void _scheduleArrival() {
-    _arrivalWake?.cancel();
-    final delay = widget.controller.nextFrameDelay;
-    if (delay != null) {
-      _arrivalWake = Timer(delay, () {
-        if (mounted) _onControllerChanged();
-      });
-    }
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _driver.setEnabled(TickerMode.valuesOf(context).enabled);
   }
 
   @override
   void didUpdateWidget(covariant DanmakuOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.controller, widget.controller)) {
-      oldWidget.controller.removeListener(_onControllerChanged);
-      widget.controller.addListener(_onControllerChanged);
-      _onControllerChanged();
+      _driver.dispose();
+      _driver = _createDriver()
+        ..setEnabled(TickerMode.valuesOf(context).enabled);
     }
   }
 
   @override
   void dispose() {
-    _arrivalWake?.cancel();
-    widget.controller.removeListener(_onControllerChanged);
-    _ticker.dispose();
-    _repaint.dispose();
+    _driver.dispose();
     super.dispose();
   }
 
@@ -106,10 +80,9 @@ final class _DanmakuOverlayState extends State<DanmakuOverlay>
           child: CustomPaint(
             painter: _DanmakuPainter(
               widget.controller,
-              _repaint,
+              _driver,
               MediaQuery.maybeDevicePixelRatioOf(context) ??
                   View.of(context).devicePixelRatio,
-              (visible) => _paintedContent = visible,
             ),
             size: Size.infinite,
           ),
@@ -120,20 +93,16 @@ final class _DanmakuOverlayState extends State<DanmakuOverlay>
 }
 
 final class _DanmakuPainter extends CustomPainter {
-  _DanmakuPainter(
-    this.controller,
-    Listenable repaint,
-    this.pixelRatio,
-    this.onPainted,
-  ) : super(repaint: repaint);
+  _DanmakuPainter(this.controller, this.driver, this.pixelRatio)
+    : super(repaint: driver);
   final DanmakuController controller;
+  final DanmakuFrameDriver<DanmakuPlacement> driver;
   final double pixelRatio;
-  final void Function(bool visible) onPainted;
 
   @override
   void paint(Canvas canvas, Size size) {
     canvas.clipRect(Offset.zero & size);
-    final placements = controller.frame();
+    final placements = driver.frame;
     for (final placement in placements) {
       controller.paintText(
         placement.event,
@@ -142,11 +111,11 @@ final class _DanmakuPainter extends CustomPainter {
         pixelRatio: pixelRatio,
       );
     }
-    onPainted(placements.isNotEmpty);
   }
 
   @override
   bool shouldRepaint(_DanmakuPainter oldDelegate) =>
       !identical(controller, oldDelegate.controller) ||
+      !identical(driver, oldDelegate.driver) ||
       pixelRatio != oldDelegate.pixelRatio;
 }
