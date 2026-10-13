@@ -2,7 +2,7 @@
 
 日期：2026-10-13。用户补充条件：从首页选择视频、1080p、复用 Release 登录信息，每个场景测量 30 秒。本轮按这些条件使用 **Windows Release**，共用正式 BiliApp、首页 VideoCard、VideoScreen、PlaybackPanel、PlaybackSession、ApiPlaybackRepository 和 DanmakuOverlay。
 
-本文件记录修复前的正式页面基线。后续透明度对照排除了主要的整层透明度猜测，60Hz 按需绘制已实现，结果见[弹幕高刷合成修复](danmaku-frame-cadence-2026-10-13.md)。
+本文件记录随屏幕刷新率运行的 Ticker 的正式页面基线。后续透明度对照排除了主要的整层透明度猜测；60Hz 按需绘制候选已于 2026-10-14 按用户要求撤回，当前恢复 Ticker。历史候选结果与撤回记录见[弹幕高刷合成实验](danmaku-frame-cadence-2026-10-13.md)。
 
 ## 与合成测试不同的条件
 

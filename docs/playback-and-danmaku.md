@@ -51,6 +51,8 @@
 
 同日增加 `BILISAIL_VIDEO_FRAME_QUEUE` 构建实验，后续按用户要求改为 Android 默认开启、macOS 和 Windows 默认关闭，显式构建参数可覆盖默认值：DASH 播放可额外启用 8 帧／100 毫秒媒体时间／64 MiB 的解码队列，保留当前解码选择与 seek 策略。硬解兼容性和跳转后掉帧改善须另行实测；容量与启用方法见 [供帧缓冲实验](validation/video-frame-queue-experiment-2026-10-13.md)。
 
+2026-10-14 按用户要求撤回弹幕 17ms 帧驱动，点播／直播重新使用随屏幕刷新率运行的单一 Ticker，并恢复原控制器和空闲唤醒逻辑。该撤回不改变视频解码供帧队列；历史候选测量见 [弹幕高刷合成实验（已撤回）](validation/danmaku-frame-cadence-2026-10-13.md)。
+
 ## 2. 通用播放契约
 
 以下为完整目标契约示意；实际公共接口见 `packages/bili_player/lib/bili_player.dart`，现有 DASH/progressive 和 manifest 源；Windows 已验证点播分轨、直播 HLS/FLV。字幕由应用解析并叠加，尚未开放 native 字幕选择和离线源。本轮三类页面及未测项见 [影视与直播内置播放](validation/content-playback.md)：

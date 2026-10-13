@@ -48,6 +48,10 @@ flutter build apk --release --target-platform android-arm64 --dart-define=BILISA
 
 随后按用户要求整合全部本地修改以提交远端：已补齐上述弹幕帧驱动的 overlay 接入，`tool/check.ps1 -EnforceLockfile` 完整通过：根应用 1939、API 426、播放器 69、弹幕 100、合流 2，共 2536 项，另 10 项依赖 `BILI_MUX_LIBRARY` 的原生测试按配置跳过。格式／分析通过，五份锁文件没有变化。历史 9 项失败记录对应接入前快照，不代表整合后的状态；完整提交前检查日志为 `artifacts/video-frame-queue/release-check.log`。
 
+2026-10-14 用户要求撤回弹幕帧驱动：点播／直播恢复旧 Ticker 和控制器，移除该实验实现与限频测试。视频解码供帧队列、容量、显式构建覆盖和 Android 默认开启策略保留；上述 2536 项结果对应撤回前快照。
+
+撤回后的 `tool/check.ps1 -SkipPub` 完整通过 2526 项测试，另 10 项合流原生测试按配置跳过；格式与分析通过。日志 `artifacts/video-frame-queue/ticker-restore-check.log`。
+
 手动测试保持同一视频、编码、清晰度、弹幕设置和跳转点，在开／关两次构建中对比 1 倍、2 倍及常用倍速，观察跳转后首秒连续性、恢复时间、音画同步及任务管理器内存／显存。优先在已缓存区域或离线双轨内容上测试，减小网络差异。
 
 Android/macOS 原生运行、高分辨率／高帧率、真实 CDN、资源受压和长时间硬解稳定性未由本地自动测试代替。

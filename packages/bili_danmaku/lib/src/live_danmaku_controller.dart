@@ -85,37 +85,8 @@ final class LiveDanmakuController extends ChangeNotifier {
   int get textLayoutBuildCount => _layouts.buildCount;
   int get textRasterBytes => _layouts.rasterBytes;
   DanmakuRasterStatistics get rasterStatistics => _layouts.rasterStatistics;
-  DanmakuTextStyle get textStyle => _layouts.style;
   bool get isAnimating =>
       _enabled && (_pending.isNotEmpty || _visible.isNotEmpty);
-  bool get needsFrame =>
-      _enabled &&
-      _width > 0 &&
-      _height > 0 &&
-      (_visible.any((item) => item.event.mode == DanmakuMode.scroll) ||
-          (_pending.isNotEmpty && _pending.first.at <= _now()));
-
-  /// Fixed text expires once; delayed arrivals wake at their receipt clock.
-  Duration? get nextFrameDelay {
-    if (!_enabled || _width <= 0 || _height <= 0) return null;
-    final now = _now();
-    Duration? delay;
-    void consider(Duration value) {
-      final previous = delay;
-      if (value > Duration.zero && (previous == null || value < previous)) {
-        delay = value;
-      }
-    }
-
-    if (_pending.isNotEmpty) consider(_pending.first.at - now);
-    for (final item in _visible) {
-      if (item.event.mode != DanmakuMode.scroll) {
-        consider(item.at + fixedDuration - now);
-      }
-    }
-    return delay;
-  }
-
   Duration get _scrollLifetime =>
       Duration(microseconds: (scrollDuration.inMicroseconds / _speed).round());
 

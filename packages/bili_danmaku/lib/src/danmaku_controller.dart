@@ -153,7 +153,6 @@ final class DanmakuController extends ChangeNotifier {
   int get textLayoutBuildCount => _layouts.buildCount;
   int get textRasterBytes => _layouts.rasterBytes;
   DanmakuRasterStatistics get rasterStatistics => _layouts.rasterStatistics;
-  DanmakuTextStyle get textStyle => _layouts.style;
 
   /// Media history needed to rebuild after seeking or refresh visible items.
   Duration get requiredHistory {
@@ -178,10 +177,7 @@ final class DanmakuController extends ChangeNotifier {
       _now() - _anchorTime < maxInterpolation;
 
   /// Finish bounded admission after a paused seek without advancing either clock.
-  bool get needsFrame =>
-      (isAnimating &&
-          _active.any((item) => item.event.mode == DanmakuMode.scroll)) ||
-      _hasDueEvents;
+  bool get needsFrame => (isAnimating && _active.isNotEmpty) || _hasDueEvents;
 
   bool get _hasDueEvents =>
       (_width > 0 &&
@@ -189,36 +185,26 @@ final class DanmakuController extends ChangeNotifier {
       _next < _events.length &&
       _events[_next].at <= _displayPosition);
 
-  /// Wake once for a fixed item's expiry or the next arrival between samples.
+  /// Wake an idle overlay once at the next arrival between confirmed samples.
   /// Never extrapolate beyond the existing bounded interpolation window.
   Duration? get nextFrameDelay {
-    if (!isAnimating || _hasDueEvents || _width <= 0 || _height <= 0) {
+    if (!isAnimating ||
+        _active.isNotEmpty ||
+        _hasDueEvents ||
+        _width <= 0 ||
+        _height <= 0 ||
+        _next >= _events.length) {
       return null;
     }
-    final now = _now();
-    final remaining = maxInterpolation - (now - _anchorTime);
-    Duration? delay;
-    void consider(Duration value) {
-      final previous = delay;
-      if (value > Duration.zero &&
-          value <= remaining &&
-          (previous == null || value < previous)) {
-        delay = value;
-      }
+    final delayMicros =
+        (_events[_next].at - _displayPosition).inMicroseconds / _rate;
+    final remaining = maxInterpolation - (_now() - _anchorTime);
+    if (!delayMicros.isFinite ||
+        delayMicros <= 0 ||
+        delayMicros >= remaining.inMicroseconds) {
+      return null;
     }
-
-    final at = _animationAt(now);
-    for (final item in _active) {
-      if (item.event.mode != DanmakuMode.scroll) {
-        consider(item.start + fixedDuration - at);
-      }
-    }
-    if (_next < _events.length) {
-      final micros =
-          (_events[_next].at - _displayPosition).inMicroseconds / _rate;
-      if (micros.isFinite) consider(Duration(microseconds: micros.ceil()));
-    }
-    return delay;
+    return Duration(microseconds: delayMicros.ceil());
   }
 
   Duration _elapsed(Duration now) {
