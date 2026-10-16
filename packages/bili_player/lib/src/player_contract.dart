@@ -61,7 +61,7 @@ final class ManifestSource extends ResolvedMediaSource {
   final bool isLive;
 }
 
-/// Automatic uses the backend's platform defaults and software fallback.
+/// Automatic uses the platform decoder preference with a safe fallback.
 enum VideoDecodingMode { automatic, software }
 
 final class OpenOptions {

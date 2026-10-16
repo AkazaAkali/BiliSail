@@ -7,9 +7,35 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  media_kit: 1.2.6
-  media_kit_video: 2.0.1
-  media_kit_libs_video: 1.0.7
+  media_kit:
+    git:
+      url: https://github.com/CKopoer/media-kit.git
+      path: media_kit
+      ref: 63b7ea7dd95fc348cecf250df5f54ff87d69d8a9
+  media_kit_video:
+    git:
+      url: https://github.com/CKopoer/media-kit.git
+      path: media_kit_video
+      ref: 63b7ea7dd95fc348cecf250df5f54ff87d69d8a9
+  media_kit_libs_video:
+    git:
+      url: https://github.com/CKopoer/media-kit.git
+      path: libs/universal/media_kit_libs_video
+      ref: 63b7ea7dd95fc348cecf250df5f54ff87d69d8a9
+
+# Overrides are repeated in the application root: Pub ignores dependency
+# overrides from a transitive package. Keep every fork ref in sync.
+dependency_overrides:
+  media_kit:
+    git:
+      url: https://github.com/CKopoer/media-kit.git
+      path: media_kit
+      ref: 63b7ea7dd95fc348cecf250df5f54ff87d69d8a9
+  media_kit_libs_android_video:
+    git:
+      url: https://github.com/CKopoer/media-kit.git
+      path: libs/android/media_kit_libs_android_video
+      ref: 63b7ea7dd95fc348cecf250df5f54ff87d69d8a9
 dev_dependencies:
   flutter_test:
     sdk: flutter

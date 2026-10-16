@@ -33,6 +33,20 @@ dependencies:
     path: packages/bili_mux
   flutter_inappwebview: 6.2.0-beta.3
 
+# media_kit_video and the aggregate native package declare hosted dependencies.
+# Resolve their core/Android dependencies to the same audited fork commit.
+dependency_overrides:
+  media_kit:
+    git:
+      url: https://github.com/CKopoer/media-kit.git
+      path: media_kit
+      ref: 63b7ea7dd95fc348cecf250df5f54ff87d69d8a9
+  media_kit_libs_android_video:
+    git:
+      url: https://github.com/CKopoer/media-kit.git
+      path: libs/android/media_kit_libs_android_video
+      ref: 63b7ea7dd95fc348cecf250df5f54ff87d69d8a9
+
 dev_dependencies:
   flutter_driver:
     sdk: flutter

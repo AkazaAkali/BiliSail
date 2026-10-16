@@ -6,6 +6,157 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('animation frames skip unchanged VOD and live admission work', () {
+    var now = Duration.zero;
+    final vod = DanmakuController(monotonicNow: () => now);
+    final live = LiveDanmakuController(monotonicNow: () => now);
+    addTearDown(vod.dispose);
+    addTearDown(live.dispose);
+    vod.setViewport(width: 800, height: 450);
+    live.setViewport(width: 800, height: 450);
+    live.configure(area: 1, speed: 1, maxPerSecond: 0);
+    vod.replaceEvents([
+      for (final mode in DanmakuMode.values)
+        DanmakuEvent(
+          id: mode.name,
+          at: Duration.zero,
+          text: mode.name,
+          mode: mode,
+        ),
+    ]);
+    live.add([
+      for (final mode in DanmakuMode.values)
+        LiveDanmakuEvent(id: mode.name, text: mode.name, mode: mode),
+    ]);
+    vod.sync(
+      confirmedPosition: now,
+      playing: true,
+      buffering: false,
+      seeking: false,
+      rate: 1,
+    );
+    final firstVod = vod.frame();
+    final firstLive = live.frame();
+    for (var frame = 1; frame <= 240; frame++) {
+      now = Duration(milliseconds: frame * 2);
+      final vf = vod.frame();
+      final lf = live.frame();
+      expect(vf.map((p) => p.event.id), DanmakuMode.values.map((m) => m.name));
+      expect(lf.map((p) => p.event.id), DanmakuMode.values.map((m) => m.name));
+      expect(vf.first.x, lessThan(firstVod.first.x));
+      expect(lf.first.x, lessThan(firstLive.first.x));
+      expect(vf[1].x, firstVod[1].x);
+      expect(lf[1].x, firstLive[1].x);
+      expect(vf.map((p) => p.y), firstVod.map((p) => p.y));
+      expect(lf.map((p) => p.y), firstLive.map((p) => p.y));
+    }
+    // Previously both indexes and protection sets were rebuilt on all 241
+    // calls. Frame count and position updates still remain unchanged.
+    expect(vod.laneIndexBuildCount, 1);
+    expect(live.laneIndexBuildCount, 1);
+    expect(vod.rasterProtectionUpdateCount, 1);
+    expect(live.rasterProtectionUpdateCount, 1);
+    expect(vod.textLayoutBuildCount, 3);
+    expect(live.textLayoutBuildCount, 3);
+
+    // Expiration must still refresh protection on an animation-only frame.
+    for (var sample = 1; sample <= 90; sample++) {
+      now += const Duration(milliseconds: 100);
+      vod.sync(
+        confirmedPosition: now,
+        playing: true,
+        buffering: false,
+        seeking: false,
+        rate: 1,
+      );
+      vod.frame();
+      live.frame();
+    }
+    expect(vod.visibleCount, 0);
+    expect(live.visibleCount, 0);
+    expect(vod.laneIndexBuildCount, 1);
+    expect(live.laneIndexBuildCount, 1);
+    expect(vod.rasterProtectionUpdateCount, 3);
+    expect(live.rasterProtectionUpdateCount, 3);
+  });
+
+  test(
+    'VOD protection follows filtering, seek, viewport and raster release',
+    () {
+      final controller = DanmakuController(monotonicNow: () => Duration.zero);
+      addTearDown(controller.dispose);
+      controller.setViewport(width: 800, height: 450);
+      const events = [
+        DanmakuEvent(id: 'scroll', at: Duration.zero, text: 'scroll'),
+        DanmakuEvent(
+          id: 'top',
+          at: Duration.zero,
+          text: 'top',
+          mode: DanmakuMode.top,
+        ),
+      ];
+      controller.replaceEvents(events);
+      expect(controller.frame(), hasLength(2));
+      expect(controller.rasterProtectionUpdateCount, 1);
+      controller.replaceEvents(events);
+      controller.setViewport(width: 1000, height: 450);
+      expect(controller.frame(), hasLength(2));
+      expect(controller.laneIndexBuildCount, 1);
+      expect(controller.rasterProtectionUpdateCount, 1);
+
+      controller.releaseRasterCache();
+      controller.frame();
+      expect(controller.rasterProtectionUpdateCount, 2);
+      controller.replaceEvents([events.last]);
+      expect(controller.frame().single.event.id, 'top');
+      expect(controller.rasterProtectionUpdateCount, 3);
+      expect(controller.laneIndexBuildCount, 1);
+
+      controller.seekConfirmed(Duration.zero);
+      expect(controller.frame().single.event.id, 'top');
+      expect(controller.laneIndexBuildCount, 2);
+      expect(controller.rasterProtectionUpdateCount, 4);
+      controller.setViewport(width: 1000, height: 1);
+      expect(controller.frame(), isEmpty);
+      expect(controller.rasterProtectionUpdateCount, 5);
+      controller.setViewport(width: 1000, height: 450);
+      expect(controller.frame(), isEmpty);
+      expect(controller.laneIndexBuildCount, 2);
+      expect(controller.rasterProtectionUpdateCount, 5);
+    },
+  );
+
+  test('live protection follows admissions, viewport clipping and clear', () {
+    final controller = LiveDanmakuController(monotonicNow: () => Duration.zero);
+    addTearDown(controller.dispose);
+    controller.configure(area: 1, speed: 1, maxPerSecond: 0);
+    controller.setViewport(width: 800, height: 450);
+    controller.add(const [LiveDanmakuEvent(id: 'one', text: 'one')]);
+    controller.frame();
+    controller.setViewport(width: 1000, height: 450);
+    controller.frame();
+    expect(controller.laneIndexBuildCount, 1);
+    expect(controller.rasterProtectionUpdateCount, 1);
+    controller.add(const [LiveDanmakuEvent(id: 'two', text: 'two')]);
+    expect(controller.frame(), hasLength(2));
+    expect(controller.laneIndexBuildCount, 2);
+    expect(controller.rasterProtectionUpdateCount, 2);
+    controller.setViewport(width: 1000, height: 1);
+    expect(controller.frame(), isEmpty);
+    expect(controller.rasterProtectionUpdateCount, 3);
+    controller.setViewport(width: 1000, height: 450);
+    expect(controller.frame(), isEmpty);
+    expect(controller.laneIndexBuildCount, 2);
+    expect(controller.rasterProtectionUpdateCount, 3);
+    controller.add(const [LiveDanmakuEvent(id: 'three', text: 'three')]);
+    expect(controller.frame(), hasLength(1));
+    expect(controller.laneIndexBuildCount, 3);
+    expect(controller.rasterProtectionUpdateCount, 4);
+    controller.clear();
+    expect(controller.frame(), isEmpty);
+    expect(controller.rasterProtectionUpdateCount, 5);
+  });
+
   test('hidden raster reclamation keeps layouts and scheduling reusable', () {
     final controller = DanmakuController(monotonicNow: () => Duration.zero);
     addTearDown(controller.dispose);

@@ -4,6 +4,8 @@
 
 ## 固定版本与来源
 
+2026-10-16 更新：当前播放器依赖已切到用户 media-kit fork 的固定 Git 提交，Android 采用新的 Surface 生命周期和 20260906 原生资产；当前解析、源码许可、检查/构建与实机边界见 [移植记录](piliplus-media-kit-port.md)。以下版本与默认原生资产表保留为首版历史记录，不能作为当前 Android bundle 的来源。
+
 本机 SDK：Flutter 3.47.6、Dart 3.13.5。`bili_player/pubspec.yaml` 精确声明 `media_kit 1.2.6`、`media_kit_video 2.0.1`、`media_kit_libs_video 1.0.7`；`bili_danmaku` 只依赖 Flutter SDK。包内 `flutter pub get` 解析出 Android 原生包 `media_kit_libs_android_video 1.3.8`、Windows `media_kit_libs_windows_video 1.0.11`、macOS `media_kit_libs_macos_video 1.1.4`。根应用必须保留自己的 `pubspec.lock`，并在三端构建后核对最终解析版本。
 
 [media_kit 官方包页](https://pub.dev/packages/media_kit)列出 Android、Windows、macOS 视频/音频、外部音轨和请求头能力；这是包声明，未证明这些能力的组合已在本项目通过。`media_kit`、`media_kit_video` 和 `media_kit_libs_video` 包页标 MIT；分发前仍要单独核查打包的 mpv、FFmpeg 与其他原生库许可。[macOS 原生构建仓库](https://github.com/media-kit/libmpv-darwin-build)列出默认构建与可选 GPL 构建的许可区别。

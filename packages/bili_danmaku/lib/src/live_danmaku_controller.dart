@@ -64,6 +64,9 @@ final class LiveDanmakuController extends ChangeNotifier {
   final Duration scrollDuration, fixedDuration, maxPendingAge;
   final Queue<_Received> _pending = Queue();
   final List<_Visible> _visible = [];
+  bool _rasterProtectionDirty = false;
+  int _laneIndexBuildCount = 0;
+  int _rasterProtectionUpdateCount = 0;
   late final _layouts = DanmakuTextLayouts(maxTextLayouts);
   final Map<String, Duration> _recentIds = {};
   bool _enabled = true;
@@ -85,6 +88,13 @@ final class LiveDanmakuController extends ChangeNotifier {
   int get textLayoutBuildCount => _layouts.buildCount;
   int get textRasterBytes => _layouts.rasterBytes;
   DanmakuRasterStatistics get rasterStatistics => _layouts.rasterStatistics;
+
+  @visibleForTesting
+  int get laneIndexBuildCount => _laneIndexBuildCount;
+
+  @visibleForTesting
+  int get rasterProtectionUpdateCount => _rasterProtectionUpdateCount;
+
   bool get isAnimating =>
       _enabled && (_pending.isNotEmpty || _visible.isNotEmpty);
   Duration get _scrollLifetime =>
@@ -145,6 +155,7 @@ final class LiveDanmakuController extends ChangeNotifier {
   void clear() {
     _pending.clear();
     _visible.clear();
+    _rasterProtectionDirty = true;
     _recentIds.clear();
     _windowCount = 0;
     _windowAt = _now();
@@ -211,7 +222,7 @@ final class LiveDanmakuController extends ChangeNotifier {
       // Text shaping and rasters do not depend on viewport size. Keep arrival
       // times and project scroll progress onto the new width in frame().
       final lanes = (_availableHeight / _laneHeight).floor().clamp(0, 24);
-      _visible.removeWhere((item) => item.lane >= lanes);
+      _removeVisibleWhere((item) => item.lane >= lanes);
     }
     notifyListeners();
   }
@@ -235,10 +246,16 @@ final class LiveDanmakuController extends ChangeNotifier {
 
   void _clearLayouts() => _layouts.clear();
 
+  void _removeVisibleWhere(bool Function(_Visible) test) {
+    final previousLength = _visible.length;
+    _visible.removeWhere(test);
+    if (_visible.length != previousLength) _rasterProtectionDirty = true;
+  }
+
   List<LiveDanmakuPlacement> frame() {
     if (!_enabled) return const [];
     final now = _now();
-    _visible.removeWhere(
+    _removeVisibleWhere(
       (item) =>
           now - item.at >=
           (item.event.mode == DanmakuMode.scroll
@@ -246,6 +263,35 @@ final class LiveDanmakuController extends ChangeNotifier {
               : fixedDuration),
     );
     if (_width <= 0 || _height <= 0) return const [];
+    // Keep the receipt clock moving every frame; only arrivals need an index.
+    if (_pending.isNotEmpty && _pending.first.at <= now) _admit(now);
+    if (_rasterProtectionDirty) {
+      _layouts.protectRasters(
+        _visible.map(
+          (item) => (item.event.text, item.event.color, item.event.fontSize),
+        ),
+      );
+      _rasterProtectionDirty = false;
+      _rasterProtectionUpdateCount++;
+    }
+    return [
+      for (final item in _visible)
+        LiveDanmakuPlacement(
+          item.event,
+          item.event.mode == DanmakuMode.scroll
+              ? _width -
+                    (_width + item.width) *
+                        ((now - item.at).inMicroseconds /
+                            _scrollLifetime.inMicroseconds)
+              : (_width - item.width) / 2,
+          item.event.mode == DanmakuMode.bottom
+              ? _top + _availableHeight - (item.lane + 1) * _laneHeight
+              : _top + item.lane * _laneHeight,
+        ),
+    ];
+  }
+
+  void _admit(Duration now) {
     final prepared = <(LiveDanmakuEvent, double, double)>[];
     final texts = _mergeDuplicates
         ? {for (final item in _visible) (item.event.mode, item.event.text)}
@@ -265,6 +311,7 @@ final class LiveDanmakuController extends ChangeNotifier {
       final layout = _layout(received.event);
       prepared.add((received.event, layout.width, layout.height));
     }
+    if (prepared.isEmpty) return;
     var textHeight = _visible.isEmpty
         ? DanmakuTextLayouts.minFontSize
         : _laneHeight - _lineSpacing;
@@ -286,7 +333,8 @@ final class LiveDanmakuController extends ChangeNotifier {
     });
     _laneHeight = textHeight + _lineSpacing;
     final laneCount = (_availableHeight / _laneHeight).floor().clamp(0, 24);
-    _visible.removeWhere((item) => item.lane >= laneCount);
+    _removeVisibleWhere((item) => item.lane >= laneCount);
+    _laneIndexBuildCount++;
     final lanes = List.generate(
       DanmakuMode.values.length,
       (_) => List.generate(laneCount, (_) => <_Visible>[]),
@@ -306,28 +354,9 @@ final class LiveDanmakuController extends ChangeNotifier {
       }
       final item = _Visible(event, now, width, height, lane);
       _visible.add(item);
+      _rasterProtectionDirty = true;
       lanes[event.mode.index][lane].add(item);
     }
-    _layouts.protectRasters(
-      _visible.map(
-        (item) => (item.event.text, item.event.color, item.event.fontSize),
-      ),
-    );
-    return [
-      for (final item in _visible)
-        LiveDanmakuPlacement(
-          item.event,
-          item.event.mode == DanmakuMode.scroll
-              ? _width -
-                    (_width + item.width) *
-                        ((now - item.at).inMicroseconds /
-                            _scrollLifetime.inMicroseconds)
-              : (_width - item.width) / 2,
-          item.event.mode == DanmakuMode.bottom
-              ? _top + _availableHeight - (item.lane + 1) * _laneHeight
-              : _top + item.lane * _laneHeight,
-        ),
-    ];
   }
 
   int _findLane(

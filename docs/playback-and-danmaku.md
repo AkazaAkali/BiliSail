@@ -2,6 +2,8 @@
 
 日期：2026-10-05。首版已使用 `media_kit`，Windows 分轨与请求策略已验证，三端结论仍以完整 M0 为准。本文中的参数为初始预算，不是已测结果；当前证据见 [实测记录](validation/m0-results.md)。
 
+2026-10-16 按用户要求参考 PiliPlus，将 Android Surface load/unload 与相关核心扩展移植到用户 media-kit fork，并固定 Git 依赖；Android 自动解码优先 MediaCodec，弹幕减少无新候选时的重复轨道/缓存工作。来源、采用范围及验证见 [移植记录](validation/piliplus-media-kit-port.md)。
+
 2026-10-11 已接入高能进度条：Windows/macOS 默认开启、移动默认关闭；等待章节确认，无章节才加载，存在章节不请求、不显示。复用唯一会话及已有位置订阅，缓存曲线几何，仅改变已播放裁剪；可选读取不阻塞媒体打开，见 [设计](high-energy-progress-design.md) 与 [实现验证](validation/high-energy-progress.md)。
 
 影视弹幕、直播实时连接/画面弹幕及 SC 状态合并的当前实现和容量限制见 [影视与直播弹幕修复](validation/pgc-live-danmaku.md)；直播使用独立到达时间时钟，继续复用唯一原生播放会话。

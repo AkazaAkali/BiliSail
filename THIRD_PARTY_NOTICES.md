@@ -29,6 +29,14 @@ Windows MSI/EXE 打包使用固定 [WiX Toolset 6.0.2](https://github.com/wixtoo
 
 关于页与更新检查使用 [package_info_plus 10.2.2](https://pub.dev/packages/package_info_plus/versions/10.2.2) 读取平台包版本，BSD-3-Clause；本轮将已有锁定的传递依赖提升为直接依赖，没有改变包版本或新增下载的二进制来源。GitHub 更新请求自行实现，只参考 UWP 交互职责，未复制源码或版本 schema，见 [更新验证](docs/validation/app-updates.md)。系统浏览器入口沿用 url_launcher，仅开放本项目 GitHub 仓库与 Release 路径，不传账号凭据。
 
+## 2026-10-16 media-kit fork 与 Android 原生资产
+
+播放器核心、视频输出、聚合库及 Android video 库固定为用户 [CKopoer/media-kit](https://github.com/CKopoer/media-kit/commit/63b7ea7dd95fc348cecf250df5f54ff87d69d8a9) 的 Git 提交。基于官方当前代码，兼容移植 PiliPlus 实际使用的两个 MIT fork；保留 MIT 版权头。mpv v0.41.0 client 头文件另保留 ISC 声明，FFI 使用固定版本工具真实重生成。
+
+Android 使用 [20260906 default](https://github.com/My-Responsitories/libmpv-android-video-build/releases/tag/20260906) 原生资产，逐 ABI 校验 SHA-256；源码版本、构建选项、依赖许可与摘要见 fork 的 [NATIVE_LIBRARIES.md](https://github.com/CKopoer/media-kit/blob/63b7ea7dd95fc348cecf250df5f54ff87d69d8a9/libs/android/media_kit_libs_android_video/NATIVE_LIBRARIES.md)。构建脚本的 MIT 不替代原生依赖各自的许可。
+
+PiliPlus 应用为 GPLv3，本次仅参考其配置与职责，未复制应用代码。弹幕参考分支 canvas_danmaku 为 MIT，未新增依赖或复制源码。精确来源、采用边界与验证见 [移植记录](docs/validation/piliplus-media-kit-port.md)。
+
 ## Windows 原生播放器资产
 
 图片缓存直接使用现有锁定的 [crypto 3.0.7](https://pub.dev/packages/crypto/versions/3.0.7) 计算 SHA-256 文件键和内容校验，BSD-3-Clause；它此前已由 API 包引入，本次没有增加新的解析版本或原生二进制。

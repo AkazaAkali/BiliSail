@@ -4,6 +4,8 @@
 
 ## 1. 来源快照
 
+2026-10-16 按用户指定只读参考 [PiliPlus](../../PiliPlus/README.md)（`936072449e82e3d90c28c728c0087bf5136fa441`），并修改用户的 [media-kit fork](../../media-kit/README.md)。PiliPlus 应用为 GPLv3，仅借鉴行为；其实际使用的两个 media-kit 分支为 MIT，移植保留版权头并记录精确提交。采用内容、各分支差异、弹幕独立优化、原生资产和验证边界见 [移植记录](validation/piliplus-media-kit-port.md)。
+
 2026-10-10 密集弹幕优化另只读查看用户指定的 [dart_simple_live](../../dart_simple_live/README.md)，提交 `ba828e6783b176ea5709fcd09f0eb01dfaceeb51`。其 [播放器弹幕入口](../../dart_simple_live/simple_live_app/lib/modules/live_room/player/player_controls.dart) 与 [添加消息入口](../../dart_simple_live/simple_live_app/lib/modules/live_room/player/player_controller.dart) 使用 `canvas_danmaku ^0.2.7`。项目许可为 GPL-3.0；没有复制其源码、资源或状态管理。
 
 另外从 [pub.dev](https://pub.dev/packages/canvas_danmaku/versions/0.3.3) 下载并核验 `canvas_danmaku` 0.2.7 与当前 0.3.3 的源码归档（MIT，SHA-256 分别为 `98fd90f257ffe93bd6a0bd857d92f40172767fc77ffb48b2379ac692e62150eb`、`1ff071d027b1cf3320d4b58ff1aee6811de51ce39b5b5773c2e0d7693e02d401`）。参考段落复用、预渲染图像、单 Ticker 与资源释放思路，独立实现现有弹幕包中的调度预算和有界文字图像缓存；生产代码没有复制实现或新增依赖。归档在忽略目录 `artifacts/danmaku-performance/`；0.3.3 的解压副本仅将包内自引用改为相对路径，以运行隔离的原生对照，保留其 MIT LICENSE，未修改相邻仓库或原始归档。对比和采用理由见 [密集弹幕性能优化](validation/danmaku-performance.md)。

@@ -337,3 +337,9 @@ FRB 支持跨平台是可行性依据，但平台构建、取消、错误和流�
 **交付与生命周期**：原生输出借用 ANGLE D3D11 device，让绘制和必要复制共享即时上下文，以有序提交替代每帧 CPU 等待 GPU。仅在确认消费者为同一设备时直接共享；其他情况保留独立复制纹理，按 draw revision 避免重复复制。保留窗口视口上限、队列公平性、旧纹理注销与 render-context 销毁屏障，不终止其他组件共用的 EGL display。
 
 **弹幕与测量**：空／未来事件窗口不连续重绘；到期事件在既有有界插值范围内由单次唤醒触发，暂停、缓冲、seek、换控制器与 dispose 取消或重新锚定。GPU 比较固定素材、物理输出尺寸、解码器实值及进程/适配器，同时记录频率与功耗，不把百分比降低写成全平台或固定收益。来源、测试、前后数据与未测项见 [Windows GPU 优化结果](validation/windows-gpu-optimization-2026-10-13.md)。
+
+## D42：维护自有 media-kit fork 的 Android Surface 生命周期
+
+**决定（2026-10-16）**：按用户要求，基于自有官方 fork 兼容移植 PiliPlus 所用两个 MIT 分支的 Surface、原生参数、实例锁与 FFI 扩展，依赖固定 Git 提交，保留官方当前 API 和 Windows 渲染补丁。Android Surface 由 mpv load/unload 屏障管理，尺寸更新不产生隐式 seek；自动解码优先 MediaCodec，软件选择仍受原设置控制。
+
+**范围与验收**：Android 原生资产采用固定摘要的 20260906 default 构建，其他平台原生 wrapper 沿用锁定版本。弹幕保留原 Ticker/时钟，只减少重复入场索引和缓存保护工作。来源许可、各项采用说明、检查/构建及实机边界见 [移植记录](validation/piliplus-media-kit-port.md)。

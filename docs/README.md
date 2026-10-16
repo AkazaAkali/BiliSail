@@ -9,6 +9,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [整体架构](architecture.md) | 产品范围、技术栈、模块依赖、目录、状态管理、存储和平台适配 |
+| [PiliPlus 与 media-kit fork 移植](validation/piliplus-media-kit-port.md) | 固定 Git 依赖、Android Surface、解码与弹幕优化及验证边界 |
 | [下载与离线播放](downloads.md) | 分 P／剧集、下载队列、断点恢复、校验、本地分轨播放及三端验收边界 |
 | [项目更名](validation/project-renaming.md) | BiliSail／哔帆的命名范围、安装／存储标识与平台验证 |
 | [应用图标](../assets/branding/README.md) | 小电视与船帆角标、保留候选方案、官网参考和平台资源 |
