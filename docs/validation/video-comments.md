@@ -70,6 +70,14 @@ Web 评论正文中的被 @ 用户由 `content.at_name_to_mid_str`（用户名 �
 
 `tool/check.ps1 -SkipPub` 完整通过：根应用 994 项、`bili_api` 285 项、`bili_player` 22 项、`bili_danmaku` 32 项，共 1333 项；根应用及三个包的格式、静态分析通过。文档相对文件链接和 `git diff --check` 通过。
 
+## 评论日期年份（2026-10-16）
+
+游客只读检查 `BV14P4y1g75A`（aid `894565084`）的 `/x/v2/reply`，主评论及楼中楼预览均返回完整的秒级 Unix 时间戳 `ctime`。例如主评论的 `1653457764` 对应北京时间 `2022-05-25 13:49:24`，年份没有在接口或模型映射中丢失；原显示组件固定输出月、日。
+
+共用 `CommentAuthorHeader` 继续将 `publishedAt` 转为设备本地时间，再与当前本地年份比较：同年显示 `月-日`，非同年显示 `年-月-日`。视频、影视及动态评论的主评论和完整楼中楼回复共用此规则，缺失时间仍不显示日期。评论组件 14 项测试通过，覆盖同年、过去年份、未来年份，以及 UTC 时间转本地后的年初／年末边界。
+
+`tool/check.ps1 -SkipPub` 完整通过：根应用 1940 项、`bili_api` 426 项、`bili_player` 69 项、`bili_danmaku` 90 项、`bili_mux` 2 项，共 2527 项；根应用及四个包的格式和静态分析通过。另有 10 项 mux 原生测试因未配置 `BILI_MUX_LIBRARY` 条件跳过。文档相对链接及 `git diff --check` 通过。未构建或进行三端实机视觉验收。
+
 ## 正文实体、链接与进度（2026-10-07）
 
 评论正文通过共享评论模块的纯 Dart `lib/features/comments/domain/comment_text.dart` 分段。展示前仅解码一遍常用 HTML 实体（`amp/lt/gt/quot/apos/nbsp`）和合法 Unicode 十进制／十六进制字符引用，例如 `30tps -&gt; 50tps` 显示为 `30tps -> 50tps`。未知或非法实体保留原文，编码的标签显示为普通文字；原始 `CommentEntry.message`、编辑草稿和发送内容保持原样。视频原路径转为导出入口，定向测试经过该入口验证共享实现。

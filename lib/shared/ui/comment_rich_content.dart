@@ -301,7 +301,12 @@ class CommentAuthorHeader extends StatelessWidget {
               runSpacing: 2,
               children: [
                 if (time != null)
-                  Text('${time.month}-${time.day}', style: styles.metadata),
+                  Text(
+                    time.year == DateTime.now().year
+                        ? '${time.month}-${time.day}'
+                        : '${time.year}-${time.month}-${time.day}',
+                    style: styles.metadata,
+                  ),
                 if (hasLocation) Text(location, style: styles.metadata),
               ],
             ),

@@ -222,6 +222,36 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+  testWidgets('comment dates include the year outside the current local year', (
+    tester,
+  ) async {
+    final year = DateTime.now().year;
+    final dates = [
+      (DateTime(year, 5, 25), '5-25'),
+      (DateTime(year - 1, 5, 25), '${year - 1}-5-25'),
+      (DateTime(year + 1, 5, 25), '${year + 1}-5-25'),
+      (DateTime(year, 1, 1).toUtc(), '1-1'),
+      (DateTime(year - 1, 12, 31, 23, 59).toUtc(), '${year - 1}-12-31'),
+    ];
+    for (final (publishedAt, label) in dates) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CommentAuthorHeader(
+              comment: CommentEntry(
+                id: '1',
+                author: 'reader',
+                message: 'comment',
+                publishedAt: publishedAt,
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(find.text(label), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }
+  });
   testWidgets('IP location follows the date in the existing metadata style', (
     tester,
   ) async {
@@ -233,7 +263,7 @@ void main() {
               id: '1',
               author: 'reader',
               message: 'comment',
-              publishedAt: DateTime(2026, 10, 7),
+              publishedAt: DateTime(DateTime.now().year, 10, 7),
               ipLocation: 'IP属地：广东',
             ),
           ),
@@ -262,7 +292,7 @@ void main() {
                 id: '1',
                 author: 'reader',
                 message: 'comment',
-                publishedAt: DateTime(2026, 10, 7),
+                publishedAt: DateTime(DateTime.now().year, 10, 7),
                 ipLocation: location,
               ),
             ),
