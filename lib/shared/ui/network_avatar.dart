@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../../core/presentation/public_image_variant.dart';
 import 'app_network_image.dart';
 
-/// Public CDN avatars never receive account cookies. Keep a stable fallback
-/// while loading or when an upstream image has disappeared.
+/// Public CDN avatars never receive account cookies. Leave loading avatars blank
+/// and use a fallback only when their source is missing or unavailable.
 class NetworkAvatar extends StatelessWidget {
   const NetworkAvatar({super.key, this.url, this.name = '', this.radius = 18});
   final Uri? url;
@@ -53,7 +53,7 @@ class NetworkAvatar extends StatelessWidget {
                   fit: BoxFit.cover,
                   errorBuilder: (_, _, _) => fallback,
                   frameBuilder: (_, child, frame, _) =>
-                      frame != null ? child : fallback,
+                      frame != null ? child : const SizedBox.expand(),
                 ),
         ),
       ),
