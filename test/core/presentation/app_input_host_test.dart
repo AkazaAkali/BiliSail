@@ -137,6 +137,45 @@ void main() {
   });
 
   for (final viewFocus in [true, false]) {
+    for (final editing in [true, false]) {
+      testWidgets(
+        'IME resyncs $editing policy after ${viewFocus ? 'view refocus' : 'lifecycle resume'} with unchanged Flutter focus',
+        (tester) async {
+          final policies = <bool>[];
+          final input = _dispatcher([]);
+          addTearDown(input.dispose);
+          await tester.pumpWidget(
+            MaterialApp(
+              home: AppInputHost<String>(
+                dispatcher: input,
+                routes: InputRouteObserver(),
+                onEditingChanged: (value) async => policies.add(value),
+                child: Scaffold(
+                  body: editing
+                      ? const TextField(autofocus: true)
+                      : const Text('player'),
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(policies.last, editing);
+          final focus = FocusManager.instance.primaryFocus;
+          policies.clear();
+          _active(tester, false, viewFocus: viewFocus);
+          await tester.pump();
+          expect(policies, isEmpty);
+          _active(tester, true, viewFocus: viewFocus);
+          await tester.pumpAndSettle();
+          expect(FocusManager.instance.primaryFocus, same(focus));
+          expect(policies, [editing]);
+          await tester.pump();
+          expect(policies, [editing]);
+          await tester.pumpWidget(const SizedBox());
+        },
+      );
+    }
+
     testWidgets(
       'Windows ${viewFocus ? 'view blur' : 'lifecycle deactivation'} recovers mouse and keyboard with stale Alt',
       (tester) async {

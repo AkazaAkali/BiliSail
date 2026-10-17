@@ -4,8 +4,9 @@
 #include <windows.h>
 #include <imm.h>
 
-// The window owns its HIMC. Borrow and restore the exact association without
-// changing the selected input language, conversion mode, or other windows.
+// Windows/TSF owns the input context and can replace it during an IME switch.
+// Never cache a borrowed HIMC across a detached interval. Restore the current
+// default association without changing the input language or conversion mode.
 class WindowImeContext {
  public:
   explicit WindowImeContext(HWND window) : window_(window) {}
@@ -15,20 +16,20 @@ class WindowImeContext {
 
   bool SetActive(bool active) noexcept {
     if (!IsWindow(window_)) return false;
-    if (active && detached_) {
-      ImmAssociateContext(window_, saved_context_);
-      detached_ = false;
-    } else if (!active && !detached_) {
-      saved_context_ = ImmAssociateContext(window_, nullptr);
-      detached_ = true;
+    const HIMC context = ImmGetContext(window_);
+    if (context) ImmReleaseContext(window_, context);
+    if (active) {
+      // A newly selected input method may already have supplied a context.
+      // Keep it; otherwise ask Windows for its current default, even when the
+      // previous editing policy was also active or started without a HIMC.
+      return context != nullptr ||
+             ImmAssociateContextEx(window_, nullptr, IACE_DEFAULT) != FALSE;
     }
-    return true;
+    return ImmAssociateContextEx(window_, nullptr, 0) != FALSE;
   }
 
  private:
   const HWND window_;
-  HIMC saved_context_ = nullptr;
-  bool detached_ = false;
 };
 
 #endif  // RUNNER_WINDOW_IME_CONTEXT_H_

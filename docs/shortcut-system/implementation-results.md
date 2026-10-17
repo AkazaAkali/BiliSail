@@ -69,6 +69,20 @@ Windows runner 的 `bilisail/text_input` 通道调用 [ImmAssociateContext](http
 
 本次 `tool/check.ps1 -SkipPub` 通过根应用及四个包的格式、静态分析与 2,367 项测试（根应用 1,848、bili_api 390、bili_player 41、bili_danmaku 86、bili_mux 2）；7 项既有原生合流测试因未配置 `BILI_MUX_LIBRARY` 跳过。IMM 原生回归与 1 项 Windows 集成测试通过，`flutter build windows --release --no-pub -t lib/main.dart` 通过，普通应用产物为 `build/windows/x64/runner/Release/bilisail.exe`。日志在 `build/ime-test/`。Microsoft Pinyin／第三方 IME 的真实实键切换、原生 WebView 内输入与 Android／macOS 本轮未验收。
 
+### 第三方输入法的上下文恢复（2026-10-17）
+
+用户报告微信输入法在搜索、评论和弹幕输入框中只能输入英文字母。本机注册的微信输入法为 3.0.0.34。源码和隐藏 Win32 窗口回归确认原策略存在三个恢复缺口：首次解除关联时没有 HIMC，后续进入编辑器仍恢复为空；输入法重新关联了上下文后，进入编辑器会被缓存旧值覆盖；原生关联改变但编辑布尔值未改变时，不再校正。上述受控回归证明应用的恢复缺陷，不等于捕获了用户现场的微信输入法失效轨迹。
+
+[WindowImeContext](../../windows/runner/window_ime_context.h) 不再跨解除关联期间保存借用的 HIMC。进入编辑器时保留当前已有关联；关联缺失时调用 Windows 的 [ImmAssociateContextEx / IACE_DEFAULT](https://learn.microsoft.com/en-us/windows/win32/api/imm/nf-imm-immassociatecontextex) 恢复当前默认上下文。非编辑状态仍解除本 Flutter view 的关联，重复请求重新核对实际状态；销毁时恢复可用的默认关联。此策略替代上节“恢复保存的精确 HIMC”约定，不创建／销毁系统上下文，不强制输入语言或中英文模式，也不递归操作其他窗口。
+
+AppInputHost 在窗口重新聚焦或应用恢复活动时，于帧后重新发送当前编辑策略，即使原 TextField 仍持有 Flutter 焦点也会同步；窗口与生命周期均有效才执行。原有编辑保护、标点快捷键和模态隔离继续共用根输入宿主。
+
+回归新增默认上下文缺失恢复、新关联保留、同策略下原生关联改变，以及编辑／非编辑状态下的窗口切回与应用恢复。Windows 集成补充原生 `WM_CHAR` 中文字符交付和编辑草稿保留；直接字符消息不代表输入法候选／组合会话已通过验收。微信输入法实际候选选择、Win+Space 切换与长时间失焦恢复仍需人工验收。
+
+`tool/check.ps1 -SkipPub` 通过根应用及四个包的格式、静态分析与 2,537 项测试（根应用 1,944、bili_api 426、bili_player 72、bili_danmaku 93、bili_mux 2）；10 项原生合流测试因未配置 `BILI_MUX_LIBRARY` 跳过。`tool/test-windows-ime.ps1` 的 IMM 原生回归和 1 项 Windows 集成测试通过。整仓检查和 Windows 集成日志分别为 `build/ime-test/check-2026-10-17.log` 与 `build/ime-test/integration-2026-10-17.log`。
+
+`flutter build windows --release --no-pub -t lib/main.dart` 通过，普通应用产物为 `build/windows/x64/runner/Release/bilisail.exe`，日志为 `build/ime-test/release-2026-10-17.log`。既有 flutter_inappwebview_windows CMP0175 警告未阻止构建。Android／macOS 本轮未构建或实机验证。
+
 ## 页面刷新
 
 刷新只归活动页面，进行中重复触发合并；播放器不再独立解释 F5／侧键为 retry。首页保留频道，搜索使用 refresh 保留当前筛选，历史、消息、下载、用户页调用各自刷新。UGC 复用相关推荐／标签刷新与本页播放重试组合；PGC 先重新加载剧集，同一选择与源代次稳定才重试，变更选集由原激活路径开源；直播由房间 controller.load 驱动目标，不另发 retry。离线保留本地源 retry；设置等无能力页不注册空回调。页面销毁／账号和 source generation 继续由已有控制器及会话隔离。

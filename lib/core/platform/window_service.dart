@@ -10,6 +10,7 @@ class WindowService {
 
   /// Keep IME composition attached only while a Flutter editor needs it.
   /// Otherwise Windows can consume punctuation before Flutter sees a key event.
+  /// Reapplying the policy reconciles associations changed by Windows/TSF.
   Future<void> setTextInputActive(bool active) async {
     if (!Platform.isWindows) return;
     await _textInputChannel.invokeMethod<void>('setActive', active);

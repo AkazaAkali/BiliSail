@@ -247,6 +247,8 @@ Riverpod 负责状态订阅和注入，不承担弹幕逐帧广播。路由 prov
 
 快捷键由 MaterialApp builder 中、根 Navigator 外层的 `AppInputHost` 接收，整个窗口保留一个业务 early key handler 和一个侧键全局 pointer route。`core/input` 为纯 Dart 泛型分发器；公共 domain 持有命令目录；app 组合根编译设置和注册工作区，页面与 PlaybackPanel 注册各自能力。根与 Shell Navigator observer 共用路由账本，普通弹窗隔离底层，全屏标记为播放呈现。普通／全屏视图共享同一播放快捷键 owner，隐藏页不响应。设置保持原 JSON 格式，详细行为和实测边界见[快捷键重构实施记录](shortcut-system/implementation-results.md)。
 
+Windows 的输入法关联由同一宿主按可编辑焦点同步，窗口重新聚焦或应用恢复活动时重新核对。原生端保留输入法当前提供的上下文；缺失时恢复 Windows 当前默认上下文，不缓存跨输入法切换的借用 HIMC。非编辑焦点解除 Flutter view 的 IME 关联，以便标点键进入快捷键层。恢复规则及第三方输入法验收边界见同一实施记录。
+
 ## 9. 可观测性和故障边界
 
 统一 `AppFailure`：网络、超时、取消、会话失效、访问受限、风控/限流、协议变化、解码、磁盘、未知。保留脱敏的操作 ID、端点名、业务码、阶段和是否可重试。错误解释与恢复动作由应用层映射到 UI。

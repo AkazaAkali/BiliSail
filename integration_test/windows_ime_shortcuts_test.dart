@@ -53,9 +53,11 @@ void main() {
     );
     final editor = FocusNode();
     final player = FocusNode();
+    final text = TextEditingController();
     addTearDown(input.dispose);
     addTearDown(editor.dispose);
     addTearDown(player.dispose);
+    addTearDown(text.dispose);
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: Text('IME probe'))),
     );
@@ -83,7 +85,7 @@ void main() {
         home: Scaffold(
           body: Column(
             children: [
-              TextField(focusNode: editor),
+              TextField(focusNode: editor, controller: text),
               Focus(focusNode: player, child: const Text('player')),
             ],
           ),
@@ -106,6 +108,21 @@ void main() {
       editor.requestFocus();
       await tester.pumpAndSettle();
       expect(native.context, original);
+      // Reapplying an unchanged editing policy must preserve the context and
+      // draft. Native WM_CHAR delivery checks editing, not real IME composition.
+      final draft = text.value;
+      await window.setTextInputActive(true);
+      expect(text.value, draft);
+      native.character(0x4e2d);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(
+        text.text,
+        draft.text.replaceRange(
+          draft.selection.start,
+          draft.selection.end,
+          '中',
+        ),
+      );
       native.key(0xba, 0x27, character: 0x3b);
       native.key(0xde, 0x28, character: 0x27);
       await tester.pump(const Duration(milliseconds: 100));
@@ -221,16 +238,20 @@ final class _NativeInput {
   }
 
   void key(int virtualKey, int scanCode, {int? character}) {
+    final flags = 1 | (scanCode << 16);
+    _post(0x100, virtualKey, flags);
+    if (character != null) _post(0x102, character, flags);
+    _post(0x101, virtualKey, flags | 0xc0000000);
+  }
+
+  void character(int character) => _post(0x102, character, 1);
+
+  void _post(int message, int word, int flags) {
     final post = _user
         .lookupFunction<
           Int32 Function(IntPtr, Uint32, UintPtr, IntPtr),
           int Function(int, int, int, int)
         >('PostMessageW');
-    final flags = 1 | (scanCode << 16);
-    expect(post(_view, 0x100, virtualKey, flags), isNot(0));
-    if (character != null) {
-      expect(post(_view, 0x102, character, flags), isNot(0));
-    }
-    expect(post(_view, 0x101, virtualKey, flags | 0xc0000000), isNot(0));
+    expect(post(_view, message, word, flags), isNot(0));
   }
 }

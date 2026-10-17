@@ -340,13 +340,24 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _lifecycleActive = state == AppLifecycleState.resumed;
-    if (!_active) _resetInput();
+    _windowActivityChanged();
   }
 
   @override
   void didChangeViewFocus(ViewFocusEvent event) {
     _viewFocused = event.state == ViewFocusState.focused;
-    if (!_active) _resetInput();
+    _windowActivityChanged();
+  }
+
+  void _windowActivityChanged() {
+    if (!_active) {
+      _resetInput();
+      return;
+    }
+    // Selecting an IME or switching windows can change the native association
+    // while the same Flutter editor retains focus. Reconcile on return too.
+    _lastEditing = null;
+    _scheduleEditingSync();
   }
 
   ShortcutContext _context() {

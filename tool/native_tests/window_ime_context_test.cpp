@@ -26,9 +26,8 @@ int main() {
                                      0, 0, 100, 100, nullptr, nullptr,
                                      GetModuleHandleW(nullptr), nullptr);
   Check(window && other, "create hidden native windows");
-  const HIMC context = ImmCreateContext();
-  Check(context != nullptr, "create input context");
-  const HIMC original = ImmAssociateContext(window, context);
+  const HIMC context = Context(window);
+  Check(context != nullptr, "window has a default input context");
   const HIMC other_context = Context(other);
   const HKL layout = GetKeyboardLayout(0);
   const BOOL open = ImmGetOpenStatus(context);
@@ -41,7 +40,7 @@ int main() {
     Check(ImmGetOpenStatus(context) == open, "conversion mode is preserved");
     Check(policy.SetActive(false), "repeated detach");
     Check(policy.SetActive(true), "restore IME inside editor");
-    Check(Context(window) == context, "restore exact context after repeated detach");
+    Check(Context(window) == context, "restore default context after repeated detach");
     Check(policy.SetActive(true), "repeated restore");
     Check(policy.SetActive(false), "detach before destruction");
   }
@@ -51,10 +50,26 @@ int main() {
     WindowImeContext policy(window);
     policy.SetActive(false);
     policy.SetActive(true);
-    Check(Context(window) == nullptr, "no original context stays absent");
+    Check(Context(window) == context, "editor restores a missing default context");
   }
-  ImmAssociateContext(window, original);
-  ImmDestroyContext(context);
+  {
+    WindowImeContext policy(window);
+    Check(policy.SetActive(false), "detach before input method switch");
+    const HIMC replacement = ImmCreateContext();
+    Check(replacement != nullptr, "create replacement input context");
+    ImmAssociateContext(window, replacement);
+    Check(policy.SetActive(true), "enable after input method re-association");
+    Check(Context(window) == replacement, "preserve newly associated input context");
+    ImmAssociateContext(window, nullptr);
+    Check(ImmDestroyContext(replacement) != FALSE, "release replaced context");
+    Check(policy.SetActive(true), "reconcile unchanged editing policy");
+    Check(Context(window) == context, "recover missing context while already editing");
+    Check(policy.SetActive(false), "disable before external re-association");
+    ImmAssociateContext(window, context);
+    Check(policy.SetActive(false), "reconcile unchanged non-editing policy");
+    Check(Context(window) == nullptr, "detach newly associated context outside editor");
+  }
+  Check(Context(window) == context, "destruction restores the default context");
   {
     WindowImeContext policy(window);
     policy.SetActive(false);
@@ -62,6 +77,6 @@ int main() {
     Check(!policy.SetActive(true), "destroyed view is rejected");
   }
   DestroyWindow(other);
-  std::cout << "PASS: IME detach, exact restore, idempotence, isolation, lifecycle\n";
+  std::cout << "PASS: IME default restore, context replacement, reconciliation, isolation, lifecycle\n";
   return 0;
 }
