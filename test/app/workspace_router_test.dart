@@ -380,6 +380,9 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.text('播放 第二集'), findsOneWidget);
+        expect(find.widgetWithText(ActionChip, tag), findsNothing);
+        await tester.tap(find.text('展开'));
+        await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(ActionChip, tag));
         await tester.pumpAndSettle();
         expect(search.queries, [tag]);

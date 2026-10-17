@@ -336,11 +336,11 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                                     ?.copyWith(height: 1.6),
                               ),
                             ),
+                            VideoTagsPanel(
+                              id: widget.id,
+                              onSearch: widget.onSearchTag,
+                            ),
                           ],
-                          VideoTagsPanel(
-                            id: widget.id,
-                            onSearch: widget.onSearchTag,
-                          ),
                           _separator('intro'),
                           if (video.parts.length > 1 ||
                               video.collection != null) ...[

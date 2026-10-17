@@ -695,63 +695,78 @@ void main() {
       },
     );
   }
-  testWidgets(
-    'tags stay visible and search full names without expanding intro',
-    (tester) async {
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(1100, 800);
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      const tag = 'Flutter & Dart/中文+测试';
-      String? searched;
-      var created = 0;
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            authControllerProvider.overrideWith(_GuestAuthController.new),
-            videoRepositoryProvider.overrideWithValue(_VideoRepository()),
-            videoExtrasRepositoryProvider.overrideWithValue(
-              _ExtrasRepository(tags: const [tag, '编程', '教程', '跨平台开发']),
-            ),
-          ],
-          child: InputTestApp(
-            theme: BiliTheme.light(),
-            builder: (context, child) => RepaintBoundary(
-              key: const ValueKey('video-tags-preview'),
-              child: child ?? const SizedBox.shrink(),
-            ),
-            home: Scaffold(
-              body: VideoScreen(
-                id: const VideoId('BV1abc123456'),
-                onSearchTag: (value) => searched = value,
-                playerBuilder: (_, _, _) =>
-                    _TrackedPlayer(onCreate: () => created++, onDispose: () {}),
+  for (final width in [360.0, 1100.0]) {
+    testWidgets(
+      'description and tags default to collapsed and toggle together at $width',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = Size(width, 800);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        const tag = 'Flutter & Dart/中文+测试';
+        String? searched;
+        var created = 0;
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              authControllerProvider.overrideWith(_GuestAuthController.new),
+              videoRepositoryProvider.overrideWithValue(_VideoRepository()),
+              videoExtrasRepositoryProvider.overrideWithValue(
+                _ExtrasRepository(tags: const [tag, '编程', '教程', '跨平台开发']),
+              ),
+            ],
+            child: InputTestApp(
+              theme: BiliTheme.light(),
+              builder: (context, child) => RepaintBoundary(
+                key: const ValueKey('video-tags-preview'),
+                child: child ?? const SizedBox.shrink(),
+              ),
+              home: Scaffold(
+                body: VideoScreen(
+                  id: const VideoId('BV1abc123456'),
+                  onSearchTag: (value) => searched = value,
+                  playerBuilder: (_, _, _) => _TrackedPlayer(
+                    onCreate: () => created++,
+                    onDispose: () {},
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('测试简介'), findsNothing);
-      expect(find.text('标签'), findsOneWidget);
-      await tester.tap(find.widgetWithText(ActionChip, tag));
-      expect(searched, tag);
-      await _tagsSnapshot(tester, 'wide');
-      await tester.tap(find.text('展开'));
-      await tester.pumpAndSettle();
-      expect(find.text('测试简介'), findsOneWidget);
-      expect(find.text('标签'), findsOneWidget);
-      await tester.tap(find.text('收起'));
-      await tester.pumpAndSettle();
-      tester.view.physicalSize = const Size(360, 800);
-      await tester.pumpAndSettle();
-      expect(find.byTooltip('收起视频信息'), findsOneWidget);
-      expect(find.text('标签'), findsOneWidget);
-      await _tagsSnapshot(tester, 'narrow');
-      expect(created, 1);
-      expect(tester.takeException(), isNull);
-    },
-  );
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('测试简介'), findsNothing);
+        expect(find.text('标签'), findsNothing);
+        expect(find.widgetWithText(ActionChip, tag), findsNothing);
+        expect(find.text('展开'), findsOneWidget);
+        await tester.tap(find.text('展开'));
+        await tester.pumpAndSettle();
+        expect(find.text('测试简介'), findsOneWidget);
+        expect(find.text('标签'), findsOneWidget);
+        await tester.ensureVisible(find.widgetWithText(ActionChip, tag));
+        await tester.tap(find.widgetWithText(ActionChip, tag));
+        expect(searched, tag);
+        await _tagsSnapshot(tester, width >= 1000 ? 'wide' : 'narrow');
+        await tester.ensureVisible(find.text('收起'));
+        await tester.tap(find.text('收起'));
+        await tester.pumpAndSettle();
+        expect(find.text('测试简介'), findsNothing);
+        expect(find.text('标签'), findsNothing);
+        expect(find.widgetWithText(ActionChip, tag), findsNothing);
+        tester.view.physicalSize = Size(width >= 1000 ? 360 : 1100, 800);
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('收起视频信息'), findsOneWidget);
+        expect(find.text('测试简介'), findsNothing);
+        expect(find.text('标签'), findsNothing);
+        await tester.tap(find.text('展开'));
+        await tester.pumpAndSettle();
+        expect(find.text('测试简介'), findsOneWidget);
+        expect(find.text('标签'), findsOneWidget);
+        expect(created, 1);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   for (final initialSize in [const Size(480, 660), const Size(1100, 800)]) {
     testWidgets(
