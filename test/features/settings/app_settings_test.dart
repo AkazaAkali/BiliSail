@@ -2,6 +2,28 @@ import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('wheel damping defaults, copies and normalizes independently', () {
+    expect(const AppSettings.defaults().wheelDampingRatio, 1.3);
+    expect(AppSettings().wheelDampingRatio, 1.3);
+    for (final entry in <double, double>{
+      -1: .5,
+      .5: .5,
+      .75: .75,
+      1: 1,
+      2: 2,
+      3: 2,
+      double.nan: 1.3,
+      double.infinity: 1.3,
+      double.negativeInfinity: 1.3,
+    }.entries) {
+      final settings = AppSettings(wheelDampingRatio: entry.key)
+          .normalized()
+          .copyWith(theme: AppThemePreference.dark);
+      expect(settings.wheelDampingRatio, entry.value);
+      expect(settings.theme, AppThemePreference.dark);
+    }
+  });
+
   test('live and video quality defaults normalize independently', () {
     expect(const AppSettings.defaults().preferredLiveQuality, 10000);
     expect(AppSettings().preferredLiveQuality, 10000);

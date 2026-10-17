@@ -9,6 +9,51 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'wheel damping updates live, queues saves and rolls back failures',
+    () async {
+      final repository = _DeferredSettingsRepository();
+      final container = ProviderContainer(
+        overrides: [settingsRepositoryProvider.overrideWithValue(repository)],
+      );
+      addTearDown(container.dispose);
+      await container.read(settingsControllerProvider.future);
+      final controller = container.read(settingsControllerProvider.notifier);
+      final ratio = controller.setWheelDampingRatio(1.55);
+      final theme = controller.setTheme(AppThemePreference.dark);
+      expect(
+        container
+            .read(settingsControllerProvider)
+            .requireValue
+            .wheelDampingRatio,
+        1.55,
+      );
+      await Future<void>.delayed(Duration.zero);
+      repository.completeNext();
+      await ratio;
+      await Future<void>.delayed(Duration.zero);
+      repository.completeNext();
+      await theme;
+      container.invalidate(settingsControllerProvider);
+      final loaded = await container.read(settingsControllerProvider.future);
+      expect(loaded.wheelDampingRatio, 1.55);
+      expect(loaded.theme, AppThemePreference.dark);
+
+      final failure = controller.setWheelDampingRatio(.5);
+      final assertion = expectLater(failure, throwsStateError);
+      await Future<void>.delayed(Duration.zero);
+      repository.failNext();
+      await assertion;
+      expect(
+        container
+            .read(settingsControllerProvider)
+            .requireValue
+            .wheelDampingRatio,
+        1.55,
+      );
+    },
+  );
+
   test('queued live and video quality changes persist independently', () async {
     final repository = _DeferredSettingsRepository();
     final container = ProviderContainer(

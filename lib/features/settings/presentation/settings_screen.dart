@@ -218,6 +218,27 @@ final class _SettingsCategoryPageState
                             '字体预览：哔哩哔哩 BiliSail（哔帆） · Aa 0123456789',
                             style: TextStyle(fontFamily: s.fontFamily),
                           ),
+                          const SizedBox(height: 20),
+                          _slider(
+                            '滚轮阻尼比',
+                            s.wheelDampingRatio,
+                            .5,
+                            2,
+                            controller.setWheelDampingRatio,
+                          ),
+                          const Text(
+                            '用于桌面鼠标滚轮，释放滑块后生效，默认 1.30。小于 1 更有弹性，大于 1 收尾更缓和。',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          TextButton(
+                            key: const ValueKey('reset-wheel-damping-ratio'),
+                            onPressed: s.wheelDampingRatio == 1.3
+                                ? null
+                                : () => _save(
+                                    () => controller.setWheelDampingRatio(1.3),
+                                  ),
+                            child: const Text('恢复默认阻尼比'),
+                          ),
                         ]),
                       if (widget.category == SettingsCategory.shortcuts)
                         _section('快捷键', [

@@ -7,6 +7,27 @@ import 'package:flutter/services.dart';
 import '../../core/presentation/input_scope.dart';
 import '../../core/presentation/workspace_activity.dart';
 
+/// Keeps local ScrollConfiguration overrides on the same wheel preference.
+final class SmoothScrollScope extends InheritedWidget {
+  const SmoothScrollScope({
+    super.key,
+    required this.dampingRatio,
+    required super.child,
+  }) : assert(dampingRatio > 0 && dampingRatio < double.infinity);
+
+  final double dampingRatio;
+
+  static double dampingRatioOf(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<SmoothScrollScope>()
+          ?.dampingRatio ??
+      1.3;
+
+  @override
+  bool updateShouldNotify(SmoothScrollScope oldWidget) =>
+      dampingRatio != oldWidget.dampingRatio;
+}
+
 /// Adds short wheel transitions without replacing a list's controller/physics.
 final class SmoothScrollBehavior extends MaterialScrollBehavior {
   const SmoothScrollBehavior({this.horizontalMouseWheel = false});
@@ -60,10 +81,14 @@ final class _SmoothWheelScrollState extends State<_SmoothWheelScroll> {
   _WheelScrollActivity? _motion;
   bool _enabled = true;
   bool _active = true;
+  double _dampingRatio = 1.3;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final dampingRatio = SmoothScrollScope.dampingRatioOf(context);
+    if (dampingRatio != _dampingRatio) _stopMotion();
+    _dampingRatio = dampingRatio;
     _active =
         WorkspaceActivity.isActive(context) &&
         TickerMode.valuesOf(context).enabled;
@@ -158,6 +183,7 @@ final class _SmoothWheelScrollState extends State<_SmoothWheelScroll> {
         delegate,
         widget.scrollable.vsync,
         delta,
+        dampingRatio: _dampingRatio,
       );
       _motion = activity;
       position.beginActivity(activity);
@@ -185,25 +211,26 @@ final class _SmoothWheelScrollState extends State<_SmoothWheelScroll> {
   }
 }
 
-/// Retargets Flutter's non-bouncing scroll spring on one continuous frame clock.
+/// Retargets Flutter's scroll spring on one continuous frame clock.
 final class _WheelScrollActivity extends ScrollActivity {
   _WheelScrollActivity(
     ScrollPosition position,
     super.delegate,
     TickerProvider vsync,
-    double delta,
-  ) : _position = position {
+    double delta, {
+    required double dampingRatio,
+  }) : _position = position,
+       _spring = SpringDescription.withDampingRatio(
+         mass: 1,
+         stiffness: 1600,
+         ratio: dampingRatio,
+       ) {
     addDelta(delta);
     _ticker = vsync.createTicker(_tick)..start();
   }
 
-  // Critical damping avoids a rebound; this spring settles a normal wheel notch
-  // in about 200–250ms rather than spending extra frames on a subpixel tail.
-  static const _spring = SpringDescription(
-    mass: 1,
-    stiffness: 1600,
-    damping: 80,
-  );
+  // The default ratio of 1.3 is overdamped for a softer stop without a rebound.
+  final SpringDescription _spring;
   static const _maxPendingDistance = 1500.0; // Logical pixels.
   ScrollPosition _position;
   ScrollPosition get position => _position;
@@ -218,13 +245,17 @@ final class _WheelScrollActivity extends ScrollActivity {
   bool disposed = false;
 
   void addDelta(double delta) {
-    final reversing = _lastDelta != 0 && delta.sign != _lastDelta.sign;
+    final remaining = _targetDistance - _lastSimulationPosition;
+    // Elastic ratios can already be rebounding when a new notch arrives.
+    // Fresh input takes priority over motion or an endpoint behind that input.
+    final reversing =
+        (_lastDelta != 0 && delta.sign != _lastDelta.sign) ||
+        (_velocity != 0 && delta.sign != _velocity.sign) ||
+        (remaining != 0 && delta.sign != remaining.sign);
     if (reversing) _velocity = 0;
-    final remaining = reversing
-        ? 0.0
-        : _targetDistance - _lastSimulationPosition;
     _targetDistance =
-        (remaining + delta.clamp(-_maxPendingDistance, _maxPendingDistance))
+        ((reversing ? 0 : remaining) +
+                delta.clamp(-_maxPendingDistance, _maxPendingDistance))
             .clamp(-_maxPendingDistance, _maxPendingDistance)
             .toDouble();
     _simulation = ScrollSpringSimulation(

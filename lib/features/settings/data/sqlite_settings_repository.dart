@@ -59,6 +59,7 @@ class SqliteSettingsRepository implements SettingsRepository {
       shortcuts: ShortcutSettings.fromJson(decoded['shortcuts']),
       allowConcurrentPlayback: boolean('allowConcurrentPlayback', true),
       cacheImages: boolean('cacheImages', true),
+      wheelDampingRatio: number('wheelDampingRatio', 1.3),
       systemFontFamily: decoded['systemFontFamily'] is String
           ? decoded['systemFontFamily'] as String
           : '',
@@ -178,10 +179,11 @@ class SqliteSettingsRepository implements SettingsRepository {
     return database.writeSetting(
       'preferences.v1',
       jsonEncode({
-        'schemaVersion': 20,
+        'schemaVersion': 21,
         'navigationMode': value.navigationMode.name,
         'allowConcurrentPlayback': value.allowConcurrentPlayback,
         'cacheImages': value.cacheImages,
+        'wheelDampingRatio': value.wheelDampingRatio,
         'shortcuts': value.shortcuts.toJson(),
         'theme': value.theme.name,
         'font': value.font.name,

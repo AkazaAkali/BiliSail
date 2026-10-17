@@ -15,6 +15,38 @@ void main() {
     repository = SqliteSettingsRepository(database);
   });
   tearDown(() => database.close());
+  test('wheel damping migrates and survives save and reload', () async {
+    expect((await repository.load()).wheelDampingRatio, 1.3);
+    for (final invalid in ['null', '"invalid"', 'true', '1e999']) {
+      await database.writeSetting(
+        'preferences.v1',
+        '{"schemaVersion":20,"theme":"dark","wheelDampingRatio":$invalid}',
+      );
+      final loaded = await repository.load();
+      expect(loaded.wheelDampingRatio, 1.3);
+      expect(loaded.theme, AppThemePreference.dark);
+    }
+    await database.writeSetting(
+      'preferences.v1',
+      '{"schemaVersion":20,"theme":"dark","cacheImages":false}',
+    );
+    final legacy = await repository.load();
+    expect(legacy.wheelDampingRatio, 1.3);
+    for (final ratio in [.5, .75, 1.0, 1.3, 1.55, 2.0]) {
+      await repository.save(legacy.copyWith(wheelDampingRatio: ratio));
+      final loaded = await SqliteSettingsRepository(database).load();
+      expect(loaded.wheelDampingRatio, ratio);
+      expect(loaded.theme, AppThemePreference.dark);
+      expect(loaded.cacheImages, isFalse);
+      final snapshot = jsonDecode(
+        (await database.readSetting('preferences.v1')) ?? '{}',
+      ) as Map<String, Object?>;
+      expect(snapshot['schemaVersion'], 21);
+      expect(snapshot['wheelDampingRatio'], ratio);
+    }
+    expect(database.schemaVersion, 3);
+  });
+
   for (final defaults in [
     (area: .5, fontScale: .6),
     (area: .75, fontScale: 1.0),
@@ -126,7 +158,7 @@ void main() {
         final snapshot = jsonDecode(
           (await database.readSetting('preferences.v1')) ?? '{}',
         ) as Map<String, Object?>;
-        expect(snapshot['schemaVersion'], 20);
+        expect(snapshot['schemaVersion'], 21);
         expect(snapshot['preferredLiveQuality'], quality);
       }
       expect(database.schemaVersion, 3);
@@ -228,7 +260,7 @@ void main() {
         final snapshot = jsonDecode(
           (await database.readSetting('preferences.v1')) ?? '{}',
         ) as Map<String, Object?>;
-        expect(snapshot['schemaVersion'], 20);
+        expect(snapshot['schemaVersion'], 21);
         expect(snapshot['playerControlsMode'], mode.name);
       }
       expect(database.schemaVersion, 3);
@@ -295,7 +327,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 20);
+          expect(snapshot['schemaVersion'], 21);
           expect(snapshot['navigationMode'], mode.name);
         }
         for (final selected in WorkspaceNavigationMode.values) {
@@ -343,7 +375,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 20);
+      expect(snapshot['schemaVersion'], 21);
       expect(snapshot['theme'], 'dark');
       expect(database.schemaVersion, 3);
     },
@@ -385,7 +417,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 20);
+      expect(snapshot['schemaVersion'], 21);
       expect(snapshot['allowConcurrentPlayback'], allowed);
       expect(snapshot['navigationMode'], 'singlePage');
       final reloaded = await repository.load();

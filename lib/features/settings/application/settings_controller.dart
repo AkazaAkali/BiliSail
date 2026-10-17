@@ -68,6 +68,8 @@ final class SettingsController extends AsyncNotifier<AppSettings> {
   );
   Future<void> setCacheImages(bool value) =>
       update((current) => current.copyWith(cacheImages: value));
+  Future<void> setWheelDampingRatio(double value) =>
+      update((current) => current.copyWith(wheelDampingRatio: value));
   Future<void> setDanmakuEnabled(bool value) =>
       update((current) => current.copyWith(danmakuEnabled: value));
   Future<void> setShowCollapsedProgress(bool value) =>

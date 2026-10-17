@@ -11,6 +11,47 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets(
+    'appearance wheel damping saves, reloads and restores the default',
+    (tester) async {
+      final repository = _SettingsRepository();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [settingsRepositoryProvider.overrideWithValue(repository)],
+          child: const MaterialApp(home: Scaffold(body: SettingsScreen())),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final slider = find.byWidgetPredicate(
+        (widget) => widget is Slider && widget.min == .5 && widget.max == 2,
+      );
+      await tester.ensureVisible(slider);
+      await tester.pumpAndSettle();
+      final reset = find.byKey(const ValueKey('reset-wheel-damping-ratio'));
+      expect(tester.widget<TextButton>(reset).onPressed, isNull);
+      expect(find.text('滚轮阻尼比 · 1.30'), findsOneWidget);
+      final control = tester.widget<Slider>(slider);
+      control.onChanged?.call(1.55);
+      await tester.pump();
+      expect(repository.settings.wheelDampingRatio, 1.3);
+      control.onChangeEnd?.call(1.55);
+      await tester.pumpAndSettle();
+      expect(repository.settings.wheelDampingRatio, 1.55);
+      expect(find.text('滚轮阻尼比 · 1.55'), findsOneWidget);
+      final container = ProviderScope.containerOf(tester.element(slider));
+      container.invalidate(settingsControllerProvider);
+      await tester.pumpAndSettle();
+      expect(tester.widget<Slider>(slider).value, 1.55);
+      await tester.ensureVisible(reset);
+      await tester.tap(reset);
+      await tester.pumpAndSettle();
+      expect(repository.settings.wheelDampingRatio, 1.3);
+      expect(find.text('滚轮阻尼比 · 1.30'), findsOneWidget);
+      expect(tester.widget<TextButton>(reset).onPressed, isNull);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final inPlayer in [false, true]) {
     testWidgets('subtitle bottom distance saves 240 px (player: $inPlayer)', (
       tester,

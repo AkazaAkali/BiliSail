@@ -365,17 +365,20 @@ class _BiliAppState extends ConsumerState<BiliApp> {
         title: 'BiliSail',
         debugShowCheckedModeBanner: false,
         scrollBehavior: const SmoothScrollBehavior(),
-        builder: (context, child) => AppInputHost<Object>(
-          dispatcher: _input,
-          routes: _input.routes,
-          onEditingChanged: widget.dependencies.window.setTextInputActive,
-          child: AppUpdateHost(
-            navigatorKey: _router.routerDelegate.navigatorKey,
-            child: AppNoticeHost(
-              child: VideoCardInteractionScope(
-                interactions: cardInteractions,
-                onNotice: showAppNotice,
-                child: child ?? const SizedBox.shrink(),
+        builder: (context, child) => SmoothScrollScope(
+          dampingRatio: settings.wheelDampingRatio,
+          child: AppInputHost<Object>(
+            dispatcher: _input,
+            routes: _input.routes,
+            onEditingChanged: widget.dependencies.window.setTextInputActive,
+            child: AppUpdateHost(
+              navigatorKey: _router.routerDelegate.navigatorKey,
+              child: AppNoticeHost(
+                child: VideoCardInteractionScope(
+                  interactions: cardInteractions,
+                  onNotice: showAppNotice,
+                  child: child ?? const SizedBox.shrink(),
+                ),
               ),
             ),
           ),

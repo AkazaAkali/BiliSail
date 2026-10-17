@@ -50,6 +50,7 @@ final class AppSettings {
     this.font = AppFontPreference.harmonyOsSans,
     this.systemFontFamily = '',
     this.cacheImages = true,
+    this.wheelDampingRatio = 1.3,
     this.danmakuEnabled = true,
     this.danmakuOpacity = 0.8,
     this.danmakuFontScale = 1.0,
@@ -106,6 +107,7 @@ final class AppSettings {
        font = AppFontPreference.harmonyOsSans,
        systemFontFamily = '',
        cacheImages = true,
+       wheelDampingRatio = 1.3,
        danmakuEnabled = true,
        danmakuOpacity = 0.8,
        autoPlay = true,
@@ -156,6 +158,9 @@ final class AppSettings {
   final String systemFontFamily;
   String? get fontFamily => font.resolveFamily(systemFontFamily);
   final bool cacheImages;
+
+  /// Mouse-wheel spring damping ratio; 1 is critically damped.
+  final double wheelDampingRatio;
   final bool danmakuEnabled;
   final double danmakuOpacity;
   final double danmakuFontScale;
@@ -220,6 +225,7 @@ final class AppSettings {
     AppFontPreference? font,
     String? systemFontFamily,
     bool? cacheImages,
+    double? wheelDampingRatio,
     bool? danmakuEnabled,
     double? danmakuOpacity,
     double? danmakuFontScale,
@@ -270,6 +276,7 @@ final class AppSettings {
     font: font ?? this.font,
     systemFontFamily: systemFontFamily ?? this.systemFontFamily,
     cacheImages: cacheImages ?? this.cacheImages,
+    wheelDampingRatio: wheelDampingRatio ?? this.wheelDampingRatio,
     danmakuEnabled: danmakuEnabled ?? this.danmakuEnabled,
     danmakuOpacity: danmakuOpacity ?? this.danmakuOpacity,
     danmakuFontScale: danmakuFontScale ?? this.danmakuFontScale,
@@ -365,6 +372,7 @@ final class AppSettings {
     double bounded(double value, double min, double max, double fallback) =>
         value.isFinite ? value.clamp(min, max) : fallback;
     return copyWith(
+      wheelDampingRatio: bounded(wheelDampingRatio, .5, 2, 1.3),
       systemFontFamily: family(systemFontFamily),
       danmakuSystemFontFamily: family(danmakuSystemFontFamily),
       preferredQuality: supportedQualities.contains(preferredQuality)

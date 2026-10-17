@@ -11,6 +11,86 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../support/input_test_app.dart';
 
 void main() {
+  for (final horizontal in [false, true]) {
+    testWidgets('changing damping stops old motion and updates retained '
+        '${horizontal ? 'local horizontal' : 'global vertical'} scrolling', (
+      tester,
+    ) async {
+      final controller = ScrollController();
+      addTearDown(controller.dispose);
+      var ratio = 1.3;
+      late StateSetter update;
+      await tester.pumpWidget(
+        StatefulBuilder(
+          builder: (_, setState) {
+            update = setState;
+            return SmoothScrollScope(
+              dampingRatio: ratio,
+              child: _app(
+                horizontal
+                    ? ScrollConfiguration(
+                        behavior: const SmoothScrollBehavior(
+                          horizontalMouseWheel: true,
+                        ),
+                        child: ListView(
+                          controller: controller,
+                          scrollDirection: Axis.horizontal,
+                          children: const [SizedBox(width: 2400)],
+                        ),
+                      )
+                    : _list(controller),
+              ),
+            );
+          },
+        ),
+      );
+      final position = controller.position;
+      await _wheel(tester, find.byType(ListView), 120);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 48));
+      final defaultDistance = controller.offset;
+      expect(defaultDistance, greaterThan(0));
+      update(() => ratio = 2);
+      await tester.pump();
+      expect(controller.position, same(position));
+      expect(position.isScrollingNotifier.value, isFalse);
+      final stopped = controller.offset;
+      await tester.pump(const Duration(seconds: 1));
+      expect(controller.offset, stopped);
+      await _wheel(tester, find.byType(ListView), 120);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 48));
+      expect(controller.offset - stopped, inExclusiveRange(0, defaultDistance));
+      await tester.pumpAndSettle();
+      expect(controller.offset, closeTo(stopped + 120, .000001));
+      expect(position.isScrollingNotifier.value, isFalse);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
+    'elastic damping can rebound and a new notch cancels the rebound',
+    (tester) async {
+      final controller = ScrollController(initialScrollOffset: 300);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        SmoothScrollScope(dampingRatio: .5, child: _app(_list(controller))),
+      );
+      await _wheel(tester, find.byType(ListView), 120);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(controller.offset, greaterThan(420));
+      expect(controller.position.activity?.velocity, lessThan(0));
+      final before = controller.offset;
+      await _wheel(tester, find.byType(ListView), 1);
+      expect(controller.position.activity?.velocity, 0);
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(controller.offset, greaterThan(before));
+      await tester.pumpAndSettle();
+      expect(controller.offset, closeTo(before + 1, .000001));
+    },
+  );
+
   for (final modifier in [
     LogicalKeyboardKey.altLeft,
     LogicalKeyboardKey.controlLeft,
@@ -180,7 +260,7 @@ void main() {
   for (final pixelRatio in [1.0, 1.25, 1.5, 2.0]) {
     for (final frameMilliseconds in [8, 16]) {
       testWidgets(
-        'wheel settles within 300ms and stays still at DPR $pixelRatio '
+        'wheel settles within 400ms and stays still at DPR $pixelRatio '
         'with ${frameMilliseconds}ms frames',
         (tester) async {
           tester.view.devicePixelRatio = pixelRatio;
@@ -203,7 +283,7 @@ void main() {
           var elapsedMilliseconds = 0;
           var previous = controller.offset;
           while (controller.position.isScrollingNotifier.value &&
-              elapsedMilliseconds + frameMilliseconds <= 300) {
+              elapsedMilliseconds + frameMilliseconds <= 400) {
             await tester.pump(Duration(milliseconds: frameMilliseconds));
             elapsedMilliseconds += frameMilliseconds;
             expect(controller.offset, inInclusiveRange(previous, 120));
