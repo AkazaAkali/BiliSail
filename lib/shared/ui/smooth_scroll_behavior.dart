@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -187,8 +185,7 @@ final class _SmoothWheelScrollState extends State<_SmoothWheelScroll> {
   }
 }
 
-/// Wheel impulses drive a velocity that decays while the displayed velocity
-/// follows smoothly. One frame clock integrates motion without a position target.
+/// Retargets Flutter's non-bouncing scroll spring on one continuous frame clock.
 final class _WheelScrollActivity extends ScrollActivity {
   _WheelScrollActivity(
     ScrollPosition position,
@@ -200,77 +197,95 @@ final class _WheelScrollActivity extends ScrollActivity {
     _ticker = vsync.createTicker(_tick)..start();
   }
 
-  // Seconds. The short response smooths wheel impulses; the longer decay lets
-  // successive notches build speed. An uncapped impulse integrates to its delta.
-  static const _decaySeconds = .075;
-  static const _responseSeconds = .020;
-  static const _maxDriveVelocity = 24000.0; // Logical pixels / second.
-  static const _distanceTolerance = .01; // Remaining logical pixels.
-  static const _velocityTolerance = 5.0; // Logical pixels / second.
+  // Critical damping avoids a rebound; this spring settles a normal wheel notch
+  // in about 200–250ms rather than spending extra frames on a subpixel tail.
+  static const _spring = SpringDescription(
+    mass: 1,
+    stiffness: 1600,
+    damping: 80,
+  );
+  static const _maxPendingDistance = 1500.0; // Logical pixels.
   ScrollPosition _position;
   ScrollPosition get position => _position;
   late final Ticker _ticker;
+  late ScrollSpringSimulation _simulation;
   Duration _lastElapsed = Duration.zero;
+  Duration _simulationStartedAt = Duration.zero;
+  double _targetDistance = 0;
+  double _lastSimulationPosition = 0;
   double _lastDelta = 0;
-  double _driveVelocity = 0;
   double _velocity = 0;
   bool disposed = false;
 
   void addDelta(double delta) {
-    if (_lastDelta != 0 && delta.sign != _lastDelta.sign) {
-      _driveVelocity = 0;
-      _velocity = 0;
-    }
-    _driveVelocity = (_driveVelocity + delta / _decaySeconds)
-        .clamp(-_maxDriveVelocity, _maxDriveVelocity)
-        .toDouble();
+    final reversing = _lastDelta != 0 && delta.sign != _lastDelta.sign;
+    if (reversing) _velocity = 0;
+    final remaining = reversing
+        ? 0.0
+        : _targetDistance - _lastSimulationPosition;
+    _targetDistance =
+        (remaining + delta.clamp(-_maxPendingDistance, _maxPendingDistance))
+            .clamp(-_maxPendingDistance, _maxPendingDistance)
+            .toDouble();
+    _simulation = ScrollSpringSimulation(
+      _spring,
+      0,
+      _targetDistance,
+      _velocity,
+      // Match the display scale, ending within half a physical pixel instead
+      // of chasing hundredths of a logical pixel. The simulator owns settling.
+      tolerance: Tolerance(
+        distance: .5 / position.devicePixelRatio,
+        velocity: position.physics.toleranceFor(position).velocity,
+      ),
+    );
+    _lastSimulationPosition = 0;
+    _simulationStartedAt = _lastElapsed;
     _lastDelta = delta;
   }
 
   void _tick(Duration elapsed) {
     if (disposed || elapsed <= _lastElapsed) return;
-    final seconds = (elapsed - _lastElapsed).inMicroseconds / 1000000;
     _lastElapsed = elapsed;
-    if (!position.hasContentDimensions ||
-        !position.physics.shouldAcceptUserOffset(position)) {
+    if (!position.hasContentDimensions) {
       stop();
       return;
     }
-    final previousDrive = _driveVelocity;
-    final previousVelocity = _velocity;
-    final decay = math.exp(-seconds / _decaySeconds);
-    final response = math.exp(-seconds / _responseSeconds);
-    _driveVelocity = previousDrive * decay;
-    // Exact integration of du/dt = -u/decay and dv/dt = (u-v)/response.
-    // This avoids frame-rate-dependent Euler steps at 60/120Hz or delayed frames.
-    _velocity =
-        previousVelocity * response +
-        previousDrive *
-            _decaySeconds /
-            (_decaySeconds - _responseSeconds) *
-            (decay - response);
-    var distance =
-        _decaySeconds * (previousDrive - _driveVelocity) +
-        _responseSeconds * (previousVelocity - _velocity);
-    final remainingDistance =
-        _decaySeconds * _driveVelocity + _responseSeconds * _velocity;
-    final settled =
-        remainingDistance.abs() < _distanceTolerance &&
-        _velocity.abs() < _velocityTolerance;
-    if (settled) {
-      // Integrate the subpixel tail once so separate gestures do not accumulate
-      // rounding loss. There is still no stored endpoint to chase or snap to.
-      distance += remainingDistance;
-      _driveVelocity = 0;
-      _velocity = 0;
+    if (position.outOfRange) {
+      // A resize can leave pixels outside the new extent while the activity is
+      // moving. Correct on this frame, outside layout, before releasing it.
+      delegate.setPixels(
+        position.pixels.clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+      );
+      if (!disposed) stop();
+      return;
     }
+    if (!position.physics.shouldAcceptUserOffset(position)) {
+      stop();
+      return;
+    }
+    final simulation = _simulation;
+    final seconds = (elapsed - _simulationStartedAt).inMicroseconds / 1000000;
+    final value = simulation.x(seconds);
+    final distance = value - _lastSimulationPosition;
+    _lastSimulationPosition = value;
+    _velocity = simulation.dx(seconds);
+    // Apply only the frame's displacement so layout can still correct pixels.
     final next = (position.pixels + distance).clamp(
       position.minScrollExtent,
       position.maxScrollExtent,
     );
     final overscroll = delegate.setPixels(next);
     // A scroll listener can take ownership while setPixels dispatches updates.
-    if (!disposed && (settled || _atBoundary || overscroll != 0)) stop();
+    if (!disposed &&
+        ((identical(simulation, _simulation) && simulation.isDone(seconds)) ||
+            _atBoundary ||
+            overscroll != 0)) {
+      stop();
+    }
   }
 
   bool get _atBoundary => _lastDelta > 0
@@ -283,6 +298,9 @@ final class _WheelScrollActivity extends ScrollActivity {
 
   @override
   void applyNewDimensions() {
+    // Some physics defer out-of-range correction while velocity is nonzero.
+    // Keep the next tick so it can clamp to the new extent before stopping.
+    if (position.outOfRange) return;
     // Layout owns any offset correction. Keep momentum if there is still room;
     // at an edge discard it even if more content may arrive later.
     if (_atBoundary || !position.physics.shouldAcceptUserOffset(position)) {

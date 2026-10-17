@@ -177,6 +177,68 @@ void main() {
     expect(controller.offset, closeTo(480, .001));
   });
 
+  for (final pixelRatio in [1.0, 1.25, 1.5, 2.0]) {
+    for (final frameMilliseconds in [8, 16]) {
+      testWidgets(
+        'wheel settles within 300ms and stays still at DPR $pixelRatio '
+        'with ${frameMilliseconds}ms frames',
+        (tester) async {
+          tester.view.devicePixelRatio = pixelRatio;
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final controller = ScrollController();
+          addTearDown(controller.dispose);
+          await tester.pumpWidget(
+            _app(
+              ListView(
+                controller: controller,
+                children: const [
+                  SizedBox(height: 300, child: Text('scroll anchor')),
+                  SizedBox(height: 2400),
+                ],
+              ),
+            ),
+          );
+          await _wheel(tester, find.byType(ListView), 120);
+          await tester.pump();
+          var elapsedMilliseconds = 0;
+          var previous = controller.offset;
+          while (controller.position.isScrollingNotifier.value &&
+              elapsedMilliseconds + frameMilliseconds <= 300) {
+            await tester.pump(Duration(milliseconds: frameMilliseconds));
+            elapsedMilliseconds += frameMilliseconds;
+            expect(controller.offset, inInclusiveRange(previous, 120));
+            previous = controller.offset;
+          }
+          expect(controller.position.isScrollingNotifier.value, isFalse);
+          expect(controller.offset, closeTo(120, .000001));
+          final anchor = tester.getTopLeft(find.text('scroll anchor'));
+          await tester.pump(const Duration(milliseconds: 100));
+          expect(controller.offset, 120);
+          expect(tester.getTopLeft(find.text('scroll anchor')), anchor);
+          await tester.pump(const Duration(seconds: 1));
+          expect(controller.offset, 120);
+          expect(tester.getTopLeft(find.text('scroll anchor')), anchor);
+        },
+      );
+    }
+  }
+
+  testWidgets(
+    'fractional wheel distances do not drift across settled gestures',
+    (tester) async {
+      final controller = ScrollController(initialScrollOffset: .35);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(_app(_list(controller)));
+      for (var i = 0; i < 3; i++) {
+        await _wheel(tester, find.byType(ListView), 120.25);
+        await tester.pumpAndSettle();
+        await _wheel(tester, find.byType(ListView), 40.125);
+        await tester.pumpAndSettle();
+      }
+      expect(controller.offset, closeTo(.35 + 3 * 160.375, .000001));
+    },
+  );
+
   testWidgets('wheel velocity builds smoothly then coasts to rest', (
     tester,
   ) async {
@@ -188,7 +250,7 @@ void main() {
     await tester.pump();
     var previousOffset = controller.offset;
     var previousVelocity = 0.0;
-    for (var i = 0; i < 5; i++) {
+    for (var i = 0; i < 3; i++) {
       await tester.pump(const Duration(milliseconds: 8));
       final velocity = controller.position.activity?.velocity ?? 0;
       expect(velocity, greaterThan(previousVelocity));
@@ -232,7 +294,7 @@ void main() {
     expect(controller.offset, closeTo(beforeReverse - 120, .01));
   });
 
-  testWidgets('velocity integration is independent of the frame interval', (
+  testWidgets('wheel simulation is independent of the frame interval', (
     tester,
   ) async {
     final offsets = <double>[];
@@ -727,6 +789,41 @@ void main() {
     expect(controller.offset, closeTo(start + 120, .01));
     expect(controller.offset, greaterThan(oldEdge));
   });
+
+  testWidgets(
+    'shrinking to a single viewport clamps and releases wheel motion',
+    (tester) async {
+      final controller = ScrollController();
+      addTearDown(controller.dispose);
+      var height = 2400.0;
+      late StateSetter update;
+      await tester.pumpWidget(
+        _app(
+          StatefulBuilder(
+            builder: (_, setState) {
+              update = setState;
+              return ListView(
+                controller: controller,
+                children: [SizedBox(height: height)],
+              );
+            },
+          ),
+        ),
+      );
+      await _wheel(tester, find.byType(ListView), 1500);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 40));
+      expect(controller.offset, greaterThan(0));
+      update(() => height = 100);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(controller.offset, 0);
+      expect(controller.position.isScrollingNotifier.value, isFalse);
+      await tester.pump(const Duration(seconds: 1));
+      expect(controller.offset, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('reaching an edge discards momentum before new content arrives', (
     tester,
