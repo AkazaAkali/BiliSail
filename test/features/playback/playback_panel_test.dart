@@ -2125,8 +2125,14 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final theme = brightness == Brightness.light
-          ? BiliTheme.light()
-          : BiliTheme.dark();
+          ? BiliTheme.light(
+              font: AppFontPreference.installed,
+              systemFontFamily: 'Player Test Font',
+            )
+          : BiliTheme.dark(
+              font: AppFontPreference.installed,
+              systemFontFamily: 'Player Test Font',
+            );
       final session = _session(
         _FakeEngine(),
         repository: _MenuRepository(),
@@ -2148,6 +2154,10 @@ void main() {
       await tester.pumpAndSettle();
       final videoText = find.text('720P');
       final videoStyle = DefaultTextStyle.of(tester.element(videoText)).style;
+      final videoParagraph = tester.renderObject<RenderParagraph>(
+        find.descendant(of: videoText, matching: find.byType(RichText)),
+      );
+      expect(videoParagraph.text.style?.fontFamily, 'Player Test Font');
       final videoPopup = tester.widget<Material>(
         find.ancestor(of: videoText, matching: find.byType(Material)).first,
       );
@@ -2168,6 +2178,10 @@ void main() {
       await tester.pumpAndSettle();
       final liveText = find.text('720P 超清');
       final liveStyle = DefaultTextStyle.of(tester.element(liveText)).style;
+      final liveParagraph = tester.renderObject<RenderParagraph>(
+        find.descendant(of: liveText, matching: find.byType(RichText)),
+      );
+      expect(liveParagraph.text.style?.fontFamily, 'Player Test Font');
       final livePopup = tester.widget<Material>(
         find.ancestor(of: liveText, matching: find.byType(Material)).first,
       );

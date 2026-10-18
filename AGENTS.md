@@ -2,29 +2,52 @@
 
 ## 项目状态与入口
 
-- 目标：Flutter Bilibili 第三方客户端，首批 Android arm64、Windows x64、macOS arm64。
-- 当前已有 Flutter 0.1.0 预览工程、三个独立包、根应用/包测试和 Windows 调试入口。已实现范围与平台实测状态见 `README.md` 和 `docs/validation/m0-results.md`；M0 三端验收尚未全部完成。
-- 开始前阅读 [文档索引](docs/README.md)、[整体架构](docs/architecture.md) 和与任务有关的专项文档。
-- 实施顺序见 [实施与验收](docs/implementation-plan.md)，从 M0 技术验证开始。目录树和命令是目标设计，不能把未创建的结构写为现状。
+- Flutter/Dart Bilibili 第三方客户端，工程名为 `bilisail`，首批交付 Android arm64、Windows x64、macOS arm64；Windows 是当前主要本地开发与原生验证平台。
+- 截至 2026-10-18，工程已包含根应用、四个独立包、单/多标签工作区、视频/PGC/直播播放、账号与消息、共享评论和动态互动、云端历史、本地续播、下载与离线播放。功能概览和平台状态见 [README](README.md)；源码版本以 [pubspec.yaml](pubspec.yaml) 为准，不在本文件重复维护版本号，也不将工作区版本等同于已发布版本。
+- 仓库已有 Windows 本地/CI 构建、原生媒体及部分安装运行记录，Android 本地/CI 构建和 macOS CI 构建/打包记录。构建记录不代表设备启动、完整账号流程、安装升级、长期稳定性或性能验收；Android/macOS 实机未测项仍按专项记录保留。
+- 开始前阅读 [文档索引](docs/README.md)、[整体架构](docs/architecture.md) 和相关专项文档。文档中的 0.1.0、M0、目标目录树等可能是早期快照；判断现状须核对当前源码、锁文件、脚本和对应日期的验证记录。
+- [实施与验收](docs/implementation-plan.md) 保留里程碑和退出条件，不再将每项任务视为从 M0 初始化工程。已实现部分 M3–M5 功能不等于这些阶段或三端验收已全部完成。
 - 重要选择和改变记录在 [架构决策](docs/decisions.md)。文档默认中文，类型、变量和文件名使用清晰的英文。
+
+按任务补读以下入口，避免只依据首版 [M0 记录](docs/validation/m0-results.md) 判断当前能力：
+
+| 任务 | 入口 |
+| --- | --- |
+| 播放、弹幕与标签生命周期 | [播放设计](docs/playback-and-danmaku.md)、[多标签播放](docs/validation/multi-tab-playback.md)、[单标签导航](docs/validation/single-page-navigation.md) |
+| 协议、账号与登录 | [API 方案](docs/api-design.md)、[密码/短信登录](docs/validation/password-sms-login.md) |
+| 下载、封装与离线播放 | [下载方案](docs/downloads.md)、[bili_mux](packages/bili_mux/README.md)、[封装验证](docs/validation/download-muxing-results.md) |
+| 评论与动态共享交互 | [动态互动](docs/validation/dynamic-interactions.md) |
+| 快捷键、焦点与 Windows 输入法 | [快捷键实施记录](docs/shortcut-system/implementation-results.md) |
+| 滚轮与持久化阻尼设置 | [平滑滚动](docs/validation/smooth-scrolling.md) |
+| media-kit 依赖与 Android Surface | [fork 移植与验证](docs/validation/piliplus-media-kit-port.md) |
+| 构建、签名与安装包 | [CI/CD](docs/validation/ci-cd.md)、[macOS 启动与安全存储](docs/validation/macos-release-startup.md) |
 
 ## 参考仓库
 
 - 相邻 `../biliuwp-lite` 提供功能和交互/模块划分参考；`../bili-kernel` 提供 C#/.NET API 实现参考，后者不是 Rust 项目。
+- `../PiliPlus` 用于协议、播放器与弹幕行为参考；采用前核对实际 Git overrides、锁文件和精确提交。PiliPlus 应用的 GPLv3 与其所用 media-kit 分支的 MIT 许可分别处理，不能将应用源码按 MIT 使用。
 - 定位源码、提交与采用限制见 [参考文档](docs/references.md)。除用户明确要求外，不修改相邻仓库，不将它们作为需要发布的运行时依赖。
+- 当前 media-kit 使用自有 Git fork 的固定提交，并非相邻 `../media-kit` 的 path 依赖。需要修改 fork 时遵循用户授权范围，应用只依赖已固定、可获取的源码。
 - 借鉴职责、协议和模型，避免机械翻译 UWP 控件、静态全局服务或整仓导入。引用代码/schema/资源前记录来源与明确的许可范围。
 - 参考 API 不等于在线可用；未做在线验证必须注明。不要把对话中的性能概括当作测量结果。
 
 ## 架构边界
 
-1. 根应用按 `features/<feature>/{domain,data,application,presentation}` 组织。`app` 为唯一组合根，`core` 为通用基础能力，`shared/ui` 为通用组件。
+1. 根应用按 `lib/features/<feature>/{domain,data,application,presentation}` 组织。`lib/app` 为唯一组合根，`lib/core` 为通用基础能力，`lib/domain` 为共享领域类型，`lib/shared` 放共用映射和 UI。
 2. `domain` 保持纯 Dart，不引用 Flutter、Riverpod、Dio、SQLite 或平台插件。Repository 接口属于领域层，实现属于 data。
 3. 页面只消费应用控制器与领域状态；不直接发网络请求、访问数据库、解析 JSON/Protobuf 或调用 media_kit。
 4. 控制器通过构造器/Provider 注入 Repository 和端口。Riverpod 是默认状态与 DI 方案，go_router 管导航；不另起全局 service locator。
-5. `packages/bili_api` 是纯 Dart 协议包，不存 UI/数据库状态；`bili_player` 只处理通用媒体；`bili_danmaku` 不做网络请求。
+5. 四个独立包的职责见下表；内容身份、账号、队列和业务规则留在主应用，不能下沉到通用媒体包。
 6. 独立包只开放公共入口，不导入其他包的 `src/`。包不能反向依赖主应用；Feature 不导入另一 Feature 的 data/presentation，不产生环形依赖。
 7. 简单功能直接调用 Repository；只对跨仓储或复杂规则增加 UseCase。按实际需求建文件，不预建空架构或给每个方法套抽象层。
-8. Rust 不是 MVP 必需项。有 profile 数据或明确复用需求时按决策 D2 评估 FRB；先隔离纯计算，保持单一状态所有者。
+8. 当前不依赖 Rust。只有 profile 数据或明确复用需求时才按决策 D2 评估 FRB；先隔离纯计算，保持单一状态所有者。
+
+| 包 | 职责与边界 |
+| --- | --- |
+| `bili_api` | 纯 Dart HTTP/Protobuf/WebSocket 协议与远端模型；不持有 UI、数据库或产品设置 |
+| `bili_player` | 通用 source/engine 契约、`MediaKitEngine`、`VideoSurface` 和播放控件；不认识 bvid/cid、账号或 Bilibili API |
+| `bili_danmaku` | 无网络的点播/直播弹幕调度、布局与绘制；时钟和事件由调用方提供 |
+| `bili_mux` | 独立精简 FFmpeg 与 Dart FFI，仅处理本地 MP4/MKV 流复制；不解码、转码、访问网络或复用播放器内部 FFmpeg ABI |
 
 ## Dart 与状态约定
 
@@ -37,10 +60,23 @@
 - 明确释放 StreamSubscription、Ticker、Timer、isolate、WebSocket、播放器和文件句柄。不要用页面销毁意外终止进程级任务。
 - 高频 position/弹幕更新只影响局部绘制，禁止经全局 Provider 逐帧重建页面。
 
+## 工作区、设置与共享交互
+
+- 工作区共用页面身份、访问历史和 PageStorage；切换标签或导航模式保留未关闭页面的状态。页面缓存上限 16、访问历史上限 64，不引入无界页面保留。
+- Windows/macOS 默认多标签，Android 默认单标签；平台默认值集中在 `lib/app/platform_defaults.dart` 并注入设置仓储。改变默认值只影响缺失/非法配置，保留用户已保存的有效选择。
+- `WorkspaceActivity` 表达页面可见性，不代替播放所有权。隐藏页面停用绘制、媒体 surface 和快捷键；关闭页面取消其拥有的请求并释放对应播放会话。系统后台与应用内切页分别处理。
+- 设置沿用 `AppSettings`、设置控制器和 `SqliteSettingsRepository`；可调项按既有流程保存并立即应用，保存失败保留或回退已保存配置。默认、恢复默认、非法值回退和迁移须一致，不能覆盖有效旧值。
+- 跨视频/PGC/直播、普通/全屏的相同行为优先修改共享会话或组件。视频与动态评论复用 `lib/features/comments` 和 `lib/shared/ui`，以 `CommentTarget(oid, type)` 区分身份；不复制页面专属的协议/交互实现。
+- 快捷键与侧键共用根 Navigator 外的 `AppInputHost`、纯 Dart `core/input` 分发器和显式作用域；保留编辑保护、模态隔离及普通/全屏同一播放 owner，不增设页面级业务全局监听。
+- Windows IME 由同一输入宿主和 `windows/runner/window_ime_context.h` 协调：编辑焦点保留当前关联，缺失时恢复系统默认上下文，非编辑焦点解除关联，窗口重新聚焦/恢复活动时重新核对。不缓存跨输入法切换的借用 HIMC；原生消息注入不能代替真实候选、组合与中文提交验收。
+- 桌面滚轮集中在 `lib/shared/ui/smooth_scroll_behavior.dart`，使用 Flutter `ScrollSpringSimulation`；保留信号仲裁、嵌套边界接管、Shift 换轴、触摸/触控板、减少动画和 PageStorage。阻尼经共享 `SmoothScrollScope` 应用，实际手感需用户在运行构建中确认。
+- `NetworkAvatar` 在首帧加载前保持固定尺寸空白，无 URL/错误时保留后备内容；不要把加载态改成会切换内容的头像。播放页简介/标签折叠与整个信息区显隐是两个状态，修改时保留各自展开和交互语义。
+
 ## API 与凭据
 
 - 按 [API 方案](docs/api-design.md) 接入端点：登记 profile、host/method、鉴权、签名、响应格式、分页与重试规则。
-- MVP 优先 Web Cookie/WBI/CSRF。HTTP Protobuf 不等于 gRPC；App/TV token 不可由 Web 会话凭空假定存在。
+- 当前优先 Web Cookie/WBI/CSRF。HTTP Protobuf 不等于 gRPC；App/TV token 不可由 Web 会话凭空假定存在。
+- 登录入口复用 `SessionRepository` 的 Cookie 校验、`/x/web-interface/nav` 验证、安全存储和会话提交；扫码及内嵌官网登录遵守同一 epoch、取消和旧响应隔离规则。风控/验证码按服务端流程处理。
 - 参数只编码一次；WBI/key 刷新与账号刷新各自单飞。可重试读请求设置总次数和 deadline，不允许多层无限重试。
 - 点赞、投币、收藏、发送等操作仅由明确用户动作触发；结果不明的写请求不得自动重放。
 - 凭据用 CredentialStore/系统安全存储；禁止写入日志、普通 JSON、SQLite、fixture、设置导出或源码。安全存储失败不得退回明文。
@@ -50,50 +86,51 @@
 
 ## 播放、弹幕与平台
 
-- 遵守 [播放设计](docs/playback-and-danmaku.md)。每个播放标签只拥有一个 PlaybackSession；多标签模式允许不同标签同时播放，单标签模式由 PlaybackManager 保证互斥。主应用仅使用 PlayerEngine/VideoSurface 契约。
+- 遵守 [播放设计](docs/playback-and-danmaku.md)。视频、PGC、直播及离线播放共用契约，每个播放标签只拥有一个 `PlaybackSession` 和 engine；主应用通过 `PlayerEngine`/`VideoSurface` 使用播放器，不直接调用 media_kit。
+- 只有多标签且 `allowConcurrentPlayback` 开启时允许不同标签同时播放；单标签或关闭并发开关时由 `PlaybackManager` 先完成旧会话暂停，再允许目标播放。导航暂停保留源、位置和用户意图，手动暂停不得自动恢复；关闭标签只释放自己的会话，账号变化停止全部会话，退出等待原生释放完成。
 - 点播必须验证 DASH 音视频分轨；不能把视频 URL 单独可播视作完成。原生播放器请求不经过 Dio，需要独立设置并验证 headers/Range/重定向。
 - seek、换清晰度、换 P、URL 刷新都要隔离旧事件并保留用户播放意图；全屏/布局改变不得产生第二路音频。
-- 点播弹幕以确认的播放位置为主时钟，暂停/缓冲冻结、seek 重建、倍速校正；直播弹幕与点播时钟语义分开。
+- 点播弹幕按确认的播放位置加载/触发，动画时间独立控制滚动与停留；暂停/缓冲冻结、seek 重建、倍速语义不能混用。直播按单调到达时间调度；沿用当前随刷新率运行的 Ticker，不将已撤回的合帧实验当作现行实现。
 - 弹幕、聊天、解压任务、文件缓存均需容量上限和降级规则。复杂解码在 isolate，Flutter 绘制留 UI isolate。
 - 平台差异放在小型 PlatformServices/适配器，通过 capability 显示入口；不在业务代码到处判断 OS。
 - 后台播放、PiP、媒体键、硬解和后台下载均需逐平台验证，不能从插件支持列表推导成项目已支持。
 
 ## 存储、依赖与生成
 
-- SQLite migration 必须增版本并有迁移验证；禁止靠清空用户数据完成升级。
-- 下载实现校验 206/Content-Range、文件完整性和 URL 刷新后的资源身份；任务完成与文件落盘须可从中断恢复。
-- 初始化时固定实际验证的 Flutter SDK、直接依赖和原生二进制来源；提交根应用 pubspec.lock，不依赖“始终取最新”构建。
+- SQLite migration 必须增版本并有迁移验证；禁止靠清空用户数据完成升级。数据库 schema 与 `preferences.v1` 等 JSON 快照版本分别管理；当前定义以 `AppDatabase` 和对应仓储为准，增加设置字段不必然改表。
+- 下载队列由进程级仓储持有，页面关闭不停止任务；账号变化暂停旧任务，重启等待用户显式继续。校验 206/Content-Range、文件完整性及 URL 刷新后的资源身份，不将带签名 URL 或凭据落盘。
+- 下载文件、manifest 与 SQLite 按可恢复的提交顺序处理；分轨/MP4/MKV 均需兼容已有任务及离线打开。封装在 worker isolate 执行，取消、临时文件清理、校验和原子发布由下载仓储负责，离线媒体不受普通缓存清理影响。
+- 工程固定 Flutter **3.47.6 stable / Dart 3.13.5**，以 `.flutter-version`、检查脚本和 CI 配置共同约束；升级须同步这些入口及验证记录。直接依赖使用精确版本，提交根应用和四个包的五份 `pubspec.lock`。
+- media-kit fork 的 Git ref 必须固定完整提交；更新时同步根应用和 `bili_player` 的七处 ref，以及这两处锁文件。保留根应用的 overrides，Pub 不会采纳传递依赖包的 overrides；来源、许可和 Android 原生资产见移植记录。
+- Windows 固定 libmpv 由 `windows/native/mpv.cmake` 管理，渲染/释放补丁由 `windows/patches/media_kit_video/apply.cmake` 校验源码并应用到构建副本。不得修改 Pub 缓存或绕过来源/哈希校验；依赖升级需重新审查补丁兼容性。
+- `bili_mux` 原生资产按其 README 从固定源码构建，不能借用系统 FFmpeg 或播放器私有库；预构建资产不提交 Git，分发保留许可、来源和可重建材料。
 - 新依赖先确认目标平台、维护接口、二进制依赖和许可；选择能满足具体需求的最小组合。
 - 生成器/schema 记录版本、命令和来源；提交项目需要的生成物，改源后重生成，不手修输出。
 
 ## 检查与交付
 
-当前已有可执行工程：改动后运行 `tool/check.ps1` 覆盖根应用与三个包。纯文档改动只检查相对链接、源码路径、术语/阶段一致性和差异。原生播放改动另外运行受影响平台的原生测试和构建。
+代码改动运行根检查脚本，覆盖根应用与四个包的格式、静态分析、离线测试及打包边界脚本：
 
-初始化后按实际存在的目录运行：
+```powershell
+.\tool\check.ps1
 
-```text
-# 根应用
-flutter pub get
-dart format --output=none --set-exit-if-changed lib test integration_test
-flutter analyze
-flutter test
+# 依赖已解析且此次未变更时可跳过 pub get
+.\tool\check.ps1 -SkipPub
 
-# packages/bili_api 中
-dart pub get
-dart analyze
-dart test
-
-# packages/bili_player、packages/bili_danmaku 中分别执行
-flutter pub get
-flutter analyze
-flutter test
+# 与 CI 一致，验证锁文件可复现解析
+.\tool\check.ps1 -EnforceLockfile
 ```
 
-- 各 package 同样格式检查，根命令不替代子包检查。尚未存在 integration_test 等目录时只传实际目录。
+- 分别运行检查时，`bili_api` 使用 `dart analyze/test`，根应用与另三个包使用 `flutter analyze/test`；各包还需检查自己的 `lib/test` 格式。根应用测试不替代子包或原生集成测试，具体命令以 `tool/check.ps1` 为准。
+- 纯文档改动只检查相对链接、源码路径、术语/阶段一致性和 `git diff --check`，无需运行 Flutter 全套或构建。
 - 只读文档或低风险样式变更不强制新增测试；协议、会话竞态、播放状态机、存储迁移需要行为测试。
 - 优先 fake clock/transport/repository/player 和脱敏 fixture。正常 CI 不使用真实账号，不自动执行投币/发送等账户写操作。
+- Windows 受控媒体回归使用 `tool/test-windows-media.ps1`，PGC/直播相关使用 `tool/test-windows-content.ps1`；公开在线烟测用脚本的 `-Online` 显式启用。原生释放改动补跑 `tool/test-windows-video-dispose.ps1`，输入法改动补跑 `tool/test-windows-ime.ps1`，其他测试按受影响路径选择。
+- 普通检查未配置 `BILI_MUX_LIBRARY` 时会跳过 mux 原生用例，必须如实报告。完整原生回归按包 README 准备组件及 `BILI_MUX_FFPROBE` 后执行，不能把配置跳过算作原生通过。
 - 原生播放改动至少在受影响平台构建并实机验证；三端验证记录与未测项均写明。性能用 profile/release，不能用 debug 帧率作结论。
+- Flutter 构建前按 [bili_mux 说明](packages/bili_mux/README.md) 准备目标原生资产，例如 `.\tool\build-download-mux.ps1 -Target windows-x64`；`tool/build-release.ps1` 已包含组件构建与安装包流程。Windows Release 入口为 `build/windows/x64/runner/Release/bilisail.exe`，分发须保留整个 Release 目录。
 - 构建按主机执行 Windows、Android、macOS 目标；工具链或设备不可用时准确报告，不能声称通过。
+- 用户明确要求自行构建、实机确认或暂不测性能时遵循该范围，完成授权的自动检查并列明余下验收。测试、构建、实际设备操作和性能测量分别报告；历史通过记录不代表当前工作区已通过。
+- 开始和交付前检查 `git status`，保留用户已有及同期修改；提交时只包含本任务文件，不为凑全量通过而改动无关代码。全量检查若被既有问题阻塞，记录具体失败和已完成的定向验证。
 - 完成后说明改动、验证结果、未验证部分；重要边界变化同步 docs。保持用户已有修改，不顺带重排或迁移无关代码。
 

@@ -811,6 +811,7 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
 
   Widget _buildPlayer(BuildContext context) {
     final session = widget.session;
+    final appTextStyle = Theme.of(context).textTheme.bodyMedium;
     return InputProtection(
       playerSurface: true,
       activationFocus: _focusNode,
@@ -1348,8 +1349,13 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                         retainDynamicPress: true,
                                         child: Theme(
                                           data:
-                                              ThemeData.dark(
+                                              ThemeData(
+                                                brightness: Brightness.dark,
                                                 useMaterial3: true,
+                                                fontFamily:
+                                                    appTextStyle?.fontFamily,
+                                                fontFamilyFallback: appTextStyle
+                                                    ?.fontFamilyFallback,
                                               ).copyWith(
                                                 colorScheme:
                                                     ColorScheme.fromSeed(

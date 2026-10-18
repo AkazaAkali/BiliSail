@@ -253,6 +253,7 @@ Pop-Location
 | --- | --- |
 | [biliuwp-lite（原项目）](https://github.com/xiaoyaocz/biliuwp-lite) / [ywmoyue 维护分支](https://github.com/ywmoyue/biliuwp-lite) | 功能、桌面布局与交互参考；部分图标资源来源见[资源记录](assets/README.md) |
 | [bili-kernel](https://github.com/Richasy/bili-kernel) | C# / .NET API 项目，为协议模型、鉴权与职责划分提供参考 |
+| [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus) | 播放器配置、Android Surface 生命周期与弹幕优化思路参考；具体采用范围见[移植记录](docs/validation/piliplus-media-kit-port.md) |
 | [Flutter](https://github.com/flutter/flutter) / [Dart](https://github.com/dart-lang/sdk) | 跨平台界面与语言运行时 |
 | [Riverpod](https://github.com/rrousselGit/riverpod) / [go_router](https://pub.dev/packages/go_router) | 应用状态、依赖注入与路由 |
 | [media_kit](https://github.com/media-kit/media-kit) / [mpv](https://github.com/mpv-player/mpv) / [FFmpeg](https://ffmpeg.org) | 播放适配与原生媒体解码基础 |
