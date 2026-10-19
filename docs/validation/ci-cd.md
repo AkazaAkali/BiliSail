@@ -25,6 +25,8 @@ SDK 缓存沿用 `flutter-action` 的默认键，按系统、SDK 架构、版本
 
 CI 在工作流顶层显式设置 `PUB_HOSTED_URL=https://pub.dev`，与根应用及 `bili_api`、`bili_player`、`bili_danmaku`、`bili_mux` 五份锁文件的官方 hosted 源一致；检查、三端构建和 Release 复用流程均使用此源。Dependabot 的 Pub 更新也使用官方源。严格检查和提交前，本地应先设置 `$env:PUB_HOSTED_URL = 'https://pub.dev'`（PowerShell）或 `export PUB_HOSTED_URL=https://pub.dev`（sh），再执行 `pwsh ./tool/check.ps1 -EnforceLockfile`。
 
+macOS 原生插件按根 `pubspec.yaml` 的项目级开关统一使用 CocoaPods，沿用固定 SDK 的标准 `macos/Podfile`。锁定的 `media_kit_libs_macos_video 1.1.4` 不支持 SwiftPM，混用时 fork 的视频插件会编译为空实现；原因、构建迁移及验收边界见 [macOS 视频插件修复](piliplus-media-kit-port.md#2026-10-19macos-视频插件误选-swiftpm-stub)。本地与 CI 均由 Flutter 读取此配置，无需修改机器全局开关。
+
 本地临时使用镜像运行 `pub get` 可能改写锁文件中的 hosted URL；不要将这类改动混入提交。恢复官方源后重新验证五份锁文件，并确认依赖版本、约束、内容哈希没有意外变化。`FLUTTER_STORAGE_BASE_URL` 控制 Flutter SDK 下载，与 Pub 包源是不同设置。
 
 Dart 3.13.5 内置的 [Pub 源码](https://github.com/dart-lang/pub/blob/ec276d10a7fa0f6c6ec005340fb9ad29f3b012d0/lib/src/source/hosted.dart#L40) 会将官方旧域名 `https://pub.dartlang.org` 规范化为 `https://pub.dev`，再用于 hosted 来源身份比较；两者的文本差异不等于来源冲突。`pub.flutter-io.cn` 是另一来源，不能依赖这种官方别名规范化消除镜像冲突。验证以固定 Flutter 3.47.6 的实际解析、内容哈希与 `--enforce-lockfile` 为准。

@@ -59,3 +59,35 @@ Pub 不会采纳传递依赖包的 overrides，因此根应用和 bili_player �
 待设备连接后的验收：同一问题视频 3 倍速完整播放，读取实际 hwdec-current 并追踪视频 PTS/avsync；另测暂停打开、续播、前后台、全屏、切源/清晰度、显式 seek、软件解码、DASH 分轨与直播。Windows 已构建并跑原生/core 回归，本轮未运行完整 GUI 播放验收或性能对比。
 
 手机当前未连接，用户要求先完成代码和构建。本轮不声称 Android 真机三倍速、前后台、切源/清晰度、软硬解回退及长期稳定性通过；macOS 构建与设备也未验证。
+
+## 2026-10-19：macOS 视频插件误选 SwiftPM stub
+
+用户报告 macOS 所有视频打开失败，提示 `Native source loading terminated with an error.`。该提示是应用对原生源加载失败的通用分类，单独不能确定根因；本次从当前锁文件和固定 fork 源码确认了以下构建缺陷：
+
+1. Flutter 3.47.6 默认启用 SwiftPM，工程已包含 `FlutterGeneratedPluginSwiftPackage` 集成。固定 fork 的 `media_kit_video/macos/media_kit_video/Package.swift` 存在，因此视频插件优先交给 SwiftPM 编译。
+2. 两份锁文件中的 `media_kit_libs_macos_video 1.1.4` 只有 podspec，没有 `Package.swift`。Flutter 将它交给 CocoaPods，不会为它创建视频插件所需的同级 Swift package。
+3. 视频插件的 SwiftPM manifest 检查 `../media_kit_libs_macos_video`，缺失时将 sources 设为 `stub`。该实现的 `MediaKitVideoPlugin.register` 是空函数，没有创建 `com.alexmercerind/media_kit_video` 通道；生成的注册文件里有函数调用也不能证明输出插件已注册。
+4. 同一 fork 的 CocoaPods podspec 通过 `MediaKitUtils` 查找应用的 `pubspec.lock`。其中存在 macOS 原生库时，选择真实 `plugin` 源码并链接 `Mpv` framework，因此两者统一走 CocoaPods 可以避开上述错误分支。
+
+修复在[根 pubspec](../../pubspec.yaml) 的 `flutter.config` 中设置 `enable-swift-package-manager: false`，使用 Flutter 支持的项目级开关，覆盖本地和 CI。只在 `bili_player` 包中配置不会对应用生效，用户级 `flutter config` 也不能确保其他构建机器采用相同选择。配置格式见 [Flutter 官方说明](https://docs.flutter.dev/packages-and-plugins/swift-package-manager/for-app-developers#turn-off-swiftpm-for-a-single-project)。
+
+补入的 [Podfile](../../macos/Podfile) 直接复制自固定 Flutter 3.47.6 SDK 的 `packages/flutter_tools/templates/cocoapods/Podfile-macos`，沿用现有 macOS 12.0 部署目标、Runner/RunnerTests 和标准插件安装函数；[Debug](../../macos/Flutter/Flutter-Debug.xcconfig) 与 [Release/Profile](../../macos/Flutter/Flutter-Release.xcconfig) 引入对应 Pods 配置。没有改动 fork、原生资产、两份锁文件或生成的插件注册文件。
+
+既有 Xcode SwiftPM 集成保留。已核对固定 SDK 的 `DarwinDependencyManagement.setUp`：关闭开关后，即使工程已集成 SwiftPM，也会重新生成无插件依赖的容器，并清理旧插件链接；所有原生插件通过 CocoaPods 安装。不能仅运行 `pod install` 而继续使用旧的 SwiftPM 插件图。
+
+已有失败构建的 Mac 应关闭旧进程，更新代码后重新构建。可以先执行一次 `flutter clean`，再使用标准发布入口：
+
+```sh
+pwsh ./tool/build-release.ps1 -Target macos-arm64
+```
+
+该入口包含原生 mux 资产准备、锁文件解析、macOS 构建及打包；机器仍需具备 Xcode、CocoaPods 和脚本要求的工具链。手动 Flutter 构建也会读取相同的项目配置，并在 pub/build 阶段更新原生依赖图。
+
+本次在 Windows 完成以下验证：
+
+- `flutter pub get --enforce-lockfile` 通过，五份锁文件未改变。
+- 使用固定 SDK 的 `FlutterManifest` / `FlutterFeaturesConfig` 加载实际根 pubspec，分别将内存中的全局 SwiftPM 开关设为 true/false，两项均确认项目配置优先且结果为 false；没有修改用户级配置。
+- Podfile 与 SDK 模板哈希一致；141 个相对文档链接目标存在，`git diff --check` 通过。
+- `tool/check.ps1 -SkipPub` 的格式、静态分析、打包边界检查和 2555 项测试通过（根应用 1962、API 426、播放器 72、弹幕 93、mux 2）；10 项 mux 原生测试因未配置 `BILI_MUX_LIBRARY` 跳过。
+
+本地探针与检查日志位于忽略目录 `artifacts/macos-media-plugin-2026-10-19/`。macOS 的 `pod install`、Xcode 编译、真实通道注册、DASH 音视频、直播及全屏/换源仍须在 Mac 上验证，不能由 Windows 检查或此前构建记录代替。

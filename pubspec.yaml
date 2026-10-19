@@ -1,7 +1,7 @@
 name: bilisail
 description: BiliSail, a cross-platform third-party Bilibili client focused on the viewing experience, built with Flutter.
 publish_to: none
-version: 1.0.7+3
+version: 1.0.8+0
 
 environment:
   sdk: '>=3.13.0 <4.0.0'
@@ -57,6 +57,10 @@ dev_dependencies:
   flutter_lints: 6.0.0
 
 flutter:
+  # The pinned macOS media libs are CocoaPods-only. Keep the video plugin on
+  # CocoaPods too, otherwise its SwiftPM manifest builds a no-op stub.
+  config:
+    enable-swift-package-manager: false
   uses-material-design: true
   assets:
     - assets/icons/
