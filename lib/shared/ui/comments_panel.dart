@@ -45,6 +45,8 @@ class _CommentsPanelState extends ConsumerState<CommentsPanel> {
       commentsProviderFor(widget.target);
   final _text = TextEditingController();
   final _focus = FocusNode();
+  final _composerFocus = FocusNode(skipTraversal: true);
+  final _emotePickerOpen = ValueNotifier(false);
   final _topScroll = ScrollController();
   final _replyScroll = ScrollController();
   double _topOffset = 0;
@@ -81,6 +83,8 @@ class _CommentsPanelState extends ConsumerState<CommentsPanel> {
     _linkCancellation?.cancel();
     _text.dispose();
     _focus.dispose();
+    _composerFocus.dispose();
+    _emotePickerOpen.dispose();
     _topScroll.dispose();
     _replyScroll.dispose();
     super.dispose();
@@ -140,7 +144,7 @@ class _CommentsPanelState extends ConsumerState<CommentsPanel> {
     }
   }
 
-  Future<void> _emotes(String oid) async {
+  Future<void> _emotes() async {
     final target = widget.target;
     final provider = _provider;
     final controller = ref.read(provider.notifier);
@@ -148,21 +152,28 @@ class _CommentsPanelState extends ConsumerState<CommentsPanel> {
     final scope = snapshot.accountScope, epoch = snapshot.sessionEpoch;
     final container = ProviderScope.containerOf(context);
     unawaited(controller.loadEmotes());
-    final emote = await showDialog<CommentEmote>(
-      context: context,
-      builder: (_) => UncontrolledProviderScope(
-        container: container,
-        child: _CommentEmoteDialog(target: target),
-      ),
-    );
-    if (emote == null ||
-        !mounted ||
+    _emotePickerOpen.value = true;
+    CommentEmote? emote;
+    try {
+      emote = await showDialog<CommentEmote>(
+        context: context,
+        builder: (_) => UncontrolledProviderScope(
+          container: container,
+          child: _CommentEmoteDialog(target: target),
+        ),
+      );
+    } finally {
+      if (mounted) _emotePickerOpen.value = false;
+    }
+    if (!mounted ||
         widget.target != target ||
         !controller.isCurrentAccount(scope, epoch) ||
         !ref.read(provider).signedIn) {
       return;
     }
-    _text.value = insertCommentEmote(_text.value, emote.text);
+    if (emote != null) {
+      _text.value = insertCommentEmote(_text.value, emote.text);
+    }
     _focus.requestFocus();
   }
 
@@ -313,7 +324,25 @@ class _CommentsPanelState extends ConsumerState<CommentsPanel> {
     },
   );
 
-  Widget _composer() => Consumer(
+  Widget _composer() => Focus(
+    focusNode: _composerFocus,
+    child: TextFieldTapRegion(
+      child: ListenableBuilder(
+        listenable: Listenable.merge([_composerFocus, _emotePickerOpen]),
+        builder: (context, _) => _composerContent(
+          expanded: _composerFocus.hasFocus || _emotePickerOpen.value,
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 200),
+        ),
+      ),
+    ),
+  );
+
+  Widget _composerContent({
+    required bool expanded,
+    required Duration duration,
+  }) => Consumer(
     builder: (context, ref, _) {
       ref.watch(
         _provider.select(
@@ -332,7 +361,15 @@ class _CommentsPanelState extends ConsumerState<CommentsPanel> {
       final controller = ref.read(_provider.notifier);
       final theme = Theme.of(context);
       final root = state.openRoot;
-      final oid = widget.target.oid;
+      final inputStyle = theme.textTheme.bodyMedium?.copyWith(
+        fontSize: 13,
+        height: 1.4,
+      );
+      final iconStyle = IconButton.styleFrom(
+        minimumSize: const Size.square(32),
+        padding: const EdgeInsets.all(6),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      );
       return SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -353,7 +390,7 @@ class _CommentsPanelState extends ConsumerState<CommentsPanel> {
                   ),
                 ),
               ),
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -368,6 +405,7 @@ class _CommentsPanelState extends ConsumerState<CommentsPanel> {
                         ),
                         IconButton(
                           tooltip: '取消回复',
+                          style: iconStyle,
                           onPressed: state.busy
                               ? null
                               : controller.cancelTarget,
@@ -375,75 +413,130 @@ class _CommentsPanelState extends ConsumerState<CommentsPanel> {
                         ),
                       ],
                     ),
-                  TextField(
-                    controller: _text,
-                    focusNode: _focus,
-                    readOnly: !state.signedIn,
-                    onTap: state.signedIn ? null : _login,
-                    minLines: 1,
-                    maxLines: 4,
-                    maxLength: 1000,
-                    decoration: InputDecoration(
-                      hintText: state.signedIn
-                          ? root == null
-                                ? '发一条友善的评论'
-                                : '发一条友善的回复'
-                          : '登录后参与评论',
-                      counterText: '',
-                      isDense: true,
-                      filled: true,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide: BorderSide.none,
+                  AnimatedSize(
+                    duration: duration,
+                    curve: Curves.easeOutCubic,
+                    alignment: Alignment.topCenter,
+                    child: TextField(
+                      controller: _text,
+                      focusNode: _focus,
+                      style: inputStyle,
+                      readOnly: !state.signedIn,
+                      onTap: state.signedIn ? null : _login,
+                      onTapOutside: (_) => _composerFocus.unfocus(),
+                      minLines: 1,
+                      maxLines: expanded ? 4 : 1,
+                      maxLength: 1000,
+                      decoration: InputDecoration(
+                        hintText: state.signedIn
+                            ? root == null
+                                  ? '发一条友善的评论'
+                                  : '发一条友善的回复'
+                            : '登录后参与评论',
+                        counterText: '',
+                        isDense: true,
+                        filled: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide: BorderSide.none,
+                        ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      IconButton(
-                        tooltip: '选择表情',
-                        onPressed: state.busy ? null : () => _emotes(oid),
-                        icon: const Icon(BiliIcons.emoji),
-                      ),
-                      const Spacer(),
-                      FilledButton(
-                        onPressed:
-                            state.busy ||
-                                state.loading ||
-                                state.replyLoading ||
-                                state.uncertain.contains('send')
-                            ? null
-                            : () async {
-                                if (!state.signedIn) {
-                                  _login();
-                                  return;
-                                }
-                                final submitted = _text.text;
-                                final submittedTarget = widget.target;
-                                final submittedRoot = state.openRoot?.id;
-                                if (await controller.send(submitted) &&
-                                    mounted &&
-                                    widget.target == submittedTarget &&
-                                    _text.text == submitted) {
-                                  final current = ref.read(_provider);
-                                  if (current.openRoot?.id == submittedRoot &&
-                                      current.replyTarget == null) {
-                                    _text.clear();
-                                  }
-                                }
-                              },
-                        child: state.busy
-                            ? const SizedBox.square(
-                                dimension: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
+                  ExcludeFocus(
+                    excluding: !expanded,
+                    child: IgnorePointer(
+                      ignoring: !expanded,
+                      child: AnimatedSwitcher(
+                        duration: duration,
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeInCubic,
+                        transitionBuilder: (child, animation) => SizeTransition(
+                          sizeFactor: animation,
+                          alignment: Alignment.topCenter,
+                          child: FadeTransition(
+                            opacity: animation,
+                            child: child,
+                          ),
+                        ),
+                        child: expanded
+                            ? Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    IconButton(
+                                      tooltip: '选择表情',
+                                      style: iconStyle,
+                                      iconSize: 18,
+                                      onPressed: state.busy ? null : _emotes,
+                                      icon: const Icon(BiliIcons.emoji),
+                                    ),
+                                    const Spacer(),
+                                    FilledButton(
+                                      style: FilledButton.styleFrom(
+                                        minimumSize: const Size(56, 32),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 6,
+                                        ),
+                                        textStyle: theme.textTheme.labelMedium,
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                      onPressed:
+                                          state.busy ||
+                                              state.loading ||
+                                              state.replyLoading ||
+                                              state.uncertain.contains('send')
+                                          ? null
+                                          : () async {
+                                              if (!state.signedIn) {
+                                                _login();
+                                                return;
+                                              }
+                                              final submitted = _text.text;
+                                              final submittedTarget =
+                                                  widget.target;
+                                              final submittedRoot =
+                                                  state.openRoot?.id;
+                                              if (await controller.send(
+                                                    submitted,
+                                                  ) &&
+                                                  mounted &&
+                                                  widget.target ==
+                                                      submittedTarget &&
+                                                  _text.text == submitted) {
+                                                final current = ref.read(
+                                                  _provider,
+                                                );
+                                                if (current.openRoot?.id ==
+                                                        submittedRoot &&
+                                                    current.replyTarget ==
+                                                        null) {
+                                                  _text.clear();
+                                                }
+                                              }
+                                            },
+                                      child: state.busy
+                                          ? const SizedBox.square(
+                                              dimension: 16,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          : const Text('发布'),
+                                    ),
+                                  ],
                                 ),
                               )
-                            : const Text('发布'),
+                            : const SizedBox.shrink(),
                       ),
-                    ],
+                    ),
                   ),
                 ],
               ),

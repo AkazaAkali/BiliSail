@@ -119,6 +119,8 @@ void main() {
       await tester.tap(find.byTooltip('查看评论'));
       await tester.pumpAndSettle();
       expect(find.byType(CommentsPanel), findsOneWidget);
+      expect(find.byTooltip('选择表情'), findsNothing);
+      expect(find.text('发布'), findsNothing);
       expect(types, [CommentTargetType.album]);
       expect(comments.reads, ['11']);
       expect(find.text('测试评论'), findsOneWidget);
@@ -265,6 +267,8 @@ void main() {
     (tester) async {
       await show(tester, width: 375, height: 700, scale: 2, keyboardInset: 300);
       await tester.tap(find.byTooltip('查看评论'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(TextField));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), '第一行\n第二行\n第三行\n第四行');
       await tester.pumpAndSettle();

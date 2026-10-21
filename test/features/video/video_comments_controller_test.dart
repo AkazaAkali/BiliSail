@@ -1,4 +1,5 @@
 import 'package:bilisail/domain/user.dart';
+import 'package:bilisail/app/theme.dart';
 import 'package:bilisail/core/platform/external_links.dart';
 import 'package:bilisail/core/presentation/workspace_activity.dart';
 import 'package:bilisail/domain/app_failure.dart';
@@ -26,6 +27,7 @@ import 'package:bilisail/features/video/presentation/video_comments_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -629,6 +631,81 @@ void main() {
     expect(await controller.toggleLike(root), true);
     expect(state().items.single.liked, true);
   });
+  testWidgets(
+    'composer reveals actions smoothly and preserves collapsed drafts',
+    (tester) async {
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: BiliTheme.light(),
+            home: const Scaffold(
+              body: SizedBox(
+                width: 340,
+                child: VideoCommentsPanel(detail: _detail),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final input = find.byType(TextField);
+      final collapsedRect = tester.getRect(input);
+      final list = tester.widget<ListView>(find.byType(ListView));
+      expect(collapsedRect.height, lessThanOrEqualTo(36));
+      expect(
+        tester.getSize(find.byType(SingleChildScrollView)).height,
+        lessThanOrEqualTo(52),
+      );
+      expect(
+        tester
+            .renderObject<RenderParagraph>(find.text('发一条友善的评论'))
+            .text
+            .style
+            ?.fontSize,
+        13,
+      );
+      expect(tester.widget<TextField>(input).maxLines, 1);
+      expect(find.byTooltip('选择表情'), findsNothing);
+      expect(find.text('发布'), findsNothing);
+
+      await tester.tap(input);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 60));
+      final transitioningTop = tester.getTopLeft(input).dy;
+      await tester.pumpAndSettle();
+      final expandedTop = tester.getTopLeft(input).dy;
+      expect(transitioningTop, lessThan(collapsedRect.top));
+      expect(transitioningTop, greaterThan(expandedTop));
+      expect(find.byTooltip('选择表情').hitTestable(), findsOneWidget);
+      expect(find.text('发布').hitTestable(), findsOneWidget);
+      expect(tester.widget<TextField>(input).maxLines, 4);
+      expect(tester.widget<ListView>(find.byType(ListView)), same(list));
+
+      await tester.enterText(input, '第一行\n第二行\n第三行');
+      await tester.pumpAndSettle();
+      expect(tester.getSize(input).height, greaterThan(collapsedRect.height));
+      await tester.tap(find.text('4 条'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('选择表情'), findsNothing);
+      expect(find.text('发布'), findsNothing);
+      expect(tester.getRect(input), collapsedRect);
+      expect(tester.widget<TextField>(input).controller!.text, '第一行\n第二行\n第三行');
+
+      await tester.tap(input);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(input).height, greaterThan(collapsedRect.height));
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(input).focusNode!.hasFocus, isFalse);
+      expect(find.byTooltip('选择表情').hitTestable(), findsOneWidget);
+      expect(find.text('发布').hitTestable(), findsOneWidget);
+      expect(repo.writes, 0);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
   testWidgets('successful send preserves a newer edited draft', (tester) async {
     await tester.pumpWidget(
       UncontrolledProviderScope(
@@ -645,6 +722,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '第一条评论');
+    await tester.pumpAndSettle();
     repo.writePending = Completer<void>();
     await tester.tap(find.text('发布'));
     await tester.pump();
@@ -676,6 +754,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'abcd');
+    await tester.pumpAndSettle();
     final text = tester.widget<TextField>(find.byType(TextField)).controller!;
     text.selection = const TextSelection(baseOffset: 1, extentOffset: 3);
     final inputRect = tester.getRect(find.byType(TextField));
@@ -715,6 +794,12 @@ void main() {
     await tester.tap(find.text('关闭'));
     await tester.pumpAndSettle();
     expect(text.text, 'a[笑]d');
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus,
+      isTrue,
+    );
+    expect(tester.getRect(find.byType(TextField)), inputRect);
+    expect(find.text('发布').hitTestable(), findsOneWidget);
   });
   testWidgets('nonzero count with empty result explains session limitation', (
     tester,
@@ -797,6 +882,16 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byType(TextField));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '第一行\n第二行\n第三行\n第四行');
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      '第一行\n第二行\n第三行\n第四行',
+    );
+    expect(find.text('发布').hitTestable(), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('共 3 条回复 ›'));
     await tester.pumpAndSettle();
