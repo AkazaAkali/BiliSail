@@ -1,0 +1,181 @@
+import 'dart:io';
+
+import 'package:bili_player/bili_player.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
+
+void main() {
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized().framePolicy =
+      LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
+
+  for (final play in [false, true]) {
+    testWidgets('undecodable DASH video cannot succeed on audio (play=$play)', (
+      tester,
+    ) async {
+      initializePlayerBackend();
+      final fixtures = Platform.environment['BILI_TEST_MEDIA_DIR'];
+      expect(fixtures, isNotNull);
+      final directory = await Directory.systemTemp.createTemp(
+        'bili_bad_video_',
+      );
+      final bytes = await File('$fixtures/video.mp4').readAsBytes();
+      // Keep the MP4 video track and samples, but make its decoder unavailable.
+      // mpv can still select and play the valid external audio file.
+      var replaced = 0;
+      for (var i = 0; i + 4 <= bytes.length; i++) {
+        if (bytes[i] == 0x61 &&
+            bytes[i + 1] == 0x76 &&
+            bytes[i + 2] == 0x63 &&
+            bytes[i + 3] == 0x31) {
+          bytes.setRange(i, i + 4, [0x7a, 0x7a, 0x7a, 0x7a]);
+          replaced++;
+        }
+      }
+      expect(replaced, greaterThan(0));
+      final broken = await File('${directory.path}/video.mp4')
+          .writeAsBytes(bytes);
+      final events = <PlayerDiagnosticEvent>[];
+      final failures = <PlayerFailure>[];
+      final engine = MediaKitEngine(onDiagnostic: events.add);
+      final subscription = engine.failures.listen(failures.add);
+      final policy = MediaRequestPolicy();
+      DashPairSource pair(Uri video) => DashPairSource(
+        video: MediaTrack(uri: video, requestPolicy: policy),
+        audio: MediaTrack(
+          uri: File('$fixtures/audio.m4a').uri,
+          requestPolicy: policy,
+        ),
+      );
+      try {
+        await tester.pumpWidget(
+          MaterialApp(home: VideoSurface(engine: engine)),
+        );
+        Object? error;
+        await _withFrames(
+          tester,
+          engine
+              .open(
+                pair(broken.uri),
+                OpenOptions(
+                  play: play,
+                  volume: 0,
+                  openTimeout: const Duration(seconds: 2),
+                ),
+              )
+              .catchError((Object failure) {
+                error = failure;
+              }),
+        );
+        if (error == null) {
+          await _withFrames(tester, engine.play());
+          debugPrint('AUDIO_ONLY_FALSE_SUCCESS ${engine.inspectDiagnostics()}');
+        }
+        expect(error, isA<PlayerFailure>());
+        expect(failures, hasLength(1));
+        final failed = events.singleWhere(
+          (e) => e.kind == PlayerDiagnosticKind.failed,
+        );
+        expect(failed.readinessStage, NativeReadinessStage.videoDecode);
+        expect(failed.diagnostics?.hasDecodedVideo, false);
+        expect(failed.diagnostics?.hasVideoOutput, false);
+        expect(
+          events.where((e) => e.kind == PlayerDiagnosticKind.openReady),
+          isEmpty,
+        );
+
+        await _withFrames(
+          tester,
+          engine.open(
+            pair(File('$fixtures/video.mp4').uri),
+            const OpenOptions(play: false, volume: 0, rate: 1.5),
+          ),
+        );
+        final ready = engine.inspectDiagnostics();
+        expect(ready.hasDecodedVideo, true);
+        expect(ready.hasVideoOutput, true);
+        expect(
+          events
+              .singleWhere((e) => e.kind == PlayerDiagnosticKind.openReady)
+              .diagnostics
+              ?.hasVideoOutput,
+          true,
+        );
+        expect(engine.currentSnapshot.phase, PlaybackPhase.paused);
+        expect(engine.currentSnapshot.desiredPlaying, false);
+        expect(engine.currentSnapshot.rate, 1.5);
+        await _withFrames(tester, engine.play());
+        expect(engine.inspectDiagnostics().hasDecodedAudio, true);
+        expect(failures, hasLength(1));
+        expect(tester.takeException(), isNull);
+      } finally {
+        await subscription.cancel();
+        await _withFrames(tester, engine.dispose());
+        await tester.pumpWidget(const SizedBox.shrink());
+        await directory.delete(recursive: true);
+      }
+    });
+  }
+
+  testWidgets(
+    'paused progressive video has output; audio needs no video output',
+    (tester) async {
+      initializePlayerBackend();
+      final fixtures = Platform.environment['BILI_TEST_MEDIA_DIR'];
+      expect(fixtures, isNotNull);
+      final engine = MediaKitEngine();
+      final policy = MediaRequestPolicy();
+      try {
+        await tester.pumpWidget(
+          MaterialApp(home: VideoSurface(engine: engine)),
+        );
+        for (final video in [true, false]) {
+          await _withFrames(
+            tester,
+            engine.open(
+              ProgressiveSource(
+                MediaTrack(
+                  uri: File('$fixtures/${video ? 'video.mp4' : 'audio.m4a'}')
+                      .uri,
+                  requestPolicy: policy,
+                ),
+              ),
+              const OpenOptions(play: false, volume: 0),
+            ),
+          );
+          expect(engine.currentSnapshot.phase, PlaybackPhase.paused);
+          if (video) {
+            expect(engine.inspectDiagnostics().hasDecodedVideo, true);
+            expect(engine.inspectDiagnostics().hasVideoOutput, true);
+          } else {
+            await _withFrames(tester, engine.play());
+            expect(engine.inspectDiagnostics().hasDecodedAudio, true);
+            expect(engine.inspectDiagnostics().hasDecodedVideo, false);
+          }
+        }
+        expect(tester.takeException(), isNull);
+      } finally {
+        await _withFrames(tester, engine.dispose());
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    },
+  );
+}
+
+Future<void> _withFrames(WidgetTester tester, Future<void> operation) async {
+  var done = false;
+  Object? failure;
+  final completion = operation.then<void>(
+    (_) => done = true,
+    onError: (Object error, StackTrace stack) {
+      failure = error;
+      done = true;
+    },
+  );
+  while (!done) {
+    await tester.pump(const Duration(milliseconds: 16));
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+  await completion;
+  if (failure case final error?) throw error;
+}

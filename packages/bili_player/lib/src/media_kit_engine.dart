@@ -73,6 +73,11 @@ final class MediaKitEngine
       failureKind: failureKind,
       severity: severity,
       nativeErrorCode: nativeErrorCode,
+      readinessStage: _readinessStage,
+      // openStarted precedes releasing the previous native player.
+      diagnostics: kind == PlayerDiagnosticKind.openStarted
+          ? null
+          : inspectDiagnostics(),
     ),
   );
 
@@ -103,6 +108,7 @@ final class MediaKitEngine
   double get appliedAudioGainDb => _audioGain?.gainDb ?? 0;
   bool _disposed = false;
   bool _requiresDecodedAudio = false;
+  NativeReadinessStage? _readinessStage;
   int _generation = 0;
   PlaybackSnapshot _snapshot = const PlaybackSnapshot(
     phase: PlaybackPhase.idle,
@@ -582,6 +588,7 @@ final class MediaKitEngine
         volume: options.volume,
       ),
     );
+    _readinessStage = null;
     _diagnose(PlayerDiagnosticKind.openStarted);
     return _serial(() async {
       if (generation != _generation || _disposed) return;
@@ -696,6 +703,7 @@ final class MediaKitEngine
             )
             .timeout(_remaining(watch, openBudget));
         if (generation != _generation || _disposed) return;
+        _readinessStage = NativeReadinessStage.tracks;
         if (source is DashPairSource || source is DashVideoSource) {
           // Player.open only acknowledges loadlist. Wait for actual demuxed
           // tracks after the on_load header hook has run.
@@ -711,11 +719,10 @@ final class MediaKitEngine
             'Video track did not become ready.',
           );
         }
-        if (Platform.isAndroid &&
-            source is! DashPairSource &&
-            source is! DashVideoSource) {
+        if (source is! DashPairSource && source is! DashVideoSource) {
           // Discover whether a progressive/manifest source has video before
-          // requiring a Surface. Audio-only media must not wait for one.
+          // requiring video decode/output on any platform. Audio-only media
+          // must not wait for an output it will never create.
           await _waitReady(
             player,
             generation,
@@ -729,11 +736,10 @@ final class MediaKitEngine
             'Media tracks did not become ready.',
           );
         }
-        final requireAndroidOutput =
-            Platform.isAndroid &&
-            (source is DashPairSource ||
-                source is DashVideoSource ||
-                _hasRealTrack(player.state.tracks.video));
+        final requireVideoOutput =
+            source is DashPairSource ||
+            source is DashVideoSource ||
+            _hasRealTrack(player.state.tracks.video);
         Future<void> waitForOutput() => waitForNativeSignal(
           signal: controller.waitUntilFirstFrameRendered,
           superseded: () =>
@@ -749,6 +755,7 @@ final class MediaKitEngine
         );
         if (generation != _generation || _disposed) return;
         if (audioReady != null) {
+          _readinessStage = NativeReadinessStage.externalAudio;
           // A real embedded audio track is insufficient: confirm that mpv
           // selected this source's external file, then verify decoding on play.
           await waitForNativeSignal(
@@ -774,6 +781,28 @@ final class MediaKitEngine
               .timeout(_remaining(watch, openBudget));
         }
         if (generation != _generation || _disposed) return;
+        if (requireVideoOutput) {
+          // A listed track can fail decoding while mpv keeps playing the
+          // external audio. Confirm video while still paused, inside open's
+          // shared deadline, so the caller can use its bounded CDN fallback.
+          _readinessStage = NativeReadinessStage.videoDecode;
+          await _waitReady(
+            player,
+            generation,
+            () =>
+                (player.state.videoParams.w ?? 0) > 0 &&
+                (player.state.videoParams.h ?? 0) > 0,
+            [player.stream.videoParams],
+            _remaining(watch, openBudget),
+            'Video did not decode.',
+          );
+          _readinessStage = NativeReadinessStage.videoOutput;
+          // Decoder metadata alone does not establish a native video output.
+          // mpv renders a video frame while paused; no audio probe is needed.
+          await waitForOutput();
+        }
+        if (generation != _generation || _disposed) return;
+        _readinessStage = null;
         await player
             .setRate(options.rate)
             .timeout(_remaining(watch, openBudget));
@@ -809,26 +838,6 @@ final class MediaKitEngine
         _diagnose(PlayerDiagnosticKind.openReady);
         if (options.play) {
           await player.play().timeout(_remaining(watch, openBudget));
-          if (source is DashVideoSource) {
-            await _waitReady(
-              player,
-              generation,
-              () =>
-                  (player.state.videoParams.w ?? 0) > 0 &&
-                  (player.state.videoParams.h ?? 0) > 0,
-              [player.stream.videoParams],
-              _remaining(watch, openBudget),
-              'Preview video did not decode.',
-            );
-            // Video dimensions can arrive before the native texture is resized
-            // and receives its first frame. Keep the cover until output is ready,
-            // rather than letting Video's black initialization fill replace it.
-            await waitForOutput();
-          } else if (requireAndroidOutput) {
-            // A decoded track is insufficient if Surface creation/attachment
-            // failed. Keep these errors inside this source's open deadline.
-            await waitForOutput();
-          }
           if (_requiresDecodedAudio) {
             await _waitForDecodedAudio(
               player,
@@ -841,7 +850,6 @@ final class MediaKitEngine
           }
         } else {
           await player.pause().timeout(_remaining(watch, openBudget));
-          if (requireAndroidOutput) await waitForOutput();
           if (generation == _generation && !_disposed) {
             _publish(_snapshot.copyWith(phase: PlaybackPhase.paused));
           }
@@ -1114,6 +1122,7 @@ final class MediaKitEngine
     _audioGain = null;
     _nativeErrors.reset();
     _requiresDecodedAudio = false;
+    _readinessStage = null;
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }

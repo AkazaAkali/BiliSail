@@ -73,6 +73,9 @@ enum NativeErrorCause {
 
 enum NativeLogSeverity { warning, error, fatal }
 
+/// The bounded source-open step, without media URLs or native log text.
+enum NativeReadinessStage { tracks, externalAudio, videoDecode, videoOutput }
+
 /// Raw native text never leaves the adapter. Only known categories and a
 /// three-digit HTTP status may cross into local diagnostics.
 final class NativeErrorSummary {
@@ -154,6 +157,8 @@ final class PlayerDiagnosticEvent {
     this.failureKind,
     this.severity,
     this.nativeErrorCode,
+    this.readinessStage,
+    this.diagnostics,
   }) : timestamp = DateTime.now().toUtc();
 
   final DateTime timestamp;
@@ -163,6 +168,8 @@ final class PlayerDiagnosticEvent {
   final PlayerFailureKind? failureKind;
   final NativeLogSeverity? severity;
   final int? nativeErrorCode;
+  final NativeReadinessStage? readinessStage;
+  final PlayerDiagnostics? diagnostics;
 
   Map<String, Object?> toJson() => {
     'time': timestamp.toIso8601String(),
@@ -178,6 +185,12 @@ final class PlayerDiagnosticEvent {
     'rate': snapshot.rate,
     'severity': ?severity?.name,
     'nativeErrorCode': ?nativeErrorCode,
+    'readinessStage': ?readinessStage?.name,
+    if (diagnostics case final media?) ...{
+      'hasDecodedVideo': media.hasDecodedVideo,
+      'hasDecodedAudio': media.hasDecodedAudio,
+      'hasVideoOutput': media.hasVideoOutput,
+    },
     if (nativeError case final error?) ...{
       'component': error.component,
       'cause': error.cause.name,

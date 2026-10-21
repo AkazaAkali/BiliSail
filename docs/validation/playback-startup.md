@@ -63,3 +63,32 @@ ABI 字段与数值来自 [mpv 0.36.0 libmpv/client.h](https://github.com/mpv-pl
 Windows 原生 `windows_playback_startup_test.dart` 5 项通过：受控 HTTP 403 在最后一次运行中约 625 ms 结束打开，捕获 `END_FILE` 的 `errorCode=-13` 后在 500 ms 行为断言内报告失败；随后同一 engine 打开备用夹具并确认真实视频和音频解码。无响应外部音轨的 stop、换源、dispose 和 timeout 恢复及迟到事件回归仍通过。另有独立原生 HTTP 403 脱敏诊断 1 项通过。上述 Debug 耗时是提前结束／取消的行为证据，不是性能基准。日志为 `terminal-failure-native-final.log` 和 `terminal-failure-diagnostics.log`，位于同一忽略目录。
 
 按用户安排，后续应用构建、安装和实机回归由用户手动完成；本轮仅进行了原生集成测试所需的 Windows Debug 测试入口构建，没有构建应用 Release 或替换系统已安装版本。Android/macOS 原生事件、真实账号与故障 CDN 未验证；受控 HTTP 失败验证不等于复现上述网络根因。
+
+## 2026-10-21 阻止仅音频的打开假成功
+
+针对 Windows/macOS 偶发打开缓慢、随后只有音频和黑屏，核对当前锁定 fork `63b7ea7dd95fc348cecf250df5f54ff87d69d8a9` 后发现：普通点播使用 `open(play: false)`，旧实现只等待视频轨道列表和外部音轨选中；后续 `play` 只确认音频解码。视频解码器或原生输出失败而音频正常时，打开仍可能成功，现有备用地址重试也不会触发。`NativeErrorMonitor` 以播放位置推进判断恢复，音频持续推进不能证明视频正常。
+
+受控 Windows 原生复现保留合成 MP4 的视频轨道和样本，只将视频 sample entry 的 `avc1` 改为不支持的 `zzzz`，同时提供正常 AAC 外部音轨。修复前真实 `MediaKitEngine.open(play: false)` 返回成功，`play()` 后诊断为 `hasDecodedAudio=true`、`hasDecodedVideo=false`、`hasVideoOutput=false`，回归断言失败。日志 `build/black-screen-before.log` 是本地忽略文件。本机现有应用日志另有 HTTP 503 后达到 6 秒 deadline 再切备用的记录，但缺少对应黑屏时刻的视频状态，不能把它确定为本次偶发问题的根因或归咎于特定 CDN/GPU。
+
+修复在共享 `MediaKitEngine.open` 内，对 DASH 视频及实际发现视频轨道的 progressive/manifest 源，先在暂停状态确认非零视频解码尺寸，再等待本源原生输出信号，之后才发布 `openReady`。桌面端、Android、悬停预览和暂停打开共用同一规则；纯音频源只等待媒体轨道发现。没有主动播放探测、第二个播放器、全局软解或固定等待。视频失败在原有打开 deadline 内退出并释放，应用沿用最多两次、同一 35 秒预算及服务端备用 URL；换源、关闭、账号边界仍沿用既有隔离。
+
+结构化诊断增加 `readinessStage`（`tracks` / `externalAudio` / `videoDecode` / `videoOutput`）与三个解码/输出布尔值，便于区分解复用、解码及输出故障；不记录 URL、codec 原文或凭据。锁定 SDK 的输出信号来自有效原生输出尺寸，不等于实际屏幕像素或人工画面验收。
+
+`integration_test/native_video_readiness_test.dart` 可在 Windows/macOS 原生执行：覆盖暂停/自动播放时拒绝无法解码的视频、同一 engine 换正常备用后恢复视频输出与真实音频解码、暂停意图和倍速保留，以及 progressive 视频与纯音频。已加入 `tool/test-windows-media.ps1`。
+
+```powershell
+$env:BILI_TEST_MEDIA_DIR = (Resolve-Path test/fixtures/media).Path
+flutter test integration_test/native_video_readiness_test.dart -d windows --no-pub
+```
+
+macOS 在对应主机设置同一环境变量并用 `-d macos` 执行。
+
+本轮验证：
+
+- `tool/check.ps1 -SkipPub` 通过：根应用 1962、API 426、播放器 73、弹幕 93、mux 2，共 2556 项通过；格式、分析和打包边界脚本通过。mux 另有 10 项因未设置 `BILI_MUX_LIBRARY` 跳过，不视为原生通过。日志为 `build/black-screen-check-final.log`。
+- 新增视频就绪原生回归 3 项通过；启动终止失败/stop/replace/dispose/timeout 原生回归 5 项通过。一次多入口原生测试调用的第二入口未建立调试连接，未进入测试；拆为独立调用后 5 项通过。日志为 `build/black-screen-native-regression.log`、`build/black-screen-startup.log`。
+- 既有真实 DASH 请求头、302、Range、双轨解码、seek 和重复打开 1 项通过；悬停 5 秒缓冲窗口及普通打开恢复缓存 1 项通过；本地 HLS/FLV 共用直播会话 1 项通过。未启用在线 PGC/直播 CDN 用例，测试函数按开关直接返回，不计为在线验证。日志为 `build/black-screen-dash.log`、`build/black-screen-preview.log`、`build/black-screen-content.log`。
+- `tool/test-windows-video-dispose.ps1` 的 9 项原生生命周期、渲染队列和尺寸回归通过，日志为 `build/black-screen-dispose.log`。
+- 按 `bili_mux` README 准备 Windows 原生资产后，`flutter build windows --release --no-pub` 成功（51.4 秒）。运行入口为 `build/windows/x64/runner/Release/bilisail.exe`，分发须保留整个 Release 目录；未替换已安装应用或执行人工长时间播放验收。日志为 `build/black-screen-release.log`。
+
+本轮没有访问真实账号、修改相邻 fork 或升级依赖。低概率线上故障、macOS/Android 原生执行和实机画面仍需验证，不能由 Windows 受控故障推导三端已验收。

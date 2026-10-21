@@ -4,6 +4,31 @@ import 'package:bili_player/bili_player.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('readiness diagnostics expose only stage and media readiness flags', () {
+    final event = PlayerDiagnosticEvent(
+      kind: PlayerDiagnosticKind.failed,
+      snapshot: const PlaybackSnapshot(
+        phase: PlaybackPhase.opening,
+        generation: 2,
+      ),
+      readinessStage: NativeReadinessStage.videoDecode,
+      diagnostics: const PlayerDiagnostics(
+        generation: 2,
+        position: Duration.zero,
+        hasDecodedVideo: false,
+        hasDecodedAudio: true,
+        videoCodec: 'https://private.example/?token=SECRET',
+      ),
+    );
+    final json = event.toJson();
+    expect(json['readinessStage'], 'videoDecode');
+    expect(json['hasDecodedVideo'], false);
+    expect(json['hasDecodedAudio'], true);
+    expect(json['hasVideoOutput'], false);
+    expect(jsonEncode(json), isNot(contains('SECRET')));
+    expect(jsonEncode(json), isNot(contains('private.example')));
+  });
+
   test('native text is classified without retaining URLs or credentials', () {
     final summary = NativeErrorSummary.classify(
       'HTTP error 403 Forbidden: https://cdn.example/private?token=SECRET '
