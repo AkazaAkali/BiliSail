@@ -34,7 +34,10 @@ final class ResponsiveCardGrid extends StatelessWidget {
         runSpacing: _runSpacing,
         children: [
           for (final child in children)
-            SizedBox(width: layout.width, child: child),
+            SizedBox(
+              width: layout.width,
+              child: RepaintBoundary(child: child),
+            ),
         ],
       );
     },
@@ -91,9 +94,13 @@ final class _SliverResponsiveCardGridState
                 if (row * layout.columns + column < widget.itemCount)
                   SizedBox(
                     width: layout.width,
-                    child: widget.itemBuilder(
-                      context,
-                      row * layout.columns + column,
+                    // Hover/preview changes on one card must not repaint the
+                    // other cards in this row's sliver repaint boundary.
+                    child: RepaintBoundary(
+                      child: widget.itemBuilder(
+                        context,
+                        row * layout.columns + column,
+                      ),
                     ),
                   ),
             ],

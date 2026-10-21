@@ -1,5 +1,39 @@
 # 列表滚动性能修复
 
+## 2026-10-22：滚动期间悬停与单卡绘制隔离
+
+本次针对 Windows 鼠标滚轮持续滚动的轻微卡顿反馈，先复核自然行高、悬停和绘制路径，再实施共享组件修复。当前推荐列表已经按行懒加载；500 条数据、430/1600 逻辑像素窗口的受控探针中，连续 30 个小幅滚动帧没有重新布局已有卡片或文字，不能将现象归因为“未指定 itemExtent 导致每帧重测全部条目”。大跨度跳转仍有自然高度列表的定位成本，本轮按用户指定范围保留行高与滚轮阻尼。
+
+本轮改动：
+
+- 新增 [ScrollAwareHoverRegion](../../lib/shared/ui/scroll_aware_hover_region.dart)，监听所有祖先的 `isScrollingNotifier`。滚动时保留实际指针位置，但不逐卡更新悬停样式；所有祖先停稳后恢复静止鼠标的悬停。隐藏页面保留原有恢复时序，布局期间结束滚动则延后到该帧结束通知，销毁移除监听。
+- 共用 [VideoCard](../../lib/shared/ui/video_card.dart)、[个人主页横向投稿卡](../../lib/features/profile/presentation/profile_video_card.dart)及[播放页横向相关推荐](../../lib/features/video/presentation/video_screen.dart)统一接入，作者悬停高亮同样处理；透明 InkWell 悬停使用零时长，避免无可见效果的高亮淡入淡出持续绘制。键盘焦点、菜单、点击和稍后再看仍独立工作。
+- [VideoCardCover](../../lib/shared/ui/video_card_cover.dart)在任一祖先滚动期间取消预览、撤下画面并立即恢复 1 倍封面，停止 1.05 倍悬停缩放。滚动中的鼠标进入/离开不反复重建封面；停稳后恢复正常缩放和 200ms 预览等待。独立封面、嵌套列表、后台/隐藏、迟到结果和串行释放沿用同一生命周期。
+- [共享响应式网格](../../lib/shared/ui/responsive_card_grid.dart)的普通 Wrap 与 Sliver 行均按每张卡片增加 `RepaintBoundary`，避免一张卡片的缩放、预览或悬停绘制牵连整行。保留自然高度、懒创建、行委托缓存、缓存范围及 PageStorage。
+
+覆盖范围核对：推荐/热门/排行榜/分区、搜索视频、云端历史、视频动态、收藏和稍后再看通过共享视频卡与网格生效；个人主页投稿和播放页相关推荐修复各自的横向卡片。首页影视、直播、收藏夹及搜索其他类型虽没有相同的视频悬停缩放，也通过同一网格获得单卡绘制隔离。普通横向 Sliver 列表原本已经逐条设置绘制边界，未重复叠加整卡边界。
+
+### 结构证据
+
+使用当前真实 FeedScreen、共享卡片/图片实现与仓库字体，注入 500 条 fake 视频和 640×360 PNG；Windows TargetPlatform、DPR 1，无真实 API/CDN、账号、磁盘或原生预览。连续 60 个 8ms 测试帧，每 8 帧输入一次 120px 鼠标滚轮，鼠标停在卡片上：
+
+| 视口宽度 | 修复前文字节点 paint | 修复后文字节点 paint | 修复前额外标题测量 | 修复后额外标题测量 |
+| --- | ---: | ---: | ---: | ---: |
+| 430 | 1912 | 189 | 20 | 9 |
+| 1600 | 3233 | 131 | 21 | 13 |
+
+这是 debug 模式的工作次数对照，不是帧耗时、GPU 利用率或实际手感。图片可见性检查没有合并，标题溢出测量也没有另加缓存；表中下降来自减少悬停重建与绘制范围。新增单卡图层的真实缓存/显存代价与最终帧时长仍须 Profile/Release 实机检查，不能从 paint 次数换算性能提升比例。
+
+诊断入口和结果位于 Git 忽略目录 `artifacts/recommendation-scroll-2026-10-22/`：`layout_probe_test.dart`、`baseline-layout-results.json`、`optimized-layout-results.json`。前序固定行高和单卡边界独立对照也保留在该目录；没有将临时性能探针加入产品启动或常规 CI。
+
+### 自动验证与实机边界
+
+新增[滚动悬停回归](../../test/shared/ui/scroll_aware_hover_region_test.dart)及[卡片滚动/绘制回归](../../test/shared/ui/card_scroll_repaint_test.dart)，覆盖嵌套祖先、滚动中离开、静止恢复、监听释放、网格/横向/独立封面、内容缩短与布局期间结束滚动，以及普通/Sliver 网格的相邻卡片不重画。现有共享预览、隐藏页面、首帧、取消、键盘与播放页测试继续验证。
+
+本轮 `tool/check.ps1 -SkipPub` 完整通过：根应用 1972、`bili_api` 426、`bili_player` 73、`bili_danmaku` 93、`bili_mux` 2，共 2566 项测试通过；10 项 mux 原生测试因未配置 `BILI_MUX_LIBRARY` 跳过，不计为原生通过。根应用与四包格式/静态分析、Android 版本/签名、Windows 安装器/MSIX 身份和 macOS 发布边界脚本均通过；两份改动文档的 26 个本地链接及 `git diff --check` 通过。日志为 `artifacts/recommendation-scroll-2026-10-22/check.log`。用户自行构建确认实际滚轮手感；本轮不构建安装包、不运行原生 Profile/Release 性能测试，也不将组件计数视作 Windows/Android/macOS 实机验收。
+
+## 2026-10-07：列表虚拟化
+
 日期：2026-10-07。工具链：Flutter 3.47.6 / Dart 3.13.5。修复前源码基线为 `3b8ed05668e26834106c076f769cc295819379af`，修复后为本轮工作区修改。
 
 ## 定位与实现

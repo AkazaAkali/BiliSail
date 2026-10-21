@@ -1086,6 +1086,7 @@ void main() {
       if (frame % 6 == 0) {
         await tester.sendEventToBinding(
           PointerScrollEvent(
+            kind: PointerDeviceKind.mouse,
             position: location,
             scrollDelta: const Offset(0, 25),
           ),
@@ -1093,6 +1094,11 @@ void main() {
       }
       await tester.pump(const Duration(milliseconds: 16));
       expect(operations.reads, 1, reason: 'No new preview while rolling');
+      for (final cover in tester.widgetList<AnimatedScale>(
+        find.byKey(const ValueKey('video-card-cover-scale')),
+      )) {
+        expect(cover.scale, 1, reason: 'No hover scale while rolling');
+      }
     }
     expect(position.pixels - start, greaterThan(700));
     expect(token?.isCancelled, true);

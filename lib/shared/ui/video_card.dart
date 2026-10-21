@@ -5,6 +5,7 @@ import 'bili_badges.dart';
 import 'highlighted_text.dart';
 import 'video_card_cover.dart';
 import 'video_card_interaction_scope.dart';
+import 'scroll_aware_hover_region.dart';
 import 'video_card_feedback.dart';
 export 'video_card_feedback.dart' show VideoCardFeedback;
 import '../../features/video/domain/video_card_interactions.dart';
@@ -168,166 +169,170 @@ final class _VideoCardState extends State<VideoCard> {
     );
     final highlighted = (_hovered || _focused) && !_authorHovered;
     final progress = widget.progress;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 120),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: _focused ? scheme.primary : Colors.transparent,
+    return ScrollAwareHoverRegion(
+      onHover: (hovered) => setState(() => _hovered = hovered),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: _focused ? scheme.primary : Colors.transparent,
+          ),
         ),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(7),
-        clipBehavior: Clip.none,
-        child: InkWell(
-          onTap: widget.feedback == null ? widget.onTap : null,
-          hoverColor: Colors.transparent,
-          onHover: (value) => setState(() => _hovered = value),
-          onFocusChange: (value) => setState(() => _focused = value),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              AspectRatio(
-                aspectRatio: 16 / 9,
-                child: switch (widget.feedback) {
-                  final feedback? => VideoCardFeedbackCover(
-                    feedback: feedback,
-                    background: video.coverUrl.isEmpty
-                        ? _coverFallback(context)
-                        : AppCoverImage(
-                            url: video.coverUrl,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => _coverFallback(context),
-                          ),
-                  ),
-                  null => VideoCardCover(
-                    video: video,
-                    showWatchLaterButton: widget.showWatchLaterButton,
-                    focused: _focused,
-                    hovered: _hovered,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          if (video.coverUrl.isNotEmpty)
-                            AppCoverImage(
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+          clipBehavior: Clip.none,
+          child: InkWell(
+            onTap: widget.feedback == null ? widget.onTap : null,
+            hoverColor: Colors.transparent,
+            hoverDuration: Duration.zero,
+            onFocusChange: (value) => setState(() => _focused = value),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: switch (widget.feedback) {
+                    final feedback? => VideoCardFeedbackCover(
+                      feedback: feedback,
+                      background: video.coverUrl.isEmpty
+                          ? _coverFallback(context)
+                          : AppCoverImage(
                               url: video.coverUrl,
                               fit: BoxFit.cover,
-                              excludeFromSemantics: true,
                               errorBuilder: (_, _, _) =>
                                   _coverFallback(context),
-                              frameBuilder: (_, child, frame, _) =>
-                                  frame != null
-                                  ? child
-                                  : _coverFallback(context),
-                            )
-                          else
-                            _coverFallback(context),
-                          Align(
-                            alignment: Alignment.bottomCenter,
-                            child: SizedBox(
-                              width: double.infinity,
-                              height: textScaler.scale(36) + 20,
-                              child: const DecoratedBox(
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      Colors.transparent,
-                                      Color(0xC4000000),
-                                    ],
+                            ),
+                    ),
+                    null => VideoCardCover(
+                      video: video,
+                      showWatchLaterButton: widget.showWatchLaterButton,
+                      focused: _focused,
+                      hovered: _hovered,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            if (video.coverUrl.isNotEmpty)
+                              AppCoverImage(
+                                url: video.coverUrl,
+                                fit: BoxFit.cover,
+                                excludeFromSemantics: true,
+                                errorBuilder: (_, _, _) =>
+                                    _coverFallback(context),
+                                frameBuilder: (_, child, frame, _) =>
+                                    frame != null
+                                    ? child
+                                    : _coverFallback(context),
+                              )
+                            else
+                              _coverFallback(context),
+                            Align(
+                              alignment: Alignment.bottomCenter,
+                              child: SizedBox(
+                                width: double.infinity,
+                                height: textScaler.scale(36) + 20,
+                                child: const DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        Colors.transparent,
+                                        Color(0xC4000000),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                          Positioned(
-                            left: 7,
-                            right: 7,
-                            bottom: 7,
-                            child: Semantics(
-                              label:
-                                  '观看 $playLabel，'
-                                  '弹幕 $danmakuLabel，'
-                                  '时长 ${durationLabel(video.duration)}',
-                              excludeSemantics: true,
-                              child: _CoverMetadata(
-                                video: video,
-                                cardWidth: cardWidth,
-                                playLabel: playLabel,
-                                danmakuLabel: danmakuLabel,
+                            Positioned(
+                              left: 7,
+                              right: 7,
+                              bottom: 7,
+                              child: Semantics(
+                                label:
+                                    '观看 $playLabel，'
+                                    '弹幕 $danmakuLabel，'
+                                    '时长 ${durationLabel(video.duration)}',
+                                excludeSemantics: true,
+                                child: _CoverMetadata(
+                                  video: video,
+                                  cardWidth: cardWidth,
+                                  playLabel: playLabel,
+                                  danmakuLabel: danmakuLabel,
+                                ),
                               ),
                             ),
-                          ),
-                          if (progress != null)
-                            Align(
-                              alignment: Alignment.bottomLeft,
-                              child: LinearProgressIndicator(
-                                value: progress.clamp(0.0, 1.0),
-                                minHeight: 3,
-                                backgroundColor: Colors.transparent,
+                            if (progress != null)
+                              Align(
+                                alignment: Alignment.bottomLeft,
+                                child: LinearProgressIndicator(
+                                  value: progress.clamp(0.0, 1.0),
+                                  minHeight: 3,
+                                  backgroundColor: Colors.transparent,
+                                ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                },
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 9, bottom: 1),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Reserve two scaled lines so author rows align across cards.
-                    SizedBox(
-                      width: double.infinity,
-                      height: textScaler.scale(_titleFontSize) * 1.4 * 2 + 2,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: HighlightedText(
-                              video.title,
-                              query: widget.highlightQuery,
-                              maxLines: 2,
-                              showOverflowTooltip: true,
-                              style: titleStyle?.copyWith(
-                                color: highlighted
-                                    ? scheme.primary
-                                    : scheme.onSurface,
-                              ),
-                            ),
-                          ),
-                          if (widget.feedback == null)
-                            if (widget.menu case final menu?)
-                              _menuButton(menu, cardWidth),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    _AuthorMetadata(
-                      video: video,
-                      onOpenUser: widget.feedback == null
-                          ? widget.onOpenUser
-                          : null,
-                      hovered: _authorHovered,
-                      onHover: (value) =>
-                          setState(() => _authorHovered = value),
-                      showUpBadge: widget.showUpBadge,
-                      reason: widget.showRecommendationReason
-                          ? video.recommendationReason
-                          : null,
-                      publishText: widget.publishText,
-                      publishTooltip: widget.publishTooltip,
-                    ),
-                  ],
+                  },
                 ),
-              ),
-            ],
+                Padding(
+                  padding: const EdgeInsets.only(top: 9, bottom: 1),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Reserve two scaled lines so author rows align across cards.
+                      SizedBox(
+                        width: double.infinity,
+                        height: textScaler.scale(_titleFontSize) * 1.4 * 2 + 2,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: HighlightedText(
+                                video.title,
+                                query: widget.highlightQuery,
+                                maxLines: 2,
+                                showOverflowTooltip: true,
+                                style: titleStyle?.copyWith(
+                                  color: highlighted
+                                      ? scheme.primary
+                                      : scheme.onSurface,
+                                ),
+                              ),
+                            ),
+                            if (widget.feedback == null)
+                              if (widget.menu case final menu?)
+                                _menuButton(menu, cardWidth),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      _AuthorMetadata(
+                        video: video,
+                        onOpenUser: widget.feedback == null
+                            ? widget.onOpenUser
+                            : null,
+                        hovered: _authorHovered,
+                        onHover: (value) =>
+                            setState(() => _authorHovered = value),
+                        showUpBadge: widget.showUpBadge,
+                        reason: widget.showRecommendationReason
+                            ? video.recommendationReason
+                            : null,
+                        publishText: widget.publishText,
+                        publishTooltip: widget.publishTooltip,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -684,14 +689,14 @@ final class _AuthorMetadata extends StatelessWidget {
         ? '${date.month}-${date.day}'
         : '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
     final reasonText = reason?.trim() ?? '';
-    final author = MouseRegion(
-      onEnter: (_) => onHover(true),
-      onExit: (_) => onHover(false),
+    final author = ScrollAwareHoverRegion(
+      onHover: onHover,
       child: InkWell(
         onTap: id != null && id.isValid && openUser != null
             ? () => openUser(id)
             : null,
         hoverColor: Colors.transparent,
+        hoverDuration: Duration.zero,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [

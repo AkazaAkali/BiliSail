@@ -22,6 +22,7 @@ import '../../../domain/comment_target.dart';
 import '../../../core/presentation/workspace_activity.dart';
 import '../../../shared/ui/video_card.dart';
 import '../../../shared/ui/video_card_cover.dart';
+import '../../../shared/ui/scroll_aware_hover_region.dart';
 import '../../../shared/ui/video_card_interaction_scope.dart';
 import '../../feed/application/home_repository_provider.dart';
 import '../../feed/application/watch_later_removal_controller.dart';
@@ -836,141 +837,150 @@ final class _RelatedVideoCardState extends State<_RelatedVideoCard> {
     final onOpenUser = widget.onOpenUser;
     final canOpenAuthor =
         authorId != null && authorId.isValid && onOpenUser != null;
-    return InkWell(
-      onTap: widget.onTap,
+    return ScrollAwareHoverRegion(
       onHover: (hovered) => setState(() => _hovered = hovered),
-      onFocusChange: (focused) => setState(() => _focused = focused),
-      hoverColor: Colors.transparent,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 140,
-            height: 79,
-            child: VideoCardCover(
-              video: video,
-              hovered: _hovered,
-              focused: _focused,
-              borderRadius: 5,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (video.coverUrl.isEmpty)
-                    const ColoredBox(
-                      color: Colors.black12,
-                      child: Icon(Icons.video_library_outlined),
-                    )
-                  else
-                    AppCoverImage(
-                      url: video.coverUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) =>
-                          const Icon(Icons.video_library_outlined),
-                    ),
-                  Positioned(
-                    right: 4,
-                    bottom: 3,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(2),
+      child: InkWell(
+        onTap: widget.onTap,
+        onFocusChange: (focused) => setState(() => _focused = focused),
+        hoverColor: Colors.transparent,
+        hoverDuration: Duration.zero,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 140,
+              height: 79,
+              child: VideoCardCover(
+                video: video,
+                hovered: _hovered,
+                focused: _focused,
+                borderRadius: 5,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (video.coverUrl.isEmpty)
+                      const ColoredBox(
+                        color: Colors.black12,
+                        child: Icon(Icons.video_library_outlined),
+                      )
+                    else
+                      AppCoverImage(
+                        url: video.coverUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) =>
+                            const Icon(Icons.video_library_outlined),
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 3),
-                        child: Text(
-                          durationLabel(video.duration),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.white,
+                    Positioned(
+                      right: 4,
+                      bottom: 3,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: Text(
+                            durationLabel(video.duration),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 79),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  HighlightedText(
-                    video.title,
-                    query: '',
-                    maxLines: 2,
-                    showOverflowTooltip: true,
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              BiliIcons.up,
-                              size: 13,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 3),
-                            Flexible(
-                              child: InkWell(
-                                onTap: canOpenAuthor
-                                    ? () => onOpenUser(authorId)
-                                    : null,
-                                onHover: (hovered) =>
-                                    setState(() => _authorHovered = hovered),
-                                onFocusChange: (focused) =>
-                                    setState(() => _authorFocused = focused),
-                                hoverColor: Colors.transparent,
-                                child: Text(
-                                  video.author,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color:
-                                        canOpenAuthor &&
-                                            (_authorHovered || _authorFocused)
-                                        ? theme.colorScheme.primary
+            const SizedBox(width: 10),
+            Expanded(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 79),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    HighlightedText(
+                      video.title,
+                      query: '',
+                      maxLines: 2,
+                      showOverflowTooltip: true,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                BiliIcons.up,
+                                size: 13,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 3),
+                              Flexible(
+                                child: ScrollAwareHoverRegion(
+                                  onHover: (hovered) =>
+                                      setState(() => _authorHovered = hovered),
+                                  child: InkWell(
+                                    onTap: canOpenAuthor
+                                        ? () => onOpenUser(authorId)
                                         : null,
+                                    onFocusChange: (focused) => setState(
+                                      () => _authorFocused = focused,
+                                    ),
+                                    hoverColor: Colors.transparent,
+                                    hoverDuration: Duration.zero,
+                                    child: Text(
+                                      video.author,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            color:
+                                                canOpenAuthor &&
+                                                    (_authorHovered ||
+                                                        _authorFocused)
+                                                ? theme.colorScheme.primary
+                                                : null,
+                                          ),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 3,
-                          children: [
-                            _Meta(
-                              icon: BiliIcons.playCount,
-                              label: compactCount(video.playCount),
-                            ),
-                            _Meta(
-                              icon: BiliIcons.danmaku,
-                              label: compactCount(video.danmakuCount),
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 3,
+                            children: [
+                              _Meta(
+                                icon: BiliIcons.playCount,
+                                label: compactCount(video.playCount),
+                              ),
+                              _Meta(
+                                icon: BiliIcons.danmaku,
+                                label: compactCount(video.danmakuCount),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

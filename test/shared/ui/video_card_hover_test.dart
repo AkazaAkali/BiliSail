@@ -292,6 +292,11 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 250));
       expect(services.reads, 1);
+      final coverScale = tester.widget<AnimatedScale>(
+        find.byKey(const ValueKey('video-card-cover-scale')),
+      );
+      expect(coverScale.scale, 1);
+      expect(coverScale.duration, Duration.zero);
       expect(services.engines, isEmpty);
       expect(find.byKey(const ValueKey('video-card-preview')), findsNothing);
       await tester.pump(const Duration(milliseconds: 200));

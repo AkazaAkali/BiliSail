@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:bili_player/bili_player.dart';
 
 import '../../core/presentation/workspace_activity.dart';
@@ -48,6 +49,7 @@ class _VideoCardCoverState extends State<VideoCardCover>
   Timer? _hoverDelay;
   int _writeGeneration = 0;
   bool _foreground = true;
+  bool _scrollHoverCheckScheduled = false;
   final _scrollPositions = <ScrollPosition>{};
 
   bool get _scrolling =>
@@ -76,9 +78,17 @@ class _VideoCardCoverState extends State<VideoCardCover>
     // A stationary mouse crosses many cards during smooth wheel scrolling.
     // Cancel even an in-flight open; only restart after every enclosing list
     // is idle and the normal hover delay has elapsed again.
-    _stopPreview();
-    if (_preview != null) setState(() => _preview = null);
-    _schedulePreview();
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (_scrollHoverCheckScheduled) return;
+      _scrollHoverCheckScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollHoverCheckScheduled = false;
+        if (mounted) _hoverCover(widget.hovered ?? _pointerHovered);
+      });
+      return;
+    }
+    _hoverCover(widget.hovered ?? _pointerHovered);
   }
 
   void _schedulePreview() {
@@ -168,9 +178,11 @@ class _VideoCardCoverState extends State<VideoCardCover>
   void _hoverCover(bool hovered) {
     _pointerHovered = hovered;
     if (!_active || !_foreground) return;
+    final effectiveHover = hovered && !_scrolling;
+    if (_coverHovered == effectiveHover && _preview == null) return;
     _stopPreview();
     setState(() {
-      _coverHovered = hovered;
+      _coverHovered = effectiveHover;
       _preview = null;
     });
     _schedulePreview();
@@ -250,7 +262,11 @@ class _VideoCardCoverState extends State<VideoCardCover>
         child: AnimatedScale(
           key: const ValueKey('video-card-cover-scale'),
           scale: _coverHovered ? _coverHoverScale : 1,
-          duration: const Duration(milliseconds: 200),
+          // Snap back when scrolling starts; animating the exit would keep
+          // invalidating the cover during the first scroll frames.
+          duration: _scrolling || MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(widget.borderRadius),
