@@ -33,6 +33,85 @@ final class AppImagePageViewport extends SingleChildRenderObjectWidget {
 
 final class _RenderAppImagePageViewport extends RenderProxyBox {}
 
+final _imageVisibilityChecks = _ImageVisibilityChecks();
+final _imageScrollObservers = Expando<_ImageScrollObserver>();
+
+/// Each position has one listener, regardless of the number of visible images.
+final class _ImageScrollObserver {
+  _ImageScrollObserver(this.position) {
+    position.addListener(_onScroll);
+  }
+
+  final ScrollPosition position;
+  final images = <_AppNetworkImageState>{};
+
+  void _onScroll() {
+    for (final image in List.of(images)) {
+      image._onScrollChanged();
+    }
+  }
+
+  void remove(_AppNetworkImageState image) {
+    images.remove(image);
+    if (images.isEmpty) {
+      position.removeListener(_onScroll);
+      _imageScrollObservers[position] = null;
+    }
+  }
+}
+
+/// Merge layout/scroll invalidations into one callback after the current layout.
+final class _ImageVisibilityChecks {
+  final pending = <_AppNetworkImageState>{};
+  bool _scheduled = false;
+
+  void schedule(_AppNetworkImageState image) {
+    pending.add(image);
+    if (_scheduled) return;
+    _scheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scheduled = false;
+      final images = List.of(pending);
+      pending.clear();
+      final geometry = _ImageViewportGeometry();
+      for (final image in images) {
+        if (!image.mounted) continue;
+        try {
+          image._checkVisibility(geometry);
+        } catch (error, stack) {
+          // Preserve the framework's per-callback error isolation after merging
+          // callbacks: one invalid render tree must not starve other images.
+          FlutterError.reportError(
+            FlutterErrorDetails(
+              exception: error,
+              stack: stack,
+              library: 'BiliSail image visibility',
+              context: ErrorDescription('while checking an image viewport'),
+            ),
+          );
+        }
+      }
+    }, debugLabel: 'AppNetworkImage.visibility');
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+}
+
+/// Bounds and transforms are shared only within one post-layout batch. Never
+/// reuse a previous frame's geometry across scrolling, resize or animations.
+final class _ImageViewportGeometry {
+  final _bounds = <RenderAbstractViewport, Rect>{};
+  final _transforms =
+      <(RenderAbstractViewport, RenderAbstractViewport), Matrix4>{};
+
+  Rect bounds(RenderAbstractViewport viewport) =>
+      _bounds.putIfAbsent(viewport, () => viewport.paintBounds);
+
+  Matrix4 transform(RenderAbstractViewport from, RenderAbstractViewport to) =>
+      _transforms.putIfAbsent((from, to), () => from.getTransformTo(to));
+}
+
+typedef _ImageViewport = ({RenderAbstractViewport viewport, bool insidePage});
+
 /// Public covers and avatars share one provider across tabs. No caller headers
 /// are accepted, so account credentials cannot leak to CDN image requests.
 final class AppNetworkImage extends StatefulWidget {
@@ -74,12 +153,13 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
   bool _visible = false;
   ImageLoadPriority _priority = ImageLoadPriority.prefetch;
   bool _visibilityChecked = false;
-  bool _checkScheduled = false;
   bool _retryScheduled = false;
   bool _hasFrame = false;
   ImageProvider<Object>? _provider;
   _RetainedImageProvider? _source;
   int _attempt = 0;
+  RenderBox? _visibilityBox;
+  List<_ImageViewport>? _viewports;
 
   @override
   void didChangeDependencies() {
@@ -92,6 +172,7 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
     // Observe viewport changes without rebuilding the whole list on scroll.
     MediaQuery.maybeSizeOf(context);
     Scrollable.maybeOf(context);
+    _invalidateVisibilityGeometry();
     _syncScrollPositions();
     if (!_active) {
       _visible = false;
@@ -104,6 +185,7 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
   @override
   void didUpdateWidget(AppNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _invalidateVisibilityGeometry();
     _syncScrollPositions();
     if (oldWidget.url != widget.url ||
         oldWidget.cacheWidth != widget.cacheWidth ||
@@ -119,17 +201,21 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
 
   void _syncScrollPositions() {
     final positions = <ScrollPosition>{};
-    context.visitAncestorElements((element) {
-      if (element is StatefulElement && element.state is ScrollableState) {
-        positions.add((element.state as ScrollableState).position);
-      }
-      return true;
-    });
+    if (_active) {
+      context.visitAncestorElements((element) {
+        if (element is StatefulElement && element.state is ScrollableState) {
+          positions.add((element.state as ScrollableState).position);
+        }
+        return true;
+      });
+    }
     for (final position in _positions.difference(positions)) {
-      position.removeListener(_onScrollChanged);
+      _imageScrollObservers[position]?.remove(this);
     }
     for (final position in positions.difference(_positions)) {
-      position.addListener(_onScrollChanged);
+      (_imageScrollObservers[position] ??= _ImageScrollObserver(
+        position,
+      )).images.add(this);
     }
     _positions
       ..clear()
@@ -137,12 +223,12 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
   }
 
   void _onScrollChanged() {
+    if (!mounted || !_active) return;
     // A still-mounted image can return before the post-layout check (notably
     // SingleChildScrollView). Re-admit only decoded frames here; new requests
     // continue to wait for the authoritative check after layout.
     final provider = _provider;
-    if (mounted &&
-        !_visible &&
+    if (!_visible &&
         SchedulerBinding.instance.schedulerPhase !=
             SchedulerPhase.persistentCallbacks &&
         provider is AppImageProvider &&
@@ -153,40 +239,61 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
     _scheduleVisibilityCheck();
   }
 
+  List<_ImageViewport> _viewportsFor(RenderBox box) {
+    final cached = _viewports;
+    if (identical(box, _visibilityBox) && cached != null) return cached;
+    _visibilityBox = box;
+    final viewports = <_ImageViewport>[];
+    RenderObject? ancestor = box.parent;
+    var insidePage = true;
+    while (ancestor != null) {
+      if (ancestor is _RenderAppImagePageViewport) insidePage = false;
+      if (ancestor is RenderAbstractViewport) {
+        viewports.add((viewport: ancestor, insidePage: insidePage));
+      }
+      ancestor = ancestor.parent;
+    }
+    return _viewports = viewports;
+  }
+
   ({bool visible, bool visibleInPage, ImageLoadPriority priority})
-  _readVisibility() {
+  _readVisibility([_ImageViewportGeometry? sharedGeometry]) {
     final box = context.findRenderObject();
     var visible = _active && box is RenderBox && box.hasSize;
     var visibleInPage = visible;
     var inViewport = visible;
     if (visible) {
-      // Check every ancestor viewport, including nested lists, with the same
-      // 160 logical-pixel prefetch range used for new requests.
-      RenderObject? ancestor = box.parent;
-      var insidePage = true;
-      while (ancestor != null) {
-        if (ancestor is _RenderAppImagePageViewport) insidePage = false;
-        if (ancestor is RenderAbstractViewport) {
-          final bounds = MatrixUtils.transformRect(
-            box.getTransformTo(ancestor),
-            // Intrinsic-sized images can have no area before their first frame.
-            box.paintBounds.isEmpty
-                ? Rect.fromLTWH(box.paintBounds.left, box.paintBounds.top, 1, 1)
-                : box.paintBounds,
-          );
-          final viewport = ancestor.paintBounds.inflate(160);
+      // Cache ancestry until layout/reparenting, never pixel coordinates.
+      final viewports = _viewportsFor(box);
+      if (viewports.isNotEmpty) {
+        final geometry = sharedGeometry ?? _ImageViewportGeometry();
+        final nearest = viewports.first.viewport;
+        final local = box.getTransformTo(nearest);
+        // Intrinsic-sized images can have no area before their first frame.
+        final paintBounds = box.paintBounds.isEmpty
+            ? Rect.fromLTWH(box.paintBounds.left, box.paintBounds.top, 1, 1)
+            : box.paintBounds;
+        for (final entry in viewports) {
+          final transform = identical(entry.viewport, nearest)
+              ? local
+              : (geometry.transform(nearest, entry.viewport).clone()
+                  ..multiply(local));
+          // Compose matrices before transforming the rectangle. Repeatedly
+          // transforming axis-aligned bounds would overestimate rotated images.
+          final bounds = MatrixUtils.transformRect(transform, paintBounds);
+          final viewportBounds = geometry.bounds(entry.viewport);
+          final viewport = viewportBounds.inflate(160);
           if (!bounds.overlaps(viewport)) visible = false;
-          if (!bounds.overlaps(ancestor.paintBounds)) inViewport = false;
+          if (!bounds.overlaps(viewportBounds)) inViewport = false;
           // Keep a ready frame during page swipes, but release it for inner
           // scrolling or outer vertical clipping.
-          if (insidePage
+          if (entry.insidePage
               ? !bounds.overlaps(viewport)
               : bounds.bottom <= viewport.top ||
                     bounds.top >= viewport.bottom) {
             visibleInPage = false;
           }
         }
-        ancestor = ancestor.parent;
       }
     }
     return (
@@ -199,36 +306,43 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
   }
 
   void _scheduleVisibilityCheck() {
-    if (_checkScheduled || !mounted) return;
-    _checkScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkScheduled = false;
-      if (!mounted) return;
-      final (:visible, :visibleInPage, :priority) = _readVisibility();
-      _priority = priority;
-      _source?.setPriority(priority);
-      if (!visible) {
-        _source?.releaseDemand();
-        if (!_hasFrame && _source?.hasCachedFrame != true) {
-          _releaseSource();
-        }
+    if (mounted) _imageVisibilityChecks.schedule(this);
+  }
+
+  void _invalidateVisibilityGeometry() {
+    _visibilityBox = null;
+    _viewports = null;
+  }
+
+  void _onImageLayout() {
+    _invalidateVisibilityGeometry();
+    _scheduleVisibilityCheck();
+  }
+
+  void _checkVisibility(_ImageViewportGeometry geometry) {
+    final (:visible, :visibleInPage, :priority) = _readVisibility(geometry);
+    _priority = priority;
+    _source?.setPriority(priority);
+    if (!visible) {
+      _source?.releaseDemand();
+      if (!_hasFrame && _source?.hasCachedFrame != true) {
+        _releaseSource();
       }
-      _visibilityChecked = true;
-      // A cached animation can report an error before frameBuilder runs.
-      // Release its admitted stream too, even when only the error is painted.
-      final releaseFrame =
-          _active &&
-          !visibleInPage &&
-          (_hasFrame || _source?.hasCachedFrame == true);
-      if (visible != _visible || releaseFrame) {
-        if (!visible) _stopWaiting();
-        setState(() {
-          _visible = visible;
-          if (releaseFrame) _hasFrame = false;
-        });
-      }
-    });
-    WidgetsBinding.instance.ensureVisualUpdate();
+    }
+    _visibilityChecked = true;
+    // A cached animation can report an error before frameBuilder runs.
+    // Release its admitted stream too, even when only the error is painted.
+    final releaseFrame =
+        _active &&
+        !visibleInPage &&
+        (_hasFrame || _source?.hasCachedFrame == true);
+    if (visible != _visible || releaseFrame) {
+      if (!visible) _stopWaiting();
+      setState(() {
+        _visible = visible;
+        if (releaseFrame) _hasFrame = false;
+      });
+    }
   }
 
   void _stopWaiting() {
@@ -340,7 +454,7 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
         : null;
     if (!showImage) _releaseSource();
     return _ImageViewportProbe(
-      onLayout: _scheduleVisibilityCheck,
+      onLayout: _onImageLayout,
       // A retained page can still be painted by the horizontal pager before
       // its routed selection changes. Keep its ready frame, while TickerMode
       // pauses the stream listener. Offscreen images on active lists still
@@ -389,10 +503,26 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
   }
 
   @override
-  void dispose() {
+  void deactivate() {
+    _imageVisibilityChecks.pending.remove(this);
     for (final position in _positions) {
-      position.removeListener(_onScrollChanged);
+      _imageScrollObservers[position]?.remove(this);
     }
+    _positions.clear();
+    _invalidateVisibilityGeometry();
+    super.deactivate();
+  }
+
+  @override
+  void activate() {
+    super.activate();
+    _visibilityChecked = false;
+    _syncScrollPositions();
+    _scheduleVisibilityCheck();
+  }
+
+  @override
+  void dispose() {
     _stopWaiting();
     _releaseSource();
     super.dispose();

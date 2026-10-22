@@ -13,6 +13,13 @@ export '../../../shared/ui/storyboard_thumbnail.dart';
 
 const timelineTrackInset = 8.0;
 
+typedef _ChapterTitleInputs = ({
+  TextStyle style,
+  TextDirection direction,
+  TextScaler scaler,
+  Locale? locale,
+});
+
 /// Hover and drag state stay local. Preview never commands the media engine.
 class PlaybackTimelineBar extends StatefulWidget {
   const PlaybackTimelineBar({
@@ -55,10 +62,34 @@ class _PlaybackTimelineBarState extends State<PlaybackTimelineBar> {
   double? _drag;
   bool _hovering = false;
   double? _layoutWidth;
+  _ChapterTitleInputs? _chapterTitleInputs;
+  final _chapterTitleSizes = <String, Size>{};
+
+  @override
+  void initState() {
+    super.initState();
+    PaintingBinding.instance.systemFonts.addListener(_fontsChanged);
+  }
+
+  void _fontsChanged() => setState(() {
+    _chapterTitleInputs = null;
+    _chapterTitleSizes.clear();
+  });
+
+  @override
+  void dispose() {
+    PaintingBinding.instance.systemFonts.removeListener(_fontsChanged);
+    super.dispose();
+  }
 
   @override
   void didUpdateWidget(covariant PlaybackTimelineBar oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.sourceGeneration != widget.sourceGeneration ||
+        !listEquals(oldWidget.chapters, widget.chapters)) {
+      // normalizeChapters admits at most 200 titles from the current source.
+      _chapterTitleSizes.clear();
+    }
     if (oldWidget.sourceGeneration != widget.sourceGeneration ||
         widget.duration <= Duration.zero) {
       _preview = null;
@@ -309,13 +340,8 @@ class _PlaybackTimelineBarState extends State<PlaybackTimelineBar> {
     final left = rtl ? width - end : start;
     final available = math.min(end - start, width - 24 - left);
     const style = TextStyle(color: Colors.white70, fontSize: 11);
-    final text = TextPainter(
-      text: TextSpan(text: chapter.title, style: style),
-      textDirection: Directionality.of(context),
-      textScaler: MediaQuery.textScalerOf(context),
-    )..layout();
-    final fits = text.width + 12 <= available && text.height <= 18;
-    text.dispose();
+    final size = _chapterTitleSize(context, chapter.title, style);
+    final fits = size.width + 12 <= available && size.height <= 18;
     if (!fits) {
       return const SizedBox.shrink();
     }
@@ -333,6 +359,39 @@ class _PlaybackTimelineBarState extends State<PlaybackTimelineBar> {
         ),
       ),
     );
+  }
+
+  Size _chapterTitleSize(BuildContext context, String title, TextStyle style) {
+    var effectiveStyle = DefaultTextStyle.of(context).style.merge(style);
+    if (MediaQuery.boldTextOf(context)) {
+      effectiveStyle = effectiveStyle.merge(
+        const TextStyle(fontWeight: FontWeight.bold),
+      );
+    }
+    final inputs = (
+      style: effectiveStyle,
+      direction: Directionality.of(context),
+      scaler: MediaQuery.textScalerOf(context),
+      locale: Localizations.maybeLocaleOf(context),
+    );
+    if (_chapterTitleInputs != inputs) {
+      _chapterTitleInputs = inputs;
+      _chapterTitleSizes.clear();
+    }
+    return _chapterTitleSizes.putIfAbsent(title, () {
+      final painter = TextPainter(
+        text: TextSpan(text: title, style: inputs.style),
+        textDirection: inputs.direction,
+        textScaler: inputs.scaler,
+        locale: inputs.locale,
+      );
+      try {
+        painter.layout();
+        return painter.size;
+      } finally {
+        painter.dispose();
+      }
+    });
   }
 
   Widget _buildPreview(BuildContext context, double trackWidth) {

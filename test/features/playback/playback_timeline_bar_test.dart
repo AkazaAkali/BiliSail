@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:ui';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:bili_api/bili_api.dart';
@@ -17,6 +16,7 @@ import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/domain/video.dart';
 import 'package:bilisail/features/playback/presentation/playback_timeline_bar.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -30,6 +30,76 @@ const _chapters = [
 ];
 
 void main() {
+  testWidgets('chapter titles reuse measurement across progress, hover and '
+      'width changes; typography and source changes invalidate', (
+    tester,
+  ) async {
+    var measurements = 0;
+    void created(ObjectEvent event) {
+      if (event is ObjectCreated &&
+          event.object is TextPainter &&
+          StackTrace.current.toString().contains('_chapterTitleSize')) {
+        measurements++;
+      }
+    }
+
+    FlutterMemoryAllocations.instance.addListener(created);
+    addTearDown(
+      () => FlutterMemoryAllocations.instance.removeListener(created),
+    );
+    final harness = _Harness();
+    addTearDown(harness.trend.dispose);
+    await tester.pumpWidget(harness.build());
+    expect(measurements, 2);
+    measurements = 0;
+    for (var i = 0; i < 20; i++) {
+      harness.position = Duration(seconds: i);
+      await tester.pumpWidget(harness.build());
+    }
+    harness.width = 450;
+    await tester.pumpWidget(harness.build());
+    final track = tester.getRect(
+      find.byKey(const ValueKey('playback-timeline-slider')),
+    );
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: track.center);
+    await tester.pump();
+    for (var i = 0; i < 5; i++) {
+      await mouse.moveTo(
+        Offset(track.left + track.width * (i + 1) / 6, track.center.dy),
+      );
+      await tester.pump();
+    }
+    expect(measurements, 0);
+    await mouse.removePointer();
+    harness.textScale = 2;
+    await tester.pumpWidget(harness.build());
+    expect(measurements, 2);
+    measurements = 0;
+    harness.rtl = true;
+    await tester.pumpWidget(harness.build());
+    expect(measurements, 2);
+    measurements = 0;
+    await PaintingBinding.instance.handleSystemMessage({'type': 'fontsChange'});
+    await tester.pump();
+    expect(measurements, 2);
+    measurements = 0;
+    harness.chapters = const [
+      VideoChapter(
+        start: Duration.zero,
+        end: Duration(seconds: 60),
+        title: '新章节',
+      ),
+    ];
+    await tester.pumpWidget(harness.build());
+    expect(measurements, 1);
+    await tester.pumpWidget(const SizedBox());
+    measurements = 0;
+    await PaintingBinding.instance.handleSystemMessage({'type': 'fontsChange'});
+    await tester.pump();
+    expect(measurements, 0);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('preview requests once on entry and drag start, never per move', (
     tester,
   ) async {

@@ -11,6 +11,8 @@ import 'package:bilisail/shared/ui/app_network_image.dart';
 import 'package:bilisail/shared/ui/video_card.dart';
 import 'package:bilisail/shared/ui/video_grid.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Future<Uint8List> _png() async {
@@ -52,6 +54,18 @@ Widget _app(AppImageCache cache, Widget child) => AppImageCacheScope(
 
 final class _CountingImageBinding extends AutomatedTestWidgetsFlutterBinding {
   int decodes = 0;
+  int visibilityBatches = 0;
+
+  @override
+  void addPostFrameCallback(
+    FrameCallback callback, {
+    String debugLabel = 'callback',
+  }) {
+    super.addPostFrameCallback((time) {
+      if (debugLabel == 'AppNetworkImage.visibility') visibilityBatches++;
+      callback(time);
+    }, debugLabel: debugLabel);
+  }
 
   @override
   Future<ui.Codec> instantiateImageCodecWithSize(
@@ -88,6 +102,234 @@ final class _ManualImageCompleter extends ImageStreamCompleter {
 
 void main() {
   final binding = _CountingImageBinding();
+  testWidgets('a failed visibility check reports its error without starving '
+      'other images in the batch', (tester) async {
+    final bytes = await tester.runAsync(_png);
+    if (bytes == null) throw StateError('Missing PNG');
+    final loaded = <String>[];
+    final cache = AppImageCache(
+      ImageByteCache(
+        directory: () async => throw const FileSystemException('optional'),
+        loader: (uri, _) async {
+          loaded.add(uri.path);
+          return bytes;
+        },
+      ),
+    );
+    var failNext = true;
+    await tester.pumpWidget(
+      _app(
+        cache,
+        SingleChildScrollView(
+          child: Column(
+            children: [
+              _TransformCounter(
+                onTransform: () {
+                  if (failNext) {
+                    failNext = false;
+                    throw StateError('synthetic viewport failure');
+                  }
+                },
+                child: _image(0),
+              ),
+              _image(1),
+              const SizedBox(height: 1600),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(tester.takeException(), isA<StateError>());
+    await _until(tester, () => loaded.contains('/visibility-1.jpg'));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await cache.close();
+  });
+  testWidgets('nested images share listeners, a visibility batch and outer '
+      'viewport geometry; hidden images detach', (tester) async {
+    final bytes = await tester.runAsync(_png);
+    if (bytes == null) throw StateError('Missing PNG');
+    final cache = AppImageCache(
+      ImageByteCache(
+        directory: () async => throw const FileSystemException('optional'),
+        loader: (_, _) async => bytes,
+      ),
+    );
+    final outer = _ObservedScrollController();
+    final inner = _ObservedScrollController();
+    var transformVisits = 0;
+    var active = true;
+    late StateSetter update;
+    final content = SingleChildScrollView(
+      controller: outer,
+      child: Column(
+        children: [
+          _TransformCounter(
+            onTransform: () => transformVisits++,
+            child: SizedBox(
+              height: 100,
+              child: SingleChildScrollView(
+                controller: inner,
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (var i = 0; i < 10; i++) _image(i),
+                    const SizedBox(width: 1600),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 2000),
+        ],
+      ),
+    );
+    await tester.pumpWidget(
+      _app(
+        cache,
+        StatefulBuilder(
+          builder: (_, setState) {
+            update = setState;
+            return WorkspaceActivity(
+              active: active,
+              child: TickerMode(enabled: active, child: content),
+            );
+          },
+        ),
+      ),
+    );
+    await _until(
+      tester,
+      () =>
+          tester
+              .widgetList<RawImage>(find.byType(RawImage))
+              .where((image) => image.image != null)
+              .length ==
+          10,
+    );
+    await tester.pumpAndSettle();
+    expect(outer.observed.imageListeners, 1);
+    expect(inner.observed.imageListeners, 1);
+    transformVisits = 0;
+    binding.visibilityBatches = 0;
+    outer.jumpTo(5);
+    inner.jumpTo(5);
+    await tester.pump();
+    expect(binding.visibilityBatches, 1);
+    expect(transformVisits, 1);
+    update(() => active = false);
+    await tester.pumpAndSettle();
+    expect(outer.observed.imageListeners, 0);
+    expect(inner.observed.imageListeners, 0);
+    binding.visibilityBatches = 0;
+    outer.jumpTo(10);
+    inner.jumpTo(10);
+    await tester.pump();
+    expect(binding.visibilityBatches, 0);
+    update(() => active = true);
+    await tester.pumpAndSettle();
+    expect(outer.observed.imageListeners, 1);
+    expect(inner.observed.imageListeners, 1);
+    await tester.pumpWidget(const SizedBox());
+    expect(outer.observed.imageListeners, 0);
+    expect(inner.observed.imageListeners, 0);
+    outer.dispose();
+    inner.dispose();
+    await cache.close();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('reparenting a cached image replaces queued geometry and old '
+      'scroll listeners', (tester) async {
+    final bytes = await tester.runAsync(_png);
+    if (bytes == null) throw StateError('Missing PNG');
+    var loads = 0;
+    final cache = AppImageCache(
+      ImageByteCache(
+        directory: () async => throw const FileSystemException('optional'),
+        loader: (_, _) async {
+          loads++;
+          return bytes;
+        },
+      ),
+    );
+    final left = _ObservedScrollController();
+    final right = _ObservedScrollController();
+    final key = GlobalKey();
+    final image = AppNetworkImage(
+      key: key,
+      url: 'https://i0.hdslb.com/reparent.jpg',
+      width: 40,
+      height: 40,
+    );
+    var onRight = false;
+    late StateSetter update;
+    await tester.pumpWidget(
+      _app(
+        cache,
+        StatefulBuilder(
+          builder: (_, setState) {
+            update = setState;
+            return Row(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    controller: left,
+                    child: Column(
+                      children: [
+                        if (!onRight) image,
+                        const SizedBox(height: 2000),
+                      ],
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    controller: right,
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 1000),
+                        if (onRight) image,
+                        const SizedBox(height: 1000),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+    await _until(
+      tester,
+      () => tester
+          .widgetList<RawImage>(find.byType(RawImage))
+          .any((image) => image.image != null),
+    );
+    left.jumpTo(800);
+    update(() => onRight = true);
+    await tester.pumpAndSettle();
+    expect(find.byType(RawImage), findsNothing);
+    expect(left.observed.imageListeners, 0);
+    expect(right.observed.imageListeners, 1);
+    expect(loads, 1);
+    right.jumpTo(1000);
+    await tester.pump();
+    expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNotNull);
+    expect(loads, 1);
+    await tester.pumpAndSettle();
+    binding.visibilityBatches = 0;
+    left.jumpTo(0);
+    await tester.pump();
+    expect(binding.visibilityBatches, 0);
+    await tester.pumpWidget(const SizedBox());
+    expect(right.observed.imageListeners, 0);
+    left.dispose();
+    right.dispose();
+    await cache.close();
+    expect(tester.takeException(), isNull);
+  });
   for (final lazy in [false, true]) {
     for (final fast in [false, true]) {
       testWidgets(
@@ -999,4 +1241,62 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+}
+
+final class _ObservedScrollController extends ScrollController {
+  late _ObservedScrollPosition observed;
+  @override
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) => observed = _ObservedScrollPosition(
+    physics: physics,
+    context: context,
+    oldPosition: oldPosition,
+  );
+}
+
+final class _ObservedScrollPosition extends ScrollPositionWithSingleContext {
+  _ObservedScrollPosition({
+    required super.physics,
+    required super.context,
+    super.oldPosition,
+  });
+  int imageListeners = 0;
+  @override
+  void addListener(VoidCallback listener) {
+    if (StackTrace.current.toString().contains('_ImageScrollObserver')) {
+      imageListeners++;
+    }
+    super.addListener(listener);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    if (StackTrace.current.toString().contains('_ImageScrollObserver')) {
+      imageListeners--;
+    }
+    super.removeListener(listener);
+  }
+}
+
+final class _TransformCounter extends SingleChildRenderObjectWidget {
+  const _TransformCounter({required this.onTransform, required super.child});
+  final VoidCallback onTransform;
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderTransformCounter(onTransform);
+}
+
+final class _RenderTransformCounter extends RenderProxyBox {
+  _RenderTransformCounter(this.onTransform);
+  final VoidCallback onTransform;
+  @override
+  void applyPaintTransform(RenderBox child, Matrix4 transform) {
+    if (StackTrace.current.toString().contains('app_network_image.dart')) {
+      onTransform();
+    }
+    super.applyPaintTransform(child, transform);
+  }
 }

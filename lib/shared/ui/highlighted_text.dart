@@ -60,6 +60,58 @@ final class HighlightedText extends StatelessWidget {
 
   Widget _withOverflowTooltip(BuildContext context, Text child) {
     if (!showOverflowTooltip) return child;
+    return _OverflowTooltip(text: text, maxLines: maxLines, child: child);
+  }
+}
+
+typedef _OverflowInputs = ({
+  double maxWidth,
+  TextAlign align,
+  TextDirection direction,
+  TextScaler scaler,
+  Locale? locale,
+  int maxLines,
+  TextWidthBasis widthBasis,
+  TextHeightBehavior? heightBehavior,
+});
+
+final class _OverflowTooltip extends StatefulWidget {
+  const _OverflowTooltip({
+    required this.text,
+    required this.maxLines,
+    required this.child,
+  });
+
+  final String text;
+  final int maxLines;
+  final Text child;
+
+  @override
+  State<_OverflowTooltip> createState() => _OverflowTooltipState();
+}
+
+final class _OverflowTooltipState extends State<_OverflowTooltip> {
+  _OverflowInputs? _inputs;
+  TextSpan? _measuredText;
+  bool _overflowing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    PaintingBinding.instance.systemFonts.addListener(_fontsChanged);
+  }
+
+  void _fontsChanged() => setState(() => _inputs = null);
+
+  @override
+  void dispose() {
+    PaintingBinding.instance.systemFonts.removeListener(_fontsChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final child = widget.child;
     final defaults = DefaultTextStyle.of(context);
     final childStyle = child.style;
     var effectiveStyle = childStyle == null || childStyle.inherit
@@ -72,27 +124,47 @@ final class HighlightedText extends StatelessWidget {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Measure the same spans and available width as the rendered title,
-        // including space reserved by the card's menu button.
-        final painter = TextPainter(
-          text: TextSpan(
-            style: effectiveStyle,
-            text: child.data,
-            children: [?child.textSpan],
-          ),
-          textAlign: defaults.textAlign ?? TextAlign.start,
-          textDirection: Directionality.of(context),
-          textScaler: MediaQuery.textScalerOf(context),
+        final inputs = (
+          maxWidth: constraints.maxWidth,
+          align: defaults.textAlign ?? TextAlign.start,
+          direction: Directionality.of(context),
+          scaler: MediaQuery.textScalerOf(context),
           locale: Localizations.maybeLocaleOf(context),
-          maxLines: maxLines,
-          ellipsis: '\u2026',
-          textWidthBasis: defaults.textWidthBasis,
-          textHeightBehavior: defaults.textHeightBehavior,
-        )..layout(maxWidth: constraints.maxWidth);
-        final overflowing = painter.didExceedMaxLines;
-        painter.dispose();
+          maxLines: widget.maxLines,
+          widthBasis: defaults.textWidthBasis,
+          heightBehavior: defaults.textHeightBehavior,
+        );
+        final span = TextSpan(
+          style: effectiveStyle,
+          text: child.data,
+          children: [?child.textSpan],
+        );
+        // One result per mounted title. Flutter's span comparison distinguishes
+        // paint-only hover/highlight colors from changes that affect layout.
+        if (_inputs != inputs ||
+            _measuredText?.compareTo(span) == RenderComparison.layout) {
+          final painter = TextPainter(
+            text: span,
+            textAlign: inputs.align,
+            textDirection: inputs.direction,
+            textScaler: inputs.scaler,
+            locale: inputs.locale,
+            maxLines: inputs.maxLines,
+            ellipsis: '\u2026',
+            textWidthBasis: inputs.widthBasis,
+            textHeightBehavior: inputs.heightBehavior,
+          );
+          try {
+            painter.layout(maxWidth: inputs.maxWidth);
+            _overflowing = painter.didExceedMaxLines;
+            _inputs = inputs;
+            _measuredText = span;
+          } finally {
+            painter.dispose();
+          }
+        }
         return Tooltip(
-          message: overflowing ? text : '',
+          message: _overflowing ? widget.text : '',
           excludeFromSemantics: true,
           triggerMode: TooltipTriggerMode.manual,
           child: child,
