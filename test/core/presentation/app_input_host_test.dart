@@ -164,13 +164,13 @@ void main() {
           policies.clear();
           _active(tester, false, viewFocus: viewFocus);
           await tester.pump();
-          expect(policies, isEmpty);
+          expect(policies, [false]);
           _active(tester, true, viewFocus: viewFocus);
           await tester.pumpAndSettle();
           expect(FocusManager.instance.primaryFocus, same(focus));
-          expect(policies, [editing]);
+          expect(policies, [false, editing]);
           await tester.pump();
-          expect(policies, [editing]);
+          expect(policies, [false, editing]);
           await tester.pumpWidget(const SizedBox());
         },
       );

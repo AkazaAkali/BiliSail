@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:window_manager/window_manager.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -63,8 +64,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     native.findView();
-    final original = native.context;
-    expect(original, isNot(0));
+    await windowManager.ensureInitialized();
+    await windowManager.focus();
+    await tester.pumpAndSettle();
 
     // Native engine evidence: VK_PROCESSKEY is filtered before Dart regardless
     // of the physical scan code. No Unicode/physical fallback can recover it.
@@ -72,7 +74,7 @@ void main() {
     await window.setTextInputActive(false);
     expect(native.context, 0);
     await window.setTextInputActive(true);
-    expect(native.context, original);
+    expect(native.context, isNot(0));
 
     await tester.pumpWidget(
       MaterialApp(
@@ -107,11 +109,13 @@ void main() {
     for (var i = 0; i < 2; i++) {
       editor.requestFocus();
       await tester.pumpAndSettle();
-      expect(native.context, original);
+      final editingContext = native.context;
+      expect(editingContext, isNot(0));
       // Reapplying an unchanged editing policy must preserve the context and
       // draft. Native WM_CHAR delivery checks editing, not real IME composition.
       final draft = text.value;
       await window.setTextInputActive(true);
+      expect(native.context, editingContext);
       expect(text.value, draft);
       native.character(0x4e2d);
       await tester.pump(const Duration(milliseconds: 100));
@@ -137,7 +141,7 @@ void main() {
     }
     await tester.pumpWidget(const SizedBox());
     await tester.pumpAndSettle();
-    expect(native.context, original);
+    expect(native.context, isNot(0));
   }, skip: !Platform.isWindows);
 }
 

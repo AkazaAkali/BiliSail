@@ -8,13 +8,14 @@ $visualStudio = & $vswhere -latest -products '*' -requires Microsoft.VisualStudi
 if (!$visualStudio) { throw 'Visual Studio C++ tools are required for the native IME tests.' }
 $environment = Join-Path $visualStudio 'VC/Auxiliary/Build/vcvars64.bat'
 $test = Join-Path $PSScriptRoot 'native_tests/window_ime_context_test.cpp'
+$implementation = Join-Path $repoRoot 'windows/runner/window_ime_context.cpp'
 $include = Join-Path $repoRoot 'windows/runner'
 $compileScript = Join-Path $output 'compile-test.cmd'
 @"
 @echo off
 call "$environment" >nul
 if errorlevel 1 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /WX /MT /I"$include" "$test" /Fo"$output/window_ime_context_test.obj" /Fe"$output/window_ime_context_test.exe" /link user32.lib imm32.lib
+cl /nologo /std:c++17 /EHsc /W4 /WX /MT /I"$include" "$test" "$implementation" /Fo"$output/" /Fe"$output/window_ime_context_test.exe" /link user32.lib imm32.lib comctl32.lib ole32.lib uuid.lib
 "@ | Set-Content -LiteralPath $compileScript -Encoding utf8
 & cmd /d /c $compileScript
 if ($LASTEXITCODE -ne 0) { throw 'Native IME test compilation failed.' }

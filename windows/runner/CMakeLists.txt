@@ -10,6 +10,7 @@ add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "system_fonts.cpp"
   "text_input.cpp"
+  "window_ime_context.cpp"
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"
@@ -38,6 +39,7 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "dwrite.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "imm32.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "comctl32.lib" "ole32.lib" "uuid.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

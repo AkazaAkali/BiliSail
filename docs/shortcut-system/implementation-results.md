@@ -83,6 +83,26 @@ AppInputHost 在窗口重新聚焦或应用恢复活动时，于帧后重新发�
 
 `flutter build windows --release --no-pub -t lib/main.dart` 通过，普通应用产物为 `build/windows/x64/runner/Release/bilisail.exe`，日志为 `build/ime-test/release-2026-10-17.log`。既有 flutter_inappwebview_windows CMP0175 警告未阻止构建。Android／macOS 本轮未构建或实机验证。
 
+### 原生焦点边界与独立编辑上下文（2026-10-22）
+
+安装版 1.0.7.3、微信输入法 3.0.0.37 的故障现场已记录到：Flutter view 存在 HIMC，IMM32 显示打开且为中文模式，但相同 UI 线程的 TSF 打开状态没有值；按键直接产生普通字符，没有组合输入消息。同一微信 profile 在标准 Windows EDIT 和使用相同 Release 引擎 DLL 的普通 Flutter TextField 中可以产生真实候选。加入旧关联策略的简化 Flutter 对照在短流程中也能工作，因此不能把某一次关联 API 调用直接认定为故障的唯一触发条件。
+
+原策略有两个可单独验证的生命周期缺口：原生失焦到 Dart 帧后同步之间仍可能保留关联；延迟送达的编辑通知不检查原生焦点，可能在窗口已切走后重新关联。原策略还只检查 HIMC 非空或恢复线程默认 HIMC，不能处理现场中“存在上下文但没有组合会话”的状态。此次修复覆盖这些边界，不声称已捕获首次从健康状态变为异常的完整轨迹。
+
+[WindowImeContext](../../windows/runner/window_ime_context.cpp) 使用仅针对 Flutter view 的窗口 subclass，在 `WM_KILLFOCUS` 转交 Flutter／系统窗口过程前解除关联；`WM_SETFOCUS` 在系统处理完成后才按当前编辑意图恢复。`setActive(true)` 还检查实际原生焦点，拒绝为后台 view 重新挂接输入法。没有增加全局键盘 Hook，也不递归修改原生 WebView 或其他窗口。
+
+每个新的编辑激活区间通过 `ImmCreateContext` 创建独立 HIMC，关联后才释放已脱离的旧自有上下文；失焦、离开编辑器、窗口销毁和适配器释放均清理自有资源。系统默认／输入法提供的借用上下文不缓存、不销毁；销毁适配器时仅在缺失关联或当前仍是自有上下文的情况下恢复系统默认关联。此规则替代 2026-10-17 的“编辑状态直接复用默认上下文”实现。
+
+打开状态、转换模式和句子模式以值保存。由于两个中文 TSF 输入法可能具有相同 HKL，恢复缓存模式还必须匹配 profile 的 CLSID／GUID；未知或已切换的 profile 使用当前系统输入状态。重复启用仍保留当前编辑上下文，包括输入法在活动编辑期间新提供的上下文，不打断正在进行的候选／组合。输入语言和用户的中英文选择不由应用强制切换。
+
+AppInputHost 同时要求窗口、生命周期有效且存在可编辑焦点，失活时也发送禁用策略；原生同步解除不再依赖该 Dart 帧及时执行。搜索、评论、弹幕和弹窗沿用同一根宿主。原生回归补充独立上下文、原生失焦顺序、后台迟到请求、无编辑器的重新聚焦及释放；Windows 集成测试显式聚焦本测试窗口，不再依赖后台窗口也能启用 IME 的旧行为。
+
+验证结果：宿主 11 项测试、IMM 原生回归和 1 项 Windows 集成通过。`tool/check.ps1 -SkipPub` 通过根应用与四个包的格式、静态分析及 2,575 项测试（根应用 1,981、bili_api 426、bili_player 73、bili_danmaku 93、bili_mux 2）；未配置 `BILI_MUX_LIBRARY` 的 10 项原生封装测试按配置跳过。整仓和 Windows 集成日志分别为 `build/ime-test/check-2026-10-22.log`、`build/ime-test/integration-2026-10-22.log`。
+
+`flutter build windows --release --no-pub -t lib/main.dart` 通过，产物为 `build/windows/x64/runner/Release/bilisail.exe`，日志在 `build/ime-test/release-2026-10-22.log`；既有 flutter_inappwebview_windows CMP0175 警告未阻止构建。正常 Debug 应用也已重新构建、启动并完成热重启，搜索框可显示真实微信输入法候选。Release 原生策略对照完成 `ni` 选词和“你”字上屏，用户随后反馈实际复测无问题并授权提交。
+
+上述结果包含自动按键经过真实微信输入法的候选／组合检查及用户复测反馈，不等于所有输入法、长时间后台、Win+Space 切换和原生 WebView 场景已逐项完成验收。Android／macOS 本轮未构建或实机验证。直接原生消息注入仍只证明消息路径，不能替代真实输入法验收。
+
 ## 页面刷新
 
 刷新只归活动页面，进行中重复触发合并；播放器不再独立解释 F5／侧键为 retry。首页保留频道，搜索使用 refresh 保留当前筛选，历史、消息、下载、用户页调用各自刷新。UGC 复用相关推荐／标签刷新与本页播放重试组合；PGC 先重新加载剧集，同一选择与源代次稳定才重试，变更选集由原激活路径开源；直播由房间 controller.load 驱动目标，不另发 retry。离线保留本地源 retry；设置等无能力页不注册空回调。页面销毁／账号和 source generation 继续由已有控制器及会话隔离。

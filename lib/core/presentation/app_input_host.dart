@@ -288,7 +288,7 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
   }
 
   void _syncEditing() {
-    final editing = _context().editing;
+    final editing = _active && _context().editing;
     if (_lastEditing == editing || widget.onEditingChanged == null) return;
     _lastEditing = editing;
     _notifyEditing(editing);
@@ -352,7 +352,6 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
   void _windowActivityChanged() {
     if (!_active) {
       _resetInput();
-      return;
     }
     // Selecting an IME or switching windows can change the native association
     // while the same Flutter editor retains focus. Reconcile on return too.
