@@ -1,3 +1,4 @@
+import '../../support/fake_video_output.dart';
 import '../../support/input_test_app.dart';
 
 import 'package:bilisail/core/presentation/workspace_activity.dart';
@@ -39,6 +40,46 @@ import 'package:flutter_test/flutter_test.dart';
 final _composerScopeProvider = Provider<String>((ref) => 'root');
 
 void main() {
+  testWidgets('composition strategy follows the same output into fullscreen', (
+    tester,
+  ) async {
+    final engine = _FakeEngine();
+    final session = _session(engine, repository: _MenuRepository());
+    addTearDown(session.close);
+    final composition = _RecordingComposition();
+    await tester.pumpWidget(
+      VideoCompositionScope(
+        adapter: composition,
+        child: _app(
+          session,
+          _FakeWindowService(),
+          const AppSettings.defaults(),
+        ),
+      ),
+    );
+    await _pumpFrames(tester);
+    final opens = engine.opens;
+    final inlineCompositions = composition.compositions;
+    expect(inlineCompositions, greaterThan(0));
+    expect(composition.outputs, contains(same(engine.videoOutput)));
+    expect(find.byKey(const ValueKey('player-controls')), findsOneWidget);
+    await tester.tap(find.byTooltip('全屏（F）'));
+    await _pumpFrames(tester);
+    expect(composition.compositions, greaterThan(inlineCompositions));
+    expect(
+      composition.outputs.every((o) => identical(o, engine.videoOutput)),
+      isTrue,
+    );
+    expect(engine.opens, opens);
+    expect(engine.maxSurfaces, 1);
+    await tester.tap(find.byTooltip('退出全屏（Esc）'));
+    await _pumpFrames(tester);
+    expect(engine.opens, opens);
+    await tester.pumpWidget(const SizedBox());
+    await _pumpFrames(tester);
+    expect(engine.activeSurfaces, 0);
+  });
+
   for (final width in [400.0, 1280.0]) {
     testWidgets('subtitles clear the actual control bar at width $width', (
       tester,
@@ -4640,7 +4681,30 @@ final class _FocusAtPopObserver extends NavigatorObserver {
   }
 }
 
-final class _FakeEngine implements PlayerEngine, VideoSurfaceSource {
+final class _RecordingComposition implements VideoCompositionAdapter {
+  int compositions = 0;
+  final outputs = <VideoOutput>[];
+
+  @override
+  Widget buildVideoSurface(BuildContext context, VideoOutput output) {
+    outputs.add(output);
+    return const FlutterVideoCompositionAdapter().buildVideoSurface(
+      context,
+      output,
+    );
+  }
+
+  @override
+  Widget compose(BuildContext context, {required List<Widget> layers}) {
+    compositions++;
+    return const FlutterVideoCompositionAdapter().compose(
+      context,
+      layers: layers,
+    );
+  }
+}
+
+final class _FakeEngine implements PlayerEngine, VideoOutputSource {
   final _snapshots = StreamController<PlaybackSnapshot>.broadcast(sync: true);
   final _failures = StreamController<PlayerFailure>.broadcast(sync: true);
   PlaybackSnapshot _current = const PlaybackSnapshot(
@@ -4726,7 +4790,9 @@ final class _FakeEngine implements PlayerEngine, VideoSurfaceSource {
   }
 
   @override
-  Widget buildVideoSurface() => _FakeSurface(this);
+  late final VideoOutput videoOutput = FakeVideoOutput(
+    () => _FakeSurface(this),
+  );
 }
 
 final class _FakeSurface extends StatefulWidget {

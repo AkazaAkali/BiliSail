@@ -5,7 +5,10 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 final class _ViewportEngine
-    implements PlayerEngine, VideoSurfaceSource, VideoViewportSource {
+    implements PlayerEngine, VideoOutputSource, FlutterVideoOutput {
+  @override
+  VideoOutput get videoOutput => this;
+
   Object? owner;
   final updates = <({double width, double height, double dpr})>[];
   int attaches = 0;
@@ -15,13 +18,13 @@ final class _ViewportEngine
   Widget buildVideoSurface() => const ColoredBox(color: Color(0xFF000000));
 
   @override
-  void attachVideoViewport(Object value) {
+  void attach(Object value) {
     owner = value;
     attaches++;
   }
 
   @override
-  void updateVideoViewport(
+  void updateViewport(
     Object value, {
     required double logicalWidth,
     required double logicalHeight,
@@ -36,7 +39,7 @@ final class _ViewportEngine
   }
 
   @override
-  void detachVideoViewport(Object value) {
+  void detach(Object value) {
     if (!identical(value, owner)) return;
     owner = null;
     detaches++;
@@ -115,15 +118,15 @@ void main() {
     if (!Platform.isWindows) return;
     final engine = MediaKitEngine();
     final inline = Object();
-    engine.attachVideoViewport(inline);
-    engine.updateVideoViewport(
+    engine.videoOutput.attach(inline);
+    engine.videoOutput.updateViewport(
       inline,
       logicalWidth: 640,
       logicalHeight: 360,
       devicePixelRatio: 2,
     );
     expect(engine.debugRequestedVideoViewport, (width: 1280, height: 768));
-    engine.updateVideoViewport(
+    engine.videoOutput.updateViewport(
       inline,
       logicalWidth: 320,
       logicalHeight: 180,
@@ -135,7 +138,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 1));
     expect(engine.debugRequestedVideoViewport, (width: 640, height: 384));
 
-    engine.updateVideoViewport(
+    engine.videoOutput.updateViewport(
       inline,
       logicalWidth: 960,
       logicalHeight: 540,
@@ -143,31 +146,31 @@ void main() {
     );
     expect(engine.debugRequestedVideoViewport, (width: 1920, height: 1088));
     final fullscreen = Object();
-    engine.attachVideoViewport(fullscreen);
+    engine.videoOutput.attach(fullscreen);
     expect(engine.debugRequestedVideoViewport, (width: null, height: null));
-    engine.updateVideoViewport(
+    engine.videoOutput.updateViewport(
       inline,
       logicalWidth: 100,
       logicalHeight: 100,
       devicePixelRatio: 1,
     );
     expect(engine.debugRequestedVideoViewport, (width: null, height: null));
-    engine.updateVideoViewport(
+    engine.videoOutput.updateViewport(
       fullscreen,
       logicalWidth: 800,
       logicalHeight: 450,
       devicePixelRatio: 1,
     );
     expect(engine.debugRequestedVideoViewport, (width: 832, height: 512));
-    engine.updateVideoViewport(
+    engine.videoOutput.updateViewport(
       fullscreen,
       logicalWidth: 320,
       logicalHeight: 180,
       devicePixelRatio: 1,
     );
-    engine.detachVideoViewport(fullscreen);
+    engine.videoOutput.detach(fullscreen);
     final replacement = Object();
-    engine.attachVideoViewport(replacement);
+    engine.videoOutput.attach(replacement);
     await tester.pump(const Duration(milliseconds: 301));
     expect(engine.debugRequestedVideoViewport, (width: null, height: null));
     final disposal = engine.dispose();

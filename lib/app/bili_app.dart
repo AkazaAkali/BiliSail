@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
+import 'package:bili_player/bili_player.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -47,8 +48,13 @@ import 'router.dart';
 import 'theme.dart';
 
 class BiliApp extends ConsumerStatefulWidget {
-  const BiliApp({super.key, required this.dependencies});
+  const BiliApp({
+    super.key,
+    required this.dependencies,
+    this.videoComposition = const FlutterVideoCompositionAdapter(),
+  });
   final AppDependencies dependencies;
+  final VideoCompositionAdapter videoComposition;
   @override
   ConsumerState<BiliApp> createState() => _BiliAppState();
 }
@@ -365,19 +371,22 @@ class _BiliAppState extends ConsumerState<BiliApp> {
         title: 'BiliSail',
         debugShowCheckedModeBanner: false,
         scrollBehavior: const SmoothScrollBehavior(),
-        builder: (context, child) => SmoothScrollScope(
-          dampingRatio: settings.wheelDampingRatio,
-          child: AppInputHost<Object>(
-            dispatcher: _input,
-            routes: _input.routes,
-            onEditingChanged: widget.dependencies.window.setTextInputActive,
-            child: AppUpdateHost(
-              navigatorKey: _router.routerDelegate.navigatorKey,
-              child: AppNoticeHost(
-                child: VideoCardInteractionScope(
-                  interactions: cardInteractions,
-                  onNotice: showAppNotice,
-                  child: child ?? const SizedBox.shrink(),
+        builder: (context, child) => VideoCompositionScope(
+          adapter: widget.videoComposition,
+          child: SmoothScrollScope(
+            dampingRatio: settings.wheelDampingRatio,
+            child: AppInputHost<Object>(
+              dispatcher: _input,
+              routes: _input.routes,
+              onEditingChanged: widget.dependencies.window.setTextInputActive,
+              child: AppUpdateHost(
+                navigatorKey: _router.routerDelegate.navigatorKey,
+                child: AppNoticeHost(
+                  child: VideoCardInteractionScope(
+                    interactions: cardInteractions,
+                    onNotice: showAppNotice,
+                    child: child ?? const SizedBox.shrink(),
+                  ),
                 ),
               ),
             ),

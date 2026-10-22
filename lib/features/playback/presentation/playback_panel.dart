@@ -862,9 +862,9 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                       return ColoredBox(
                         key: _playerBoundsKey,
                         color: Colors.black,
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
+                        child: VideoCompositionScope.of(context).compose(
+                          context,
+                          layers: [
                             if (widget.active)
                               VideoSurface(engine: session.engine),
                             if (widget.active && settings.danmakuEnabled)

@@ -1,3 +1,5 @@
+import '../support/fake_video_output.dart';
+
 import 'dart:async';
 
 import 'package:bili_player/bili_player.dart';
@@ -350,7 +352,7 @@ final class _AuthRepository implements AuthRepository {
   Future<void> dispose() => _events.close();
 }
 
-final class _Engine implements PlayerEngine, VideoSurfaceSource {
+final class _Engine implements PlayerEngine, VideoOutputSource {
   final _snapshots = StreamController<PlaybackSnapshot>.broadcast(sync: true);
   final _failures = StreamController<PlayerFailure>.broadcast();
   PlaybackSnapshot _snapshot = const PlaybackSnapshot(
@@ -419,5 +421,7 @@ final class _Engine implements PlayerEngine, VideoSurfaceSource {
   }
 
   @override
-  Widget buildVideoSurface() => const ColoredBox(color: Colors.black);
+  late final VideoOutput videoOutput = FakeVideoOutput(
+    () => const ColoredBox(color: Colors.black),
+  );
 }

@@ -136,6 +136,7 @@ bilisail/                         # 工程名；本地检出目录目前仍为 b
 - `bili_api`：返回稳定的远端类型，如 `ApiVideoDetail`、`ApiPlayInfo`；把不同协议 DTO 收敛成这些类型。它不知道 Flutter 页面、用户 UI 设置、SQLite 或离线策略。通过注入的会话提供器、时钟、传输获取所需上下文。
 - 主应用的 Repository：将 API 类型映射成产品领域模型，合并本地续播、用户偏好和缓存。无需对完全相同的简单值重复包装，DTO 的缺省语义必须在边界处理。
 - `bili_player`：只认识媒体源、轨道、控制命令、事件和播放面板，不认识 bvid、cid、扫码或 Bilibili API。
+- 2026-10-23 播放控制、视频输出与合成分别由纯 Dart `PlayerEngine`、`VideoOutput` 和 Flutter `VideoCompositionAdapter` 表达。当前 `MediaKitVideoOutput` 继续提供原 media-kit 画面，应用根注入默认 Flutter 合成，原弹幕与控件保持不变；设计、所有权与验证见[输出与合成拆分](player-output-composition-design.md)。这项拆分不代表原生平台独立合成已实现或性能已提升。
 - `bili_danmaku`：只接受时间戳事件和时钟，不发 HTTP，不读取账号或直接订阅某个播放器库。
 - `bili_mux`：只接受本地媒体路径、取消和进度，不认识 bvid/cid、账号、下载队列或播放器；任务持久化和原子提交由下载仓储负责。
 

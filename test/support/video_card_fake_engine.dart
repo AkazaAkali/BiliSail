@@ -1,3 +1,5 @@
+import 'fake_video_output.dart';
+
 import 'dart:async';
 
 import 'package:bili_player/bili_player.dart';
@@ -28,7 +30,7 @@ PlaybackMedia cardPreviewMedia({bool backups = false}) => PlaybackMedia(
   headers: const {'Referer': 'https://www.bilibili.com/'},
 );
 
-class CardFakeEngine extends Fake implements PlayerEngine, VideoSurfaceSource {
+class CardFakeEngine extends Fake implements PlayerEngine, VideoOutputSource {
   final events = StreamController<PlaybackSnapshot>.broadcast(sync: true);
   final errors = StreamController<PlayerFailure>.broadcast(sync: true);
   PlaybackSnapshot snapshot = const PlaybackSnapshot(
@@ -106,11 +108,13 @@ class CardFakeEngine extends Fake implements PlayerEngine, VideoSurfaceSource {
   }
 
   @override
-  Widget buildVideoSurface() => const ColoredBox(
-    key: ValueKey('fake-card-video-surface'),
-    color: Color(0xff336487),
-    child: Center(
-      child: Icon(IconData(0xe039, fontFamily: 'MaterialIcons'), size: 48),
+  late final VideoOutput videoOutput = FakeVideoOutput(
+    () => const ColoredBox(
+      key: ValueKey('fake-card-video-surface'),
+      color: Color(0xff336487),
+      child: Center(
+        child: Icon(IconData(0xe039, fontFamily: 'MaterialIcons'), size: 48),
+      ),
     ),
   );
 }

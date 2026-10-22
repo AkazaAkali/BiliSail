@@ -298,7 +298,7 @@ Future<void> _until(WidgetTester tester, bool Function() ready) async {
   );
 }
 
-class _TrackedEngine implements PlayerEngine, VideoSurfaceSource {
+class _TrackedEngine implements PlayerEngine, VideoOutputSource {
   _TrackedEngine(this.native, {this.deniedVideo});
   final MediaKitEngine native;
   final Uri? deniedVideo;
@@ -354,5 +354,5 @@ class _TrackedEngine implements PlayerEngine, VideoSurfaceSource {
   }
 
   @override
-  Widget buildVideoSurface() => native.buildVideoSurface();
+  VideoOutput get videoOutput => native.videoOutput;
 }

@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/widgets.dart';
-
 /// Headers are held only for the active source. Do not log or serialize this.
 final class MediaRequestPolicy {
   MediaRequestPolicy({Map<String, String> headers = const {}})
@@ -256,22 +254,4 @@ abstract interface class PlayerEngine {
 /// Optional native gain control; changing gain must not reopen media.
 abstract interface class AudioGainControl {
   Future<void> setAudioGain(double gainDb);
-}
-
-/// Implemented by engines that can supply a Flutter video surface.
-abstract interface class VideoSurfaceSource {
-  Widget buildVideoSurface();
-}
-
-/// Optional output sizing for a mounted surface. The owner prevents an old
-/// fullscreen or inline surface from applying a delayed layout update.
-abstract interface class VideoViewportSource {
-  void attachVideoViewport(Object owner);
-  void updateVideoViewport(
-    Object owner, {
-    required double logicalWidth,
-    required double logicalHeight,
-    required double devicePixelRatio,
-  });
-  void detachVideoViewport(Object owner);
 }

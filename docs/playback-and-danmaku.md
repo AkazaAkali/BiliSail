@@ -82,7 +82,7 @@ abstract interface class PlayerEngine {
 - `MediaRequestPolicy` 含允许的目标来源、UA/Referer 等实际所需头、重定向规则。凭据只在会话内存中短期存在；不作为可打印的模型字段暴露给 UI。
 - `PlaybackSnapshot` 含 phase、position、duration、buffered、seekable、rate、轨道和播放意图；禁止 UI 直接操作 `media_kit.Player`。
 - `PlayerCapabilities` 表示实际可用的外部音轨、字幕、codec/容器、截图等；系统 PiP/媒体键属于 PlatformServices，不能混为后端能力。
-- `VideoSurface` 是 bili_player 的 Flutter UI 出口；核心控制契约和 UI surface 分文件，测试可用 FakePlayerEngine。
+- `VideoSurface` 是 bili_player 的 Flutter UI 出口；`bili_player_control.dart` 提供不依赖 Flutter 的控制、诊断和输出生命周期契约，`VideoOutputSource` 提供稳定的输出对象。`VideoCompositionAdapter` 在应用根统一注入，负责画面构建与前景合成；当前仍使用 media-kit Video 与原 Stack，测试可分别替换 engine、output 和 composition。实现与后续平台边界见[输出与合成拆分](player-output-composition-design.md)。
 
 从用户偏好、服务端授权的 representation、后端支持和当前设备能力的交集选轨。优先使用经过验证的 H.264/AAC 组合；HEVC/AV1、HDR、高帧率逐项测试，不仅凭 codec 名宣称硬解成功。
 

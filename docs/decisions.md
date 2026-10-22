@@ -343,3 +343,11 @@ FRB 支持跨平台是可行性依据，但平台构建、取消、错误和流�
 **决定（2026-10-16）**：按用户要求，基于自有官方 fork 兼容移植 PiliPlus 所用两个 MIT 分支的 Surface、原生参数、实例锁与 FFI 扩展，依赖固定 Git 提交，保留官方当前 API 和 Windows 渲染补丁。Android Surface 由 mpv load/unload 屏障管理，尺寸更新不产生隐式 seek；自动解码优先 MediaCodec，软件选择仍受原设置控制。
 
 **范围与验收**：Android 原生资产采用固定摘要的 20260906 default 构建，其他平台原生 wrapper 沿用锁定版本。弹幕保留原 Ticker/时钟，只减少重复入场索引和缓存保护工作。来源许可、各项采用说明、检查/构建及实机边界见 [移植记录](validation/piliplus-media-kit-port.md)。
+
+## D43：分离播放控制、视频输出与平台合成
+
+**决定（2026-10-23）**：保留 Dart 会话协调、media-kit/libmpv 与现有 Flutter 呈现。PlayerEngine 契约保持纯 Dart；VideoOutput 管理视图挂载与视口；VideoCompositionAdapter 管理视频与 Flutter 前景的组合。现有 VideoController、视口通道及尺寸任务由独立 MediaKitVideoOutput 持有，engine 负责其源绑定和最终释放。
+
+**取舍**：先建立可测试的替换边界，保留弹幕、字幕、控件、全屏与预览的现有样式和交互；不引入 Rust，不新增解码器或平台合成实验。输出与合成必须配套选择，不能把 Widget 依赖或业务规则重新塞入控制契约。
+
+**迁移与验收**：Windows DComp/embedder、Android Surface/HC/HCPP、macOS 原生图层后续分别验证；这次不承诺任意输出热切或 GPU 收益。设计和本轮验证结果见[播放控制、视频输出与平台合成拆分](player-output-composition-design.md)。

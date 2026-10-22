@@ -390,9 +390,9 @@ class _VideoCardPlaybackPreview extends StatelessWidget {
           return const SizedBox.shrink();
         }
         final total = snapshot.duration.inMilliseconds;
-        return Stack(
-          fit: StackFit.expand,
-          children: [
+        return VideoCompositionScope.of(context).compose(
+          context,
+          layers: [
             surface,
             Align(
               alignment: Alignment.bottomCenter,

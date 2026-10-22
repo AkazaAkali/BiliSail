@@ -117,6 +117,57 @@ void main() {
     });
   }
 
+  testWidgets('paused resume confirms position independently of video output', (
+    tester,
+  ) async {
+    initializePlayerBackend();
+    final fixtures = Platform.environment['BILI_TEST_MEDIA_DIR'];
+    expect(fixtures, isNotNull);
+    final engine = MediaKitEngine();
+    final policy = MediaRequestPolicy();
+    final video = MediaTrack(
+      uri: File('$fixtures/video.mp4').uri,
+      requestPolicy: policy,
+    );
+    final audio = MediaTrack(
+      uri: File('$fixtures/audio.m4a').uri,
+      requestPolicy: policy,
+    );
+    try {
+      await tester.pumpWidget(MaterialApp(home: VideoSurface(engine: engine)));
+      for (final source in [
+        DashPairSource(video: video, audio: audio),
+        ProgressiveSource(video),
+        ProgressiveSource(audio),
+      ]) {
+        await _withFrames(
+          tester,
+          engine.open(
+            source,
+            const OpenOptions(
+              play: false,
+              volume: 0,
+              startPosition: Duration(seconds: 3),
+            ),
+          ),
+        );
+        expect(engine.currentSnapshot.phase, PlaybackPhase.paused);
+        expect(engine.currentSnapshot.desiredPlaying, false);
+        expect(engine.currentSnapshot.isSeeking, false);
+        expect(
+          (engine.currentSnapshot.position - const Duration(seconds: 3))
+              .inMilliseconds
+              .abs(),
+          lessThan(400),
+        );
+      }
+      expect(tester.takeException(), isNull);
+    } finally {
+      await _withFrames(tester, engine.dispose());
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
   testWidgets(
     'paused progressive video has output; audio needs no video output',
     (tester) async {
