@@ -49,6 +49,7 @@ void main() {
 
   for (final defaults in [
     (area: .5, fontScale: .6),
+    (area: .75, fontScale: .8),
     (area: .75, fontScale: 1.0),
   ]) {
     group('danmaku defaults $defaults', () {
@@ -82,6 +83,7 @@ void main() {
         'saved values survive reload regardless of platform defaults',
         () async {
           for (final chosen in [
+            (area: .5, fontScale: .6),
             (area: .75, fontScale: 1.0),
             (area: 1.0, fontScale: .2),
           ]) {
@@ -228,44 +230,47 @@ void main() {
       }
     },
   );
-  test(
-    'player controls migrate to click and both modes survive reload',
-    () async {
-      expect(
-        (await repository.load()).playerControlsMode,
-        PlayerControlsMode.click,
-      );
-      for (final oldValue in [null, 'future', 42, true]) {
-        await database.writeSetting(
-          'preferences.v1',
-          jsonEncode({
-            'schemaVersion': 15,
-            'theme': 'dark',
-            'autoPlay': false,
-            'playerControlsMode': ?oldValue,
-          }),
+  for (final defaultMode in PlayerControlsMode.values) {
+    test(
+      'player controls default to $defaultMode and saved modes survive reload',
+      () async {
+        repository = SqliteSettingsRepository(
+          database,
+          defaultPlayerControlsMode: defaultMode,
         );
-        final loaded = await repository.load();
-        expect(loaded.playerControlsMode, PlayerControlsMode.click);
-        expect(loaded.theme, AppThemePreference.dark);
-        expect(loaded.autoPlay, isFalse);
-      }
-      for (final mode in PlayerControlsMode.values) {
-        await repository.save(
-          AppSettings(playerControlsMode: mode, autoPlay: false),
-        );
-        final loaded = await repository.load();
-        expect(loaded.playerControlsMode, mode);
-        expect(loaded.autoPlay, isFalse);
-        final snapshot = jsonDecode(
-          (await database.readSetting('preferences.v1')) ?? '{}',
-        ) as Map<String, Object?>;
-        expect(snapshot['schemaVersion'], 21);
-        expect(snapshot['playerControlsMode'], mode.name);
-      }
-      expect(database.schemaVersion, 3);
-    },
-  );
+        expect((await repository.load()).playerControlsMode, defaultMode);
+        for (final oldValue in [null, 'future', 42, true]) {
+          await database.writeSetting(
+            'preferences.v1',
+            jsonEncode({
+              'schemaVersion': 15,
+              'theme': 'dark',
+              'autoPlay': false,
+              'playerControlsMode': ?oldValue,
+            }),
+          );
+          final loaded = await repository.load();
+          expect(loaded.playerControlsMode, defaultMode);
+          expect(loaded.theme, AppThemePreference.dark);
+          expect(loaded.autoPlay, isFalse);
+        }
+        for (final mode in PlayerControlsMode.values) {
+          await repository.save(
+            AppSettings(playerControlsMode: mode, autoPlay: false),
+          );
+          final loaded = await repository.load();
+          expect(loaded.playerControlsMode, mode);
+          expect(loaded.autoPlay, isFalse);
+          final snapshot = jsonDecode(
+            (await database.readSetting('preferences.v1')) ?? '{}',
+          ) as Map<String, Object?>;
+          expect(snapshot['schemaVersion'], 21);
+          expect(snapshot['playerControlsMode'], mode.name);
+        }
+        expect(database.schemaVersion, 3);
+      },
+    );
+  }
   test(
     'CDN migrates to automatic and every preference survives reload',
     () async {

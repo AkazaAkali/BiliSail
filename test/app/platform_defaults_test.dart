@@ -4,14 +4,27 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Android uses half-area and smaller danmaku defaults', () {
+  test('desktop and Android use their own player defaults', () {
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     for (final platform in TargetPlatform.values) {
       debugDefaultTargetPlatformOverride = platform;
       expect(defaultDanmakuArea, platform == TargetPlatform.android ? .5 : .75);
+      expect(defaultDanmakuFontScale, switch (platform) {
+        TargetPlatform.android => .6,
+        TargetPlatform.windows ||
+        TargetPlatform.macOS ||
+        TargetPlatform.linux => .8,
+        _ => 1.0,
+      });
       expect(
-        defaultDanmakuFontScale,
-        platform == TargetPlatform.android ? .6 : 1.0,
+        defaultPlayerControlsMode,
+        [
+              TargetPlatform.windows,
+              TargetPlatform.macOS,
+              TargetPlatform.linux,
+            ].contains(platform)
+            ? PlayerControlsMode.dynamic
+            : PlayerControlsMode.click,
       );
     }
   });

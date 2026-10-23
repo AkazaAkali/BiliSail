@@ -524,8 +524,8 @@ packages:
     dependency: "direct overridden"
     description:
       path: media_kit
-      ref: "63b7ea7dd95fc348cecf250df5f54ff87d69d8a9"
-      resolved-ref: "63b7ea7dd95fc348cecf250df5f54ff87d69d8a9"
+      ref: "24f5c7cb6b78f68fa7c23c73ffe7294f0bd962ab"
+      resolved-ref: "24f5c7cb6b78f68fa7c23c73ffe7294f0bd962ab"
       url: "https://github.com/CKopoer/media-kit.git"
     source: git
     version: "1.2.6"
@@ -533,8 +533,8 @@ packages:
     dependency: "direct overridden"
     description:
       path: "libs/android/media_kit_libs_android_video"
-      ref: "63b7ea7dd95fc348cecf250df5f54ff87d69d8a9"
-      resolved-ref: "63b7ea7dd95fc348cecf250df5f54ff87d69d8a9"
+      ref: "24f5c7cb6b78f68fa7c23c73ffe7294f0bd962ab"
+      resolved-ref: "24f5c7cb6b78f68fa7c23c73ffe7294f0bd962ab"
       url: "https://github.com/CKopoer/media-kit.git"
     source: git
     version: "1.3.8"
@@ -566,8 +566,8 @@ packages:
     dependency: transitive
     description:
       path: "libs/universal/media_kit_libs_video"
-      ref: "63b7ea7dd95fc348cecf250df5f54ff87d69d8a9"
-      resolved-ref: "63b7ea7dd95fc348cecf250df5f54ff87d69d8a9"
+      ref: "24f5c7cb6b78f68fa7c23c73ffe7294f0bd962ab"
+      resolved-ref: "24f5c7cb6b78f68fa7c23c73ffe7294f0bd962ab"
       url: "https://github.com/CKopoer/media-kit.git"
     source: git
     version: "1.0.8"
@@ -583,8 +583,8 @@ packages:
     dependency: transitive
     description:
       path: media_kit_video
-      ref: "63b7ea7dd95fc348cecf250df5f54ff87d69d8a9"
-      resolved-ref: "63b7ea7dd95fc348cecf250df5f54ff87d69d8a9"
+      ref: "24f5c7cb6b78f68fa7c23c73ffe7294f0bd962ab"
+      resolved-ref: "24f5c7cb6b78f68fa7c23c73ffe7294f0bd962ab"
       url: "https://github.com/CKopoer/media-kit.git"
     source: git
     version: "2.0.1"

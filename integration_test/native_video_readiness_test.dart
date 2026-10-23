@@ -168,6 +168,69 @@ void main() {
     }
   });
 
+  testWidgets('seek completion exposes the confirmed native position', (
+    tester,
+  ) async {
+    initializePlayerBackend();
+    final fixtures = Platform.environment['BILI_TEST_MEDIA_DIR'];
+    expect(fixtures, isNotNull);
+    final engine = MediaKitEngine();
+    final policy = MediaRequestPolicy();
+    final video = MediaTrack(
+      uri: File('$fixtures/video.mp4').uri,
+      requestPolicy: policy,
+    );
+    final audio = MediaTrack(
+      uri: File('$fixtures/audio.m4a').uri,
+      requestPolicy: policy,
+    );
+    try {
+      await tester.pumpWidget(MaterialApp(home: VideoSurface(engine: engine)));
+      for (final source in [
+        DashPairSource(video: video, audio: audio),
+        ProgressiveSource(video),
+        ProgressiveSource(audio),
+      ]) {
+        await _withFrames(
+          tester,
+          engine.open(source, const OpenOptions(play: false, volume: 0)),
+        );
+        for (final playing in [false, true]) {
+          if (playing) {
+            await engine.setRate(3);
+            await engine.play();
+          }
+          for (final milliseconds in [4700, 1700, 7200]) {
+            await engine.seek(Duration(milliseconds: milliseconds));
+            // No extra wait: callers save progress and rebuild danmaku as
+            // soon as seek completes, including while paused or at 3x.
+            expect(
+              engine.currentSnapshot.position.inMilliseconds,
+              closeTo(milliseconds, 250),
+            );
+            expect(engine.currentSnapshot.isSeeking, false);
+            expect(engine.currentSnapshot.desiredPlaying, playing);
+          }
+        }
+      }
+      await engine.pause();
+      final seeking = engine.snapshots.firstWhere((value) => value.isSeeking);
+      final obsolete = engine.seek(const Duration(milliseconds: 2300));
+      await seeking;
+      // The snapshot stream is synchronous; issue stop from the next event
+      // turn, as a user action would, rather than reentering its add callback.
+      await Future<void>.delayed(Duration.zero);
+      await Future.wait([obsolete, engine.stop()]);
+      expect(engine.currentSnapshot.phase, PlaybackPhase.idle);
+      expect(engine.currentSnapshot.position, Duration.zero);
+      expect(engine.currentSnapshot.isSeeking, false);
+      expect(tester.takeException(), isNull);
+    } finally {
+      await _withFrames(tester, engine.dispose());
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
   testWidgets(
     'paused progressive video has output; audio needs no video output',
     (tester) async {

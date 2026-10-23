@@ -31,7 +31,24 @@ double danmakuAreaForPlatform(TargetPlatform platform) =>
 double get defaultDanmakuArea => danmakuAreaForPlatform(defaultTargetPlatform);
 
 double danmakuFontScaleForPlatform(TargetPlatform platform) =>
-    platform == TargetPlatform.android ? .6 : 1.0;
+    switch (platform) {
+      TargetPlatform.android => .6,
+      TargetPlatform.windows ||
+      TargetPlatform.macOS ||
+      TargetPlatform.linux => .8,
+      _ => 1.0,
+    };
 
 double get defaultDanmakuFontScale =>
     danmakuFontScaleForPlatform(defaultTargetPlatform);
+
+PlayerControlsMode playerControlsModeForPlatform(TargetPlatform platform) =>
+    switch (platform) {
+      TargetPlatform.windows ||
+      TargetPlatform.macOS ||
+      TargetPlatform.linux => PlayerControlsMode.dynamic,
+      _ => PlayerControlsMode.click,
+    };
+
+PlayerControlsMode get defaultPlayerControlsMode =>
+    playerControlsModeForPlatform(defaultTargetPlatform);

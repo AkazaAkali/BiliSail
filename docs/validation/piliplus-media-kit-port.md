@@ -48,6 +48,8 @@ Android 库固定为 `20260906` default 资产（mpv 0.41.0 / FFmpeg 9.0.1，API
 
 Pub 不会采纳传递依赖包的 overrides，因此根应用和 bili_player 均显式覆盖 core/Android 的 hosted 声明；更新 fork 时须同时更新七处 ref，并刷新根应用与 bili_player 两份锁文件。
 
+2026-10-23 针对 Win10 启动后原生始终暂停的问题，固定提交更新为 [`24f5c7cb6b78f68fa7c23c73ffe7294f0bd962ab`](https://github.com/CKopoer/media-kit/commit/24f5c7cb6b78f68fa7c23c73ffe7294f0bd962ab)。这次仅修复 core 的 `MPV_FORMAT_FLAG` 读写宽度及参数生命周期，并增加确定性原生回归；视频输出及 Android 原生资产保持上述版本。当前七处 ref 和两份锁文件均已同步。用户已确认目标 Win10 恢复播放，临时诊断代码已移除。日志证据、提交来源审计和本轮验证见[首帧停滞修复记录](windows-playback-flag-abi-2026-10-23.md)；下列 2026-10-16 结果属于历史验证。
+
 - `tool/check.ps1 -SkipPub`：根应用 1940、API 426、播放器 72、弹幕 93、mux 2 项通过，合计 2533；mux 的 10 项原生测试因未配置 `BILI_MUX_LIBRARY` 跳过。
 - fork 核心新增测试 9 项（含真实 Windows libmpv），视频包 21 项（17 生命周期 + 4 widget），分析/格式检查通过。
 - Windows 原生释放/渲染队列/尺寸 9 项与真实 GPU 的 100 帧同设备共享、复制回退、resize、共享 display 生命周期回归通过。

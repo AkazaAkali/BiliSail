@@ -12,12 +12,14 @@ class SqliteSettingsRepository implements SettingsRepository {
     this.defaultHighEnergyProgressEnabled = false,
     this.defaultDanmakuArea = 0.75,
     this.defaultDanmakuFontScale = 1.0,
+    this.defaultPlayerControlsMode = PlayerControlsMode.click,
   });
   final AppDatabase database;
   final WorkspaceNavigationMode defaultNavigationMode;
   final bool defaultHighEnergyProgressEnabled;
   final double defaultDanmakuArea;
   final double defaultDanmakuFontScale;
+  final PlayerControlsMode defaultPlayerControlsMode;
   @override
   Future<AppSettings> load() async {
     final value = await database.readSetting('preferences.v1');
@@ -27,6 +29,7 @@ class SqliteSettingsRepository implements SettingsRepository {
         highEnergyProgressEnabled: defaultHighEnergyProgressEnabled,
         danmakuArea: defaultDanmakuArea,
         danmakuFontScale: defaultDanmakuFontScale,
+        playerControlsMode: defaultPlayerControlsMode,
       );
     }
     final Object? decoded = jsonDecode(value);
@@ -93,7 +96,7 @@ class SqliteSettingsRepository implements SettingsRepository {
           PlayerControlsMode.values
               .where((item) => item.name == decoded['playerControlsMode'])
               .firstOrNull ??
-          PlayerControlsMode.click,
+          defaultPlayerControlsMode,
       preferredQuality: number('preferredQuality', 80.0).isFinite
           ? number('preferredQuality', 80.0).toInt()
           : 80,

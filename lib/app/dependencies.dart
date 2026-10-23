@@ -164,6 +164,7 @@ class AppDependencies {
       defaultHighEnergyProgressEnabled: defaultHighEnergyProgressEnabled,
       defaultDanmakuArea: defaultDanmakuArea,
       defaultDanmakuFontScale: defaultDanmakuFontScale,
+      defaultPlayerControlsMode: defaultPlayerControlsMode,
     );
     Future<MediaCdnPreference> cdnPreference() async =>
         (await settings.load()).mediaCdn;

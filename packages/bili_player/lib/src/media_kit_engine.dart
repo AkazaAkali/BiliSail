@@ -1043,10 +1043,30 @@ final class MediaKitEngine
   @override
   Future<void> seek(Duration target) {
     if (target < Duration.zero) throw ArgumentError.value(target, 'target');
+    final generation = _generation;
     return _command(
       (player) async {
         await player.seek(target);
-        if (!_disposed) {
+        // A command reply can precede the position event. Callers use this
+        // completion to save progress and rebuild danmaku, so confirm the
+        // backend position before clearing seeking or exposing a checkpoint.
+        final duration = player.state.duration;
+        final expected = duration > Duration.zero && target > duration
+            ? duration
+            : target;
+        await _waitReady(
+          player,
+          generation,
+          () =>
+              (player.state.position - expected).abs() <=
+              const Duration(milliseconds: 250),
+          [player.stream.position],
+          const Duration(seconds: 12),
+          'Playback position did not become ready after seeking.',
+        );
+        if (!_disposed &&
+            generation == _generation &&
+            identical(_player, player)) {
           _publish(
             _snapshot.copyWith(
               position: player.state.position,
