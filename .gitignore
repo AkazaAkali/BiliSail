@@ -52,3 +52,5 @@ app.*.map.json
 **/build/
 **/.flutter-plugins-dependencies
 /artifacts/
+
+promo-video/
