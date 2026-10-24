@@ -1,4 +1,5 @@
 #include "window_ime_context.h"
+#include "text_services_scope.h"
 
 #include <msctf.h>
 #include <wrl/client.h>
@@ -50,6 +51,43 @@ void PumpMessages() {
     }
     MsgWaitForMultipleObjects(0, nullptr, FALSE, 10, QS_ALLINPUT);
   } while (GetTickCount64() < until);
+}
+
+void CheckTextServicesLifetime() {
+  Microsoft::WRL::ComPtr<ITfThreadMgr> observer;
+  Check(SUCCEEDED(CoCreateInstance(CLSID_TF_ThreadMgr, nullptr,
+                                   CLSCTX_INPROC_SERVER,
+                                   IID_PPV_ARGS(&observer))),
+        "obtain TSF manager before creating windows");
+  Check(observer->Deactivate() == E_UNEXPECTED,
+        "a COM reference alone does not activate TSF");
+  {
+    TextServicesScope outer;
+    Check(outer.active(), "activate TSF for the native UI lifetime");
+    {
+      TextServicesScope inner;
+      Check(inner.active(), "a nested owner can activate the same thread");
+    }
+    // Count the remaining activation without relying on COM reference counts.
+    // Restore the consumed activation before the outer scope releases it.
+    Check(observer->Deactivate() == S_OK,
+          "releasing a nested owner preserves the outer activation");
+    Check(observer->Deactivate() == E_UNEXPECTED,
+          "exactly one activation remains after nested scope destruction");
+    TfClientId client = TF_CLIENTID_NULL;
+    Check(observer->Activate(&client) == S_OK,
+          "restore the activation consumed by the lifetime assertion");
+  }
+  Check(observer->Deactivate() == E_UNEXPECTED,
+        "scope destruction balances its activation");
+  const auto early_return = [] {
+    TextServicesScope scope;
+    return scope.active();
+  };
+  Check(early_return(), "activate on an early-return path");
+  Check(observer->Deactivate() == E_UNEXPECTED,
+        "early return does not leak an activation");
+  std::cout << "PASS: TSF activation ownership, nesting, early return\n";
 }
 
 void CheckRealProfiles(HWND window, HWND other) {
@@ -142,12 +180,9 @@ void CheckRealProfiles(HWND window, HWND other) {
 }
 }  // namespace
 
-int main(int argc, char** argv) {
-  const bool real_profiles =
-      argc == 2 && std::string(argv[1]) == "--real-profiles";
-  Check(argc == 1 || real_profiles,
-        "usage: window_ime_context_test [--real-profiles]");
-  const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+void RunWindowChecks(bool real_profiles) {
+  TextServicesScope text_services;
+  Check(text_services.active(), "keep TSF active throughout window checks");
   WNDCLASSW definition{};
   definition.lpfnWndProc = TestWindowProc;
   definition.hInstance = GetModuleHandleW(nullptr);
@@ -256,8 +291,19 @@ int main(int argc, char** argv) {
     Check(!policy.SetActive(true), "destroyed view is rejected");
   }
   DestroyWindow(other);
-  if (SUCCEEDED(com)) CoUninitialize();
   std::cout << "PASS: owned IME context, native focus boundary, late requests, "
                "mode preservation, isolation, disposal\n";
+}
+
+int main(int argc, char** argv) {
+  const bool real_profiles =
+      argc == 2 && std::string(argv[1]) == "--real-profiles";
+  Check(argc == 1 || real_profiles,
+        "usage: window_ime_context_test [--real-profiles]");
+  const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  Check(SUCCEEDED(com), "initialize the test UI apartment");
+  CheckTextServicesLifetime();
+  RunWindowChecks(real_profiles);
+  CoUninitialize();
   return 0;
 }

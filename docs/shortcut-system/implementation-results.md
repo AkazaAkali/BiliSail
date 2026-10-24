@@ -119,6 +119,22 @@ Windows 集成首轮在标点命令断言中收到空列表，保留 `build/ime-
 
 尚未捕获同一故障窗口由微信 profile 变回微软 profile 的连续轨迹；修复针对已确认的默认上下文中间激活缺陷。两轮安装版的只读采样均没有收到测试按键，不能作为故障已复现或修复成功的证据。真实候选／提交、长时间后台和原生 WebView 仍待修复构建中的实际验证，不将 profile API 检查当作完整实键验收。Android／macOS 本轮未构建或实机验证。
 
+### 跨应用输入法切换的 TSF 激活期（2026-10-24）
+
+用户补充的完整故障包括：Alt+Tab 返回后在非编辑播放区按 Shift／普通快捷键，回搜索框只能输入英文，Shift 无法恢复中文；切换到其他输入法后无法重新选择微信。进一步缩短为“切到其他应用并选择微软输入法 → 回 BiliSail → 选择微信”也能复现，因此播放快捷键和 Shift 不是必要条件，不能仅按最初的快捷键触发点定位。
+
+完整应用的本地原生诊断记录到：异常时仍有输入上下文、活动 profile 可以仍显示微信，但线程的 TSF 打开状态由有效值变为缺失，按键仅产生普通字符而没有组合消息。分别关闭应用的 IME 上下文干预、移除 `SC_KEYMENU` 拦截、使用系统默认上下文、保留 `ITfThreadMgr` COM 引用以及限制失活时的 `SetFocus`，均未提供稳定恢复；部分短流程正常后继续切换仍失败。因此这些对照不能作为移除 Alt 补丁或改写 HIMC 策略的依据，最终保留原有修饰键、菜单和编辑焦点保护。
+
+[TextServicesScope](../../windows/runner/text_services_scope.h) 在 UI 线程创建 Flutter 引擎和窗口前调用 `ITfThreadMgr::Activate`，在所有窗口／引擎析构后调用配对的 `Deactivate`，最后才释放 COM apartment。依据 [Microsoft 的激活契约](https://learn.microsoft.com/en-us/windows/win32/api/msctf/nf-msctf-itfthreadmgr-activate)，COM 引用寿命与 TSF 激活计数是两回事；本次修复给应用明确的激活所有者，不再仅依赖 IMM 兼容路径的隐式激活。窗口创建失败的提前返回也经过相同的资源释放顺序。没有主动选择输入法、强制中英文模式或修改系统默认输入设置。
+
+显式保持激活的完整应用诊断版通过用户的跨应用微软／微信切换及中文输入复测，日志同时恢复组合消息。该结果定位到应用需要维持的文本服务激活边界，没有证明 Windows／微信输入法内部首次丢失状态的具体实现原因，也不能用某次短流程正常代替后续反复切换验收。诊断副本与限量、无输入内容的日志保存在忽略的 `build/ime-test/`，正式源码不带诊断钩子。
+
+原生回归增加 TSF 激活的嵌套所有权、精确配对和提前返回释放，并在与应用相同的激活期内验证原有窗口焦点、上下文和真实微信／微软 profile 切换。自动 profile 激活和原生消息注入仍不替代候选、组合和实际中文提交验收。
+
+当前源码执行 `tool/check.ps1 -SkipPub` 通过根应用和四个包的格式、静态分析及 2,639 项测试（根应用 2,029、API 434、player 81、danmaku 93、mux 2）；另有 10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。`tool/test-windows-ime.ps1 -RealImeProfiles` 通过原生 TSF／IME 回归和 Windows Flutter 输入法集成测试。
+
+Windows 本地 Release 构建通过，入口为 `build/windows/x64/runner/Release/bilisail.exe`，运行需保留整个 Release 目录。该构建使用升版前的 `1.1.1+5`；提交时同步远端已有的 `1.1.1+6` 并升至 `1.1.1+7`，新版本安装包由远端工作流生成。升版后执行 `tool/check.ps1 -EnforceLockfile` 再次通过格式、静态分析及上述 2,639 项测试，五份锁文件未变，10 项 mux 原生用例仍按配置跳过。诊断版的跨应用切换及真实中文输入已由用户确认；不含诊断钩子的 Release 连续多轮切换、播放页 Shift／空格／倍速仍待人工复测，Android／macOS 本轮未在本机验证。
+
 ## 页面刷新
 
 刷新只归活动页面，进行中重复触发合并；播放器不再独立解释 F5／侧键为 retry。首页保留频道，搜索使用 refresh 保留当前筛选，历史、消息、下载、用户页调用各自刷新。UGC 复用相关推荐／标签刷新与本页播放重试组合；PGC 先重新加载剧集，同一选择与源代次稳定才重试，变更选集由原激活路径开源；直播由房间 controller.load 驱动目标，不另发 retry。离线保留本地源 retry；设置等无能力页不注册空回调。页面销毁／账号和 source generation 继续由已有控制器及会话隔离。
