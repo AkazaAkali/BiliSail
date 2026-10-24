@@ -13,9 +13,10 @@ final class ApiInboxEntry {
     this.system = false,
     this.unread = 0,
     this.lastSequence,
+    this.readCursor,
   });
   final String id, title, text;
-  final String? userMid, lastSequence;
+  final String? userMid, lastSequence, readCursor;
   final Uri? avatarUrl, targetUrl;
   final DateTime? time;
   final int? sessionType;

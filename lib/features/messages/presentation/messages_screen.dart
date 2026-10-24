@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/external_links.dart';
+import '../../../core/presentation/workspace_activity.dart';
 import '../../../domain/user.dart';
 import '../../../shared/ui/network_avatar.dart';
 import '../../../shared/ui/smooth_scroll_behavior.dart';
@@ -89,6 +90,20 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
     }
     final state = ref.watch(messagesControllerProvider);
     final controller = ref.read(messagesControllerProvider.notifier);
+    final active = WorkspaceActivity.isActive(context);
+    if (active &&
+        state.section == InboxSection.system &&
+        !state.inbox.loading &&
+        state.inbox.error == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !WorkspaceActivity.isActive(context)) return;
+        final current = ref.read(messagesControllerProvider);
+        if (current.section == InboxSection.system &&
+            identical(current.inbox, state.inbox)) {
+          controller.markSystemNotificationsRead();
+        }
+      });
+    }
     final unreadState = ref.watch(unreadMessagesProvider);
     final unread = unreadState.isLoading || unreadState.hasError
         ? const <InboxSection, int>{}
@@ -182,6 +197,12 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
           ),
         ),
         const Divider(height: 1),
+        if (state.section == InboxSection.system)
+          if (state.writeMessage case final message?)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: Text(message),
+            ),
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {

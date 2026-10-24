@@ -25,6 +25,7 @@ final class InboxEntry {
     this.system = false,
     this.unread = 0,
     this.lastSequence,
+    this.readCursor,
   });
   final String id, title, text;
   final UserId? userId;
@@ -34,6 +35,7 @@ final class InboxEntry {
   final bool system;
   final int unread;
   final String? lastSequence;
+  final String? readCursor;
   bool get canSend => sessionType == 1 && !system && userId != null;
 }
 
@@ -86,6 +88,10 @@ abstract interface class MessageRepository {
   Future<void> markRead(
     InboxEntry entry,
     String sequence, {
+    required RequestCancellation cancellation,
+  });
+  Future<void> markSystemNotificationsRead(
+    String cursor, {
     required RequestCancellation cancellation,
   });
 }

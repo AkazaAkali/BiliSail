@@ -215,6 +215,9 @@ final class MessageClient {
               time: _time(row['time_at']),
               targetUrl: _uri(row['link']),
               system: true,
+              readCursor: row['cursor'] == null
+                  ? null
+                  : _decimal(row['cursor'], e),
             );
           }).toList();
       // This endpoint exposes no usable cursor in the verified Web response.
@@ -313,6 +316,15 @@ final class MessageClient {
       'build': '0',
       'mobi_app': 'web',
     }, context: context);
+  }
+
+  Future<void> markSystemNotificationsRead(
+    String cursor, {
+    ApiRequestContext? context,
+  }) {
+    const endpoint = 'message_system_mark_read';
+    _decimal(cursor, endpoint);
+    return api.acknowledgeSystemNotifications(cursor, context: context);
   }
 
   ApiPrivateMessage _message(Map<String, Object?> row, String e) {

@@ -28,6 +28,13 @@ const privateMessage = PrivateMessage(
   text: '测试私信正文',
   type: 1,
 );
+const systemNotification = InboxEntry(
+  id: '10',
+  title: '系统通知标题',
+  text: '系统通知正文',
+  system: true,
+  readCursor: '1705288500000000001',
+);
 
 class AuthFake implements AuthRepository {
   final stream = StreamController<AuthState>.broadcast(sync: true);
@@ -68,14 +75,20 @@ class MessageRepositoryFake implements MessageRepository {
   Completer<MessagePage<PrivateMessage>>? threadPending;
   Completer<void>? writePending;
   Object? writeFailure;
+  Object? inboxFailure;
+  Map<InboxSection, int> counts = {InboxSection.private: 3};
   RequestCancellation? inboxRead, threadRead, writeRead;
-  int sends = 0, marks = 0, reads = 0;
-  String? lastText, lastAck;
+  int sends = 0, marks = 0, reads = 0, systemMarks = 0, unreadReads = 0;
+  String? lastText, lastAck, lastSystemCursor;
   InboxEntry? lastThread, lastSend;
   @override
   Future<Map<InboxSection, int>> unread({
     required RequestCancellation cancellation,
-  }) async => {InboxSection.private: 3};
+  }) async {
+    unreadReads++;
+    return Map.unmodifiable(counts);
+  }
+
   @override
   Future<MessagePage<InboxEntry>> inbox(
     InboxSection section, {
@@ -84,6 +97,10 @@ class MessageRepositoryFake implements MessageRepository {
   }) async {
     reads++;
     inboxRead = cancellation;
+    if (inboxFailure case final error?) throw error;
+    if (section != InboxSection.private && section != InboxSection.system) {
+      counts[section] = 0;
+    }
     return inboxPending == null
         ? MessagePage(entries, hasMore: more, cursor: this.cursor)
         : inboxPending!.future;
@@ -127,5 +144,19 @@ class MessageRepositoryFake implements MessageRepository {
     writeRead = cancellation;
     if (writeFailure case final error?) throw error;
     await writePending?.future;
+    counts[InboxSection.private] = 0;
+  }
+
+  @override
+  Future<void> markSystemNotificationsRead(
+    String cursor, {
+    required RequestCancellation cancellation,
+  }) async {
+    systemMarks++;
+    lastSystemCursor = cursor;
+    writeRead = cancellation;
+    if (writeFailure case final error?) throw error;
+    await writePending?.future;
+    counts[InboxSection.system] = 0;
   }
 }

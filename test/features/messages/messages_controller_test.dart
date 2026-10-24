@@ -199,6 +199,149 @@ void main() {
     expect(repo.marks, 1);
   });
   test(
+    'read actions refresh the unread provider shared with the root scope',
+    () async {
+      repo.counts = {InboxSection.private: 3, InboxSection.replies: 2};
+      container.listen(unreadMessagesProvider, (_, _) {});
+      expect(
+        (await container.read(unreadMessagesProvider.future)).values
+            .fold(0, (a, b) => a + b),
+        5,
+      );
+      final page = ProviderContainer(
+        parent: container,
+        overrides: [
+          messagesControllerProvider.overrideWith(MessagesController.new),
+        ],
+      );
+      addTearDown(page.dispose);
+      page.listen(messagesControllerProvider, (_, _) {});
+      final scoped = page.read(messagesControllerProvider.notifier);
+      await flush();
+      scoped.selectSection(InboxSection.replies);
+      await flush();
+      expect(await container.read(unreadMessagesProvider.future), {
+        InboxSection.private: 3,
+        InboxSection.replies: 0,
+      });
+      scoped.selectSection(InboxSection.private);
+      scoped.selectConversation(conversation);
+      await flush();
+      expect(await scoped.markRead(), isTrue);
+      expect(
+        (await container.read(
+          unreadMessagesProvider.future,
+        ))[InboxSection.private],
+        0,
+      );
+    },
+  );
+  test(
+    'system acknowledgement selects exact newest loaded cursor once',
+    () async {
+      repo.entries = const [
+        InboxEntry(
+          id: '11',
+          title: '旧通知',
+          text: '',
+          system: true,
+          readCursor: '1705288500000000000',
+        ),
+        systemNotification,
+      ];
+      controller.selectSection(InboxSection.system);
+      await flush();
+      expect(repo.systemMarks, 0);
+      final pending = repo.writePending = Completer<void>();
+      final write = controller.markSystemNotificationsRead();
+      expect(await controller.markSystemNotificationsRead(), isFalse);
+      pending.complete();
+      expect(await write, isTrue);
+      expect(repo.lastSystemCursor, systemNotification.readCursor);
+      expect(await controller.markSystemNotificationsRead(), isFalse);
+      expect(repo.systemMarks, 1);
+    },
+  );
+  test('failed system acknowledgement is not replayed by rebuilds', () async {
+    repo.entries = const [systemNotification];
+    repo.counts = {InboxSection.system: 2};
+    container.listen(unreadMessagesProvider, (_, _) {});
+    await container.read(unreadMessagesProvider.future);
+    controller.selectSection(InboxSection.system);
+    await flush();
+    repo.writeFailure = const AppFailure(AppFailureKind.timeout, 'timeout');
+    expect(await controller.markSystemNotificationsRead(), isFalse);
+    expect(state().writeMessage, contains('尚未确认'));
+    expect(await controller.markSystemNotificationsRead(), isFalse);
+    expect(repo.systemMarks, 1);
+    expect(
+      (await container.read(
+        unreadMessagesProvider.future,
+      ))[InboxSection.system],
+      2,
+    );
+    repo.writeFailure = null;
+    await controller.refresh();
+    expect(await controller.markSystemNotificationsRead(), isTrue);
+    expect(
+      (await container.read(
+        unreadMessagesProvider.future,
+      ))[InboxSection.system],
+      0,
+    );
+  });
+  test(
+    'system read rejects empty, missing cursor, loading and failed lists',
+    () async {
+      repo.entries = [];
+      controller.selectSection(InboxSection.system);
+      expect(await controller.markSystemNotificationsRead(), isFalse);
+      await flush();
+      expect(await controller.markSystemNotificationsRead(), isFalse);
+      repo.entries = const [
+        InboxEntry(id: '10', title: '通知', text: '', system: true),
+      ];
+      await controller.refresh();
+      expect(await controller.markSystemNotificationsRead(), isFalse);
+      repo.entries = const [systemNotification];
+      repo.inboxFailure = const AppFailure(AppFailureKind.network, 'offline');
+      await controller.refresh();
+      expect(await controller.markSystemNotificationsRead(), isFalse);
+      expect(repo.systemMarks, 0);
+    },
+  );
+  test(
+    'account changes reject system read completion and cancel the write',
+    () async {
+      repo.entries = const [systemNotification];
+      controller.selectSection(InboxSection.system);
+      await flush();
+      final pending = repo.writePending = Completer<void>();
+      final write = controller.markSystemNotificationsRead();
+      final cancellation = repo.writeRead;
+      repo.accountScope = 'guest';
+      repo.sessionEpoch++;
+      auth.emit(const AuthState());
+      await flush();
+      pending.complete();
+      expect(await write, isFalse);
+      expect(cancellation?.isCancelled, isTrue);
+      expect(state().writeMessage, isNull);
+      expect(state().inbox.items, isEmpty);
+    },
+  );
+  test(
+    'system read does not acknowledge a list from an earlier epoch',
+    () async {
+      repo.entries = const [systemNotification];
+      controller.selectSection(InboxSection.system);
+      await flush();
+      repo.sessionEpoch++;
+      expect(await controller.markSystemNotificationsRead(), isFalse);
+      expect(repo.systemMarks, 0);
+    },
+  );
+  test(
     'system conversations cannot send and invalid drafts stay local',
     () async {
       const system = InboxEntry(

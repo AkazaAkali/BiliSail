@@ -82,6 +82,8 @@ class MessagesController extends Notifier<MessagesState> {
   int _generation = 0, _inboxVersion = 0, _threadVersion = 0;
   RequestCancellation? _inboxRead, _threadRead;
   final Set<RequestCancellation> _writes = {};
+  MessageListState<InboxEntry>? _systemReadAttempt;
+  (String, int)? _inboxAccount;
 
   @override
   MessagesState build() {
@@ -103,6 +105,8 @@ class MessagesController extends Notifier<MessagesState> {
   }
 
   void _cancel() {
+    _systemReadAttempt = null;
+    _inboxAccount = null;
     _inboxRead?.cancel();
     _threadRead?.cancel();
     for (final write in _writes) {
@@ -147,9 +151,10 @@ class MessagesController extends Notifier<MessagesState> {
 
   Future<void> refresh() async {
     final generation = _generation;
-    ref.invalidate(unreadMessagesProvider);
     await loadInbox(refresh: true);
-    if (ref.mounted && generation == _generation && state.selected != null) {
+    if (!ref.mounted || generation != _generation) return;
+    ref.invalidate(unreadMessagesProvider);
+    if (state.selected != null) {
       await loadThread(refresh: true);
     }
   }
@@ -186,6 +191,7 @@ class MessagesController extends Notifier<MessagesState> {
       for (final item in page.items) {
         unique[item.id] = item;
       }
+      _inboxAccount = (scope, epoch);
       state = state.copy(
         selected: unique[state.selected?.id],
         inbox: MessageListState(
@@ -199,6 +205,11 @@ class MessagesController extends Notifier<MessagesState> {
               unique.length < 500,
         ),
       );
+      // Reply/mention/like reads also advance their server-side unread state.
+      // Refresh after the read completes, so every badge sees the new counts.
+      if (section != InboxSection.private && section != InboxSection.system) {
+        ref.invalidate(unreadMessagesProvider);
+      }
     } catch (error) {
       if (_current(generation, scope, epoch) && version == _inboxVersion) {
         state = state.copy(
@@ -365,6 +376,63 @@ class MessagesController extends Notifier<MessagesState> {
       action: (repository, cancellation) =>
           repository.markRead(entry, sequence, cancellation: cancellation),
     );
+  }
+
+  Future<bool> markSystemNotificationsRead() async {
+    final inbox = state.inbox;
+    final repository = ref.read(messageRepositoryProvider);
+    if (state.section != InboxSection.system ||
+        inbox.loading ||
+        inbox.error != null ||
+        identical(inbox, _systemReadAttempt) ||
+        state.sending ||
+        state.markingRead ||
+        _inboxAccount != (repository.accountScope, repository.sessionEpoch)) {
+      return false;
+    }
+    BigInt? newest;
+    for (final entry in inbox.items) {
+      final cursor = BigInt.tryParse(entry.readCursor ?? '');
+      if (cursor != null &&
+          cursor > BigInt.zero &&
+          (newest == null || cursor > newest)) {
+        newest = cursor;
+      }
+    }
+    if (newest == null) return false;
+    // A failed/uncertain write may be tried again only after a new list load.
+    // Rebuilds and unread-count updates must not resubmit the same snapshot.
+    _systemReadAttempt = inbox;
+    final generation = _generation,
+        scope = repository.accountScope,
+        epoch = repository.sessionEpoch;
+    final cancellation = RequestCancellation();
+    _writes.add(cancellation);
+    state = state.copy(markingRead: true, clearWriteMessage: true);
+    try {
+      await repository.markSystemNotificationsRead(
+        newest.toString(),
+        cancellation: cancellation,
+      );
+      if (!_current(generation, scope, epoch)) return false;
+      state = state.copy(markingRead: false);
+      ref.invalidate(unreadMessagesProvider);
+      return true;
+    } catch (error) {
+      if (_current(generation, scope, epoch)) {
+        state = state.copy(
+          markingRead: false,
+          writeMessage:
+              state.section == InboxSection.system &&
+                  identical(state.inbox, inbox)
+              ? _error(error, write: true)
+              : null,
+        );
+      }
+      return false;
+    } finally {
+      _writes.remove(cancellation);
+    }
   }
 
   Future<bool> _write(

@@ -33,6 +33,7 @@ ApiCookieJar cookies({String domain = '.bilibili.com'}) =>
 final class Transport implements ApiTransport, ApiFormTransport {
   Object? Function(Uri) handler = (_) => {};
   ApiHttpResponse postResult = response({});
+  ApiHttpResponse? getResult;
   int posts = 0, gets = 0;
   Map<String, String> fields = {}, headers = {};
   Uri? uri;
@@ -44,7 +45,9 @@ final class Transport implements ApiTransport, ApiFormTransport {
     ApiCancellation? cancellation,
   }) async {
     gets++;
-    return response(handler(uri));
+    this.uri = uri;
+    this.headers = headers;
+    return getResult ?? response(handler(uri));
   }
 
   @override
@@ -212,6 +215,7 @@ void main() {
         'system_notify_list': [
           {
             'id': 9,
+            'cursor': 1705288500000000001,
             'title': '通知',
             'content': '正文',
             'time_at': '2026-10-05 12:00:00',
@@ -219,11 +223,68 @@ void main() {
         ],
       };
     };
-    expect(
-      (await client.notifications(ApiInboxSection.system)).items.single.time,
-      isNotNull,
-    );
+    final item = (await client.notifications(
+      ApiInboxSection.system,
+    )).items.single;
+    expect(item.time, isNotNull);
+    expect(item.readCursor, '1705288500000000001');
   });
+  test(
+    'system read keeps exact cursor, destination cookies and CSRF',
+    () async {
+      transport.getResult = response(null);
+      await client.markSystemNotificationsRead('1705288500000000001');
+      expect(transport.uri?.host, 'message.bilibili.com');
+      expect(transport.uri?.path, '/x/sys-msg/update_cursor');
+      expect(transport.uri?.queryParameters, {
+        'cursor': '1705288500000000001',
+        'has_up': '0',
+        'build': '0',
+        'mobi_app': 'web',
+        'csrf': 'csrf-fixture',
+        'csrf_token': 'csrf-fixture',
+      });
+      expect(transport.headers['Referer'], 'https://message.bilibili.com/');
+      expect(transport.headers['Cookie'], contains('SESSDATA=fixture'));
+      expect(transport.gets, 1);
+      expect(transport.posts, 0);
+    },
+  );
+  test('system read is a mutation and never retries HTTP failures', () async {
+    transport.getResult = response(null, status: 503);
+    await expectLater(
+      client.markSystemNotificationsRead('1705288500000000001'),
+      throwsA(isA<ApiFailure>()),
+    );
+    expect(transport.gets, 1);
+  });
+  test(
+    'system read rejects wrong cookie scope, cancellation and bad cursor',
+    () async {
+      final scoped = MessageClient(
+        BiliApiClient(
+          transport: transport,
+          cookieJar: cookies(domain: 'api.bilibili.com'),
+        ),
+      );
+      await expectLater(
+        scoped.markSystemNotificationsRead('1705288500000000001'),
+        throwsA(isA<ApiFailure>()),
+      );
+      await expectLater(
+        client.markSystemNotificationsRead(
+          '1705288500000000001',
+          context: ApiRequestContext(cancellation: ApiCancellation()..cancel()),
+        ),
+        throwsA(isA<ApiFailure>()),
+      );
+      expect(
+        () => client.markSystemNotificationsRead('1.7e18'),
+        throwsA(isA<ApiFailure>()),
+      );
+      expect(transport.gets, 0);
+    },
+  );
   test(
     'empty system response is a verified empty page, not an invented cursor',
     () async {

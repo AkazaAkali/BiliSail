@@ -79,6 +79,7 @@ class ApiMessageRepository implements MessageRepository {
             system: e.system,
             unread: e.unread,
             lastSequence: e.lastSequence,
+            readCursor: e.readCursor,
           ),
         ),
       ),
@@ -153,4 +154,13 @@ class ApiMessageRepository implements MessageRepository {
       cancellation,
     );
   }
+
+  @override
+  Future<void> markSystemNotificationsRead(
+    String cursor, {
+    required RequestCancellation cancellation,
+  }) => _run(
+    (context) => client.markSystemNotificationsRead(cursor, context: context),
+    cancellation,
+  );
 }

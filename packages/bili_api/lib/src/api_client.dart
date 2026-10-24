@@ -269,6 +269,38 @@ final class BiliApiClient {
     );
   }
 
+  /// The message site's read acknowledgement uses a single authenticated GET.
+  Future<void> acknowledgeSystemNotifications(
+    String cursor, {
+    ApiRequestContext? context,
+  }) async {
+    const endpoint = 'message_system_mark_read';
+    if (!RegExp(r'^[1-9][0-9]*$').hasMatch(cursor)) {
+      throw ArgumentError('Invalid notification cursor');
+    }
+    final uri = Uri.https('message.bilibili.com', '/x/sys-msg/update_cursor');
+    final credentials = _mutationCredentials(uri, endpoint);
+    // This GET mutates read state: keep the normal cancellation/deadline checks,
+    // but never replay an uncertain acknowledgement.
+    final response = await _request(
+      uri.replace(
+        queryParameters: {
+          'cursor': cursor,
+          'has_up': '0',
+          'build': '0',
+          'mobi_app': 'web',
+          'csrf': credentials.csrf,
+          'csrf_token': credentials.csrf,
+        },
+      ),
+      endpoint,
+      context,
+      maxAttempts: 1,
+      referer: 'https://message.bilibili.com/',
+    );
+    _decodeJson(response, endpoint);
+  }
+
   /// Dynamic writes use JSON and query CSRF, as in the official Web client.
   Future<Object?> submitDynamicJson(
     String path,
@@ -296,6 +328,30 @@ final class BiliApiClient {
     );
   }
 
+  ({String cookie, String csrf}) _mutationCredentials(
+    Uri uri,
+    String endpoint,
+  ) {
+    final cookie = cookieJar.headerFor(uri, now: _clock()) ?? '';
+    final cookies = <String, String>{};
+    for (final pair in cookie.split('; ')) {
+      final separator = pair.indexOf('=');
+      if (separator > 0) {
+        cookies.putIfAbsent(
+          pair.substring(0, separator),
+          () => pair.substring(separator + 1),
+        );
+      }
+    }
+    final csrf = cookies['bili_jct'];
+    if (csrf == null ||
+        csrf.isEmpty ||
+        cookies['SESSDATA']?.isNotEmpty != true) {
+      throw ApiFailure(ApiFailureCategory.authentication, endpoint);
+    }
+    return (cookie: cookie, csrf: csrf);
+  }
+
   Future<Object?> _submitForm(
     Uri uri,
     String endpoint,
@@ -315,23 +371,8 @@ final class BiliApiClient {
     }
 
     check();
-    final cookie = cookieJar.headerFor(uri, now: _clock());
-    final cookies = <String, String>{};
-    for (final pair in cookie?.split('; ') ?? const <String>[]) {
-      final separator = pair.indexOf('=');
-      if (separator > 0) {
-        cookies.putIfAbsent(
-          pair.substring(0, separator),
-          () => pair.substring(separator + 1),
-        );
-      }
-    }
-    final csrf = cookies['bili_jct'];
-    if (csrf == null ||
-        csrf.isEmpty ||
-        cookies['SESSDATA']?.isNotEmpty != true) {
-      throw ApiFailure(ApiFailureCategory.authentication, endpoint);
-    }
+    final credentials = _mutationCredentials(uri, endpoint);
+    final cookie = credentials.cookie, csrf = credentials.csrf;
     final transport = _transport;
     if (jsonBody == null
         ? transport is! ApiFormTransport
@@ -358,7 +399,7 @@ final class BiliApiClient {
             : live
             ? 'https://live.bilibili.com'
             : 'https://www.bilibili.com',
-        'Cookie': cookie ?? '',
+        'Cookie': cookie,
       };
       final operation = jsonBody == null
           ? (transport as ApiFormTransport).postForm(
@@ -1696,8 +1737,10 @@ final class BiliApiClient {
   Future<ApiHttpResponse> _request(
     Uri uri,
     String endpoint,
-    ApiRequestContext? context,
-  ) async {
+    ApiRequestContext? context, {
+    int? maxAttempts,
+    String referer = 'https://www.bilibili.com/',
+  }) async {
     if (context?.cancellation?.isCancelled ?? false) {
       throw ApiFailure(ApiFailureCategory.cancelled, endpoint);
     }
@@ -1712,7 +1755,7 @@ final class BiliApiClient {
       'User-Agent': endpoint == 'video_storyboard'
           ? 'Mozilla/5.0'
           : 'BiliSail/0.1',
-      'Referer': 'https://www.bilibili.com/',
+      'Referer': referer,
     };
     final cookie = cookieJar.headerFor(uri, now: _clock());
     if (cookie != null) headers['Cookie'] = cookie;
@@ -1724,7 +1767,7 @@ final class BiliApiClient {
       epoch,
       // The official progress preview retries on the next interaction, rather
       // than replaying a failed videoshot request inside the same interaction.
-      maxAttempts: endpoint == 'video_storyboard' ? 1 : 3,
+      maxAttempts: maxAttempts ?? (endpoint == 'video_storyboard' ? 1 : 3),
     );
     if (epoch != null && _sessionProvider?.sessionEpoch != epoch ||
         context?.cancellation?.isCancelled == true) {

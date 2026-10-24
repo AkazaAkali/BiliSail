@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:bilisail/domain/app_failure.dart';
+import 'package:bilisail/core/presentation/workspace_activity.dart';
+import 'package:bilisail/features/auth/application/account_overview_controller.dart';
+import 'package:bilisail/features/auth/presentation/account_button.dart';
 import 'package:bilisail/features/auth/application/auth_controller.dart';
 import 'package:bilisail/features/auth/domain/auth_repository.dart';
 import 'package:bilisail/features/messages/application/messages_controller.dart';
@@ -45,6 +48,148 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  Future<void> mountWithAccount(
+    WidgetTester tester, {
+    ValueNotifier<bool>? active,
+  }) async {
+    Widget messages() => ProviderScope(
+      overrides: [
+        messagesControllerProvider.overrideWith(MessagesController.new),
+      ],
+      child: const MessagesScreen(),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(auth),
+          messageRepositoryProvider.overrideWithValue(repo),
+          accountMessageIndicatorProvider.overrideWith((ref) {
+            final unread = ref.watch(unreadMessagesProvider);
+            return AccountMessageIndicator(
+              count: unread.value?.values.fold<int>(0, (a, b) => a + b) ?? 0,
+            );
+          }),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                const AccountButton(),
+                Expanded(
+                  child: active == null
+                      ? messages()
+                      : ValueListenableBuilder<bool>(
+                          valueListenable: active,
+                          child: messages(),
+                          builder: (_, value, child) =>
+                              WorkspaceActivity(active: value, child: child!),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  Badge accountBadge(WidgetTester tester) => tester.widget<Badge>(
+    find.descendant(
+      of: find.byType(AccountButton),
+      matching: find.byType(Badge),
+    ),
+  );
+
+  testWidgets(
+    'viewing system notifications updates the avatar without opening it',
+    (tester) async {
+      repo.counts = {InboxSection.private: 3, InboxSection.system: 2};
+      await mountWithAccount(tester);
+      expect((accountBadge(tester).label as Text).data, '5');
+      repo.entries = const [systemNotification];
+      await tester.tap(find.byKey(const ValueKey('message-section-system')));
+      await tester.pumpAndSettle();
+      expect(find.text('系统通知正文'), findsOneWidget);
+      expect(repo.systemMarks, 1);
+      expect((accountBadge(tester).label as Text).data, '3');
+      expect(find.text('系统通知 · 2'), findsNothing);
+      await tester.pump();
+      expect(repo.systemMarks, 1);
+    },
+  );
+
+  for (final section in [
+    InboxSection.replies,
+    InboxSection.mentions,
+    InboxSection.likes,
+  ]) {
+    testWidgets('viewing ${section.name} refreshes the avatar count', (
+      tester,
+    ) async {
+      repo.counts = {InboxSection.private: 3, section: 2};
+      await mountWithAccount(tester);
+      expect((accountBadge(tester).label as Text).data, '5');
+      await tester.tap(find.byKey(ValueKey('message-section-${section.name}')));
+      await tester.pumpAndSettle();
+      expect((accountBadge(tester).label as Text).data, '3');
+    });
+  }
+
+  testWidgets('private acknowledgement updates the avatar from a page scope', (
+    tester,
+  ) async {
+    await mountWithAccount(tester);
+    expect(accountBadge(tester).isLabelVisible, isTrue);
+    await tester.tap(find.text('测试会话'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('标为已读'));
+    await tester.pumpAndSettle();
+    expect(repo.marks, 1);
+    expect(accountBadge(tester).isLabelVisible, isFalse);
+  });
+
+  testWidgets('hidden system list waits until visible before acknowledging', (
+    tester,
+  ) async {
+    final active = ValueNotifier(true);
+    addTearDown(active.dispose);
+    await mountWithAccount(tester, active: active);
+    final pending = repo.inboxPending = Completer<MessagePage<InboxEntry>>();
+    await tester.tap(find.byKey(const ValueKey('message-section-system')));
+    await tester.pump();
+    active.value = false;
+    await tester.pump();
+    pending.complete(const MessagePage([systemNotification], hasMore: false));
+    await tester.pumpAndSettle();
+    expect(repo.systemMarks, 0);
+    active.value = true;
+    await tester.pumpAndSettle();
+    expect(repo.systemMarks, 1);
+    active.value = false;
+    await tester.pump();
+    active.value = true;
+    await tester.pumpAndSettle();
+    expect(repo.systemMarks, 1);
+  });
+
+  testWidgets(
+    'failed automatic read keeps unread badge and offers refresh guidance',
+    (tester) async {
+      repo.counts = {InboxSection.system: 2};
+      repo.writeFailure = const AppFailure(AppFailureKind.timeout, 'timeout');
+      await mountWithAccount(tester);
+      repo.entries = const [systemNotification];
+      await tester.tap(find.byKey(const ValueKey('message-section-system')));
+      await tester.pumpAndSettle();
+      expect(repo.systemMarks, 1);
+      expect(find.textContaining('尚未确认'), findsOneWidget);
+      expect((accountBadge(tester).label as Text).data, '2');
+      await tester.pump();
+      expect(repo.systemMarks, 1);
+    },
+  );
 
   testWidgets(
     'narrow message tabs scroll by mouse wheel and switch without writes',
