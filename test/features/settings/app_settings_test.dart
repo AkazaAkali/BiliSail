@@ -111,8 +111,8 @@ void main() {
   test(
     'concurrent playback requires multiple tabs and an enabled preference',
     () {
-      expect(AppSettings().allowConcurrentPlayback, isTrue);
-      expect(const AppSettings.defaults().allowConcurrentPlayback, isTrue);
+      expect(AppSettings().allowConcurrentPlayback, isFalse);
+      expect(const AppSettings.defaults().allowConcurrentPlayback, isFalse);
       for (final mode in WorkspaceNavigationMode.values) {
         for (final allowed in [false, true]) {
           final settings = const AppSettings.defaults()

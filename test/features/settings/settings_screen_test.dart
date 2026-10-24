@@ -417,7 +417,7 @@ void main() {
         final toggle = find.widgetWithText(SwitchListTile, '允许多个标签页同时播放');
         await tester.ensureVisible(toggle);
         await tester.pumpAndSettle();
-        expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+        expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
         expect(
           tester.widget<SwitchListTile>(toggle).onChanged != null,
           mode == WorkspaceNavigationMode.multipleTabs,
@@ -430,7 +430,7 @@ void main() {
         if (mode == WorkspaceNavigationMode.singlePage) {
           await tester.tap(toggle);
           await tester.pumpAndSettle();
-          expect(repository.settings.allowConcurrentPlayback, isTrue);
+          expect(repository.settings.allowConcurrentPlayback, isFalse);
           await controller.setNavigationMode(
             WorkspaceNavigationMode.multipleTabs,
           );
@@ -438,11 +438,11 @@ void main() {
         }
         await tester.tap(toggle);
         await tester.pumpAndSettle();
-        expect(repository.settings.allowConcurrentPlayback, isFalse);
+        expect(repository.settings.allowConcurrentPlayback, isTrue);
         await controller.setNavigationMode(WorkspaceNavigationMode.singlePage);
         await tester.pumpAndSettle();
         expect(tester.widget<SwitchListTile>(toggle).onChanged, isNull);
-        expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+        expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
         await controller.setNavigationMode(
           WorkspaceNavigationMode.multipleTabs,
         );
@@ -450,7 +450,7 @@ void main() {
         container.invalidate(settingsControllerProvider);
         await tester.pumpAndSettle();
         expect(tester.widget<SwitchListTile>(toggle).onChanged, isNotNull);
-        expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+        expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
         expect(tester.takeException(), isNull);
       },
     );

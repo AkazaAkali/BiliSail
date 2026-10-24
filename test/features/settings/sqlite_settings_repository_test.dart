@@ -447,6 +447,7 @@ void main() {
     expect(reloaded.theme, AppThemePreference.dark);
   });
   test('concurrent playback migrates with compatible defaults and retains its preference', () async {
+    expect((await repository.load()).allowConcurrentPlayback, isFalse);
     for (final oldValue in [null, 'false', 0, false, true]) {
       await database.writeSetting(
         'preferences.v1',
@@ -458,7 +459,7 @@ void main() {
         }),
       );
       final loaded = await repository.load();
-      final allowed = oldValue is bool ? oldValue : true;
+      final allowed = oldValue is bool ? oldValue : false;
       expect(loaded.allowConcurrentPlayback, allowed);
       expect(loaded.concurrentPlaybackEnabled, isFalse);
       expect(loaded.theme, AppThemePreference.dark);

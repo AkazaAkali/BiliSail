@@ -60,7 +60,7 @@ class SqliteSettingsRepository implements SettingsRepository {
               .firstOrNull ??
           defaultNavigationMode,
       shortcuts: ShortcutSettings.fromJson(decoded['shortcuts']),
-      allowConcurrentPlayback: boolean('allowConcurrentPlayback', true),
+      allowConcurrentPlayback: boolean('allowConcurrentPlayback', false),
       cacheImages: boolean('cacheImages', true),
       wheelDampingRatio: number('wheelDampingRatio', 1.3),
       systemFontFamily: decoded['systemFontFamily'] is String
