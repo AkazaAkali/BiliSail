@@ -587,6 +587,100 @@ void main() {
     expect(await controller.send('x'), true);
   });
   test(
+    'pagination forwards opaque cursors and resets them on sort and refresh',
+    () async {
+      repo.nextCursor = 'opaque-first';
+      await controller.load(refresh: true);
+      expect(state().nextCursor, 'opaque-first');
+      expect(repo.cursors.last, isNull);
+      repo.nextCursor = 'opaque-second';
+      await controller.load();
+      expect(repo.cursors.last, 'opaque-first');
+      expect(state().nextCursor, 'opaque-second');
+      await controller.load(sort: CommentSort.latest);
+      expect(repo.cursors.last, isNull);
+      expect(state().page, 1);
+      await controller.load(refresh: true);
+      expect(repo.cursors.last, isNull);
+      repo.nextCursor = null;
+      repo.empty = true;
+      await controller.load();
+      expect(state().nextCursor, isNull);
+      expect(state().hasMore, false);
+    },
+  );
+  test('repeated cursor pages stop when they add no new comments', () async {
+    repo.nextCursor = 'same';
+    await controller.load(refresh: true);
+    expect(state().hasMore, true);
+    repo.items = [child];
+    await controller.load();
+    expect(state().hasMore, true);
+    expect(state().items, hasLength(2));
+    await controller.load();
+    expect(state().hasMore, false);
+    final reads = repo.pages.length;
+    await controller.load();
+    expect(repo.pages, hasLength(reads));
+  });
+  test(
+    'restricted submissions retain the entry and explain visibility',
+    () async {
+      repo.sentVisibility = CommentVisibility.restricted;
+      repo.submissionMessage = '发送成功';
+      expect(await controller.send('fixture'), true);
+      expect(state().items.first.visibility, CommentVisibility.restricted);
+      expect(state().message, '评论已提交，暂未公开，请稍后查看');
+      expect(state().uncertain, isEmpty);
+      await controller.openReplies(root);
+      expect(await controller.send('reply fixture'), true);
+      expect(state().message, '回复已提交，暂未公开，请稍后查看');
+      expect(repo.writes, 2);
+    },
+  );
+  test('normal submissions keep server feedback and absent state stays unconfirmed', () async {
+    repo.sentVisibility = CommentVisibility.normal;
+    repo.submissionMessage = '评论已收到';
+    expect(await controller.send('fixture'), true);
+    expect(state().message, '评论已收到');
+    repo.submissionMessage = null;
+    expect(await controller.send('fixture'), true);
+    expect(state().message, '评论已发送');
+    repo.sentVisibility = CommentVisibility.unknown;
+    expect(await controller.send('fixture'), true);
+    expect(state().message, '评论已提交，请刷新确认显示状态');
+  });
+  testWidgets('restricted comment stays labelled after a server refresh', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(body: VideoCommentsPanel(detail: _detail)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    repo.sentVisibility = CommentVisibility.restricted;
+    await tester.enterText(find.byType(TextField), '尚未公开的评论');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('发布'));
+    await tester.pumpAndSettle();
+    expect(find.text('评论已提交，暂未公开，请稍后查看'), findsOneWidget);
+    expect(find.text('暂未公开'), findsOneWidget);
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      isEmpty,
+    );
+    repo.items = state().items;
+    await tester.tap(find.byTooltip('刷新评论'));
+    await tester.pumpAndSettle();
+    expect(find.text('尚未公开的评论'), findsOneWidget);
+    expect(find.text('暂未公开'), findsOneWidget);
+    expect(repo.writes, 1);
+  });
+  test(
     'busy prevents duplicate likes; confirmed success updates count',
     () async {
       repo.writePending = Completer<void>();
@@ -1058,6 +1152,9 @@ class _Repo implements VideoCommentsRepository, CommentEmotesRepository {
   int epoch = 0, writes = 0;
   bool empty = false;
   final pages = <int>[];
+  final cursors = <String?>[];
+  String? nextCursor, submissionMessage;
+  CommentVisibility sentVisibility = CommentVisibility.unknown;
   CommentSort? sort;
   String? sentRoot, sentParent, sentText;
   Object? failure;
@@ -1072,12 +1169,19 @@ class _Repo implements VideoCommentsRepository, CommentEmotesRepository {
     String aid,
     int page,
     CommentSort selected,
-    RequestCancellation cancellation,
-  ) async {
+    RequestCancellation cancellation, {
+    String? cursor,
+  }) async {
     pages.add(page);
+    cursors.add(cursor);
     sort = selected;
     if (pending != null) return pending!.future;
-    return CommentPage(items: empty ? [] : items, hasMore: true, totalCount: 4);
+    return CommentPage(
+      items: empty ? [] : items,
+      hasMore: true,
+      totalCount: 4,
+      nextCursor: nextCursor,
+    );
   }
 
   @override
@@ -1119,6 +1223,8 @@ class _Repo implements VideoCommentsRepository, CommentEmotesRepository {
       id: '12',
       author: '我',
       message: message,
+      visibility: sentVisibility,
+      submissionMessage: submissionMessage,
       rootId: rootId,
       parentId: parentId,
     );

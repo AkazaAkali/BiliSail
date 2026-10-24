@@ -92,3 +92,22 @@ macOS 在对应主机设置同一环境变量并用 `-d macos` 执行。
 - 按 `bili_mux` README 准备 Windows 原生资产后，`flutter build windows --release --no-pub` 成功（51.4 秒）。运行入口为 `build/windows/x64/runner/Release/bilisail.exe`，分发须保留整个 Release 目录；未替换已安装应用或执行人工长时间播放验收。日志为 `build/black-screen-release.log`。
 
 本轮没有访问真实账号、修改相邻 fork 或升级依赖。低概率线上故障、macOS/Android 原生执行和实机画面仍需验证，不能由 Windows 受控故障推导三端已验收。
+
+## 2026-10-24 音频解码失败复用有界备用恢复
+
+此前 `PlaybackSession` 的备用循环只包含 `engine.open(play: false)`，外部音轨已选中但首次 `engine.play()` 无法解码音频时，只会报错。现在共享会话将首次音频准备接入同一次解析的恢复状态，普通视频、影视和离线 DASH 共用该路径，播放器契约及原生实现不变。
+
+- 媒体打开失败与首次音频解码失败共用最多两次打开额度。已经因打开失败用过备用时，后续音频失败不会再开第三次；没有备用地址或故障不属于 `nativePlayback` 时直接报错。备用仍来自原响应，视频和音频分别选择，只有音频有备用时保留原视频地址，不新增 playurl 刷新或额外循环。
+- 原生打开及首次音频准备累计共享 35 秒；有备用地址的首轮打开与音频准备共用 6 秒。暂停打开保留剩余额度与预算，首次播放前的用户暂停时间不计入累计。音频成功解码后结束这次启动恢复，不把后续暂停/播放当作新的自动重试机会。
+- 解码失败或等待超时后，先 stop 旧 generation 并等待释放，再在同一 engine 打开备用成对轨道；Dart Future 超时不会被当作底层命令已取消。超时耗尽同样 stop，迟到解码结果不能恢复旧源。恢复使用已确认进度、当前倍速和音量，按最新播放意图与播放许可决定是否继续；用户暂停或被标签互斥暂停时保持暂停。
+- 每一步沿用 source generation、取消、关闭、账号 scope 和 session epoch 检查。恢复中的临时失败不直接写入页面错误，最终失败才交回既有错误提示与手动重新加载入口。
+
+自动回归使用 fake engine/repository 和可控时钟，覆盖立即/暂停后首次播放恢复、仅音频备用与 PGC 身份、累计预算及超时、打开和解码混合失败不超过两次、无备用/不可恢复错误、恢复时暂停/许可变化，以及 stop/close/换源/账号切换/epoch 变化后的旧失败隔离。用例位于 [playback_session_test.dart](../../test/features/playback/playback_session_test.dart)。
+
+本项只处理首次播放明确报告的音频解码失败及准备超时，没有添加持续的可听音频输出检测；正常进度继续但突然无声仍不能由此保证自动发现。按用户要求只运行自动检查，不构建应用或执行原生/实机验收；Windows、Android、macOS 实际声音、故障线路恢复与体验由后续运行构建确认。
+
+本轮验证结果：
+
+- 新增 17 项会话行为回归，包含音频解码成功后的暂停命令失败不能误用备用额度；完整 `playback_session_test.dart` 191 项通过。日志 `build/audio-recovery-session.log`。
+- `tool/check.ps1 -SkipPub` 最终通过：根应用 2025、API 434、播放器 81、弹幕 93、mux 2，共 2635 项通过；格式、静态分析及打包边界脚本通过。mux 另有 10 项因未设置 `BILI_MUX_LIBRARY` 跳过，不计作原生验证。日志 `build/audio-recovery-check-final.log`。
+- 两份播放文档的本地相对链接及本任务 `git diff --check` 通过。工作区同期评论相关改动保留；未修改播放器包、依赖或锁文件，未找到可热重载的调试进程。

@@ -28,6 +28,12 @@ final class ApiCommentsRepository
     author: v.author,
     authorId: UserId.tryParse(v.authorMid),
     message: v.message,
+    visibility: v.invisible || (v.state != null && v.state != 0)
+        ? CommentVisibility.restricted
+        : v.state == 0
+        ? CommentVisibility.normal
+        : CommentVisibility.unknown,
+    submissionMessage: v.submissionMessage,
     level: v.level,
     verifyType: v.verifyType,
     vipLabel: v.vipLabel,
@@ -57,6 +63,7 @@ final class ApiCommentsRepository
     items: List.unmodifiable(p.items.map(_entry)),
     hasMore: p.hasMore,
     totalCount: p.totalCount,
+    nextCursor: p.nextCursor,
   );
   @override
   Future<List<CommentEmotePackage>> emotes(RequestCancellation cancellation) =>
@@ -78,18 +85,28 @@ final class ApiCommentsRepository
     String oid,
     int page,
     CommentSort sort,
-    RequestCancellation cancellation,
-  ) => requests.run(
+    RequestCancellation cancellation, {
+    String? cursor,
+  }) => requests.run(
     (ctx) async => _page(
-      await api.getVideoComments(
-        oid,
-        commentType: type.value,
-        page: page,
-        sort: sort == CommentSort.hot
-            ? ApiCommentSort.hot
-            : ApiCommentSort.latest,
-        context: ctx,
-      ),
+      type == CommentTargetType.video
+          ? await api.getVideoCommentsByCursor(
+              oid,
+              cursor: cursor,
+              sort: sort == CommentSort.hot
+                  ? ApiCommentSort.hot
+                  : ApiCommentSort.latest,
+              context: ctx,
+            )
+          : await api.getVideoComments(
+              oid,
+              commentType: type.value,
+              page: page,
+              sort: sort == CommentSort.hot
+                  ? ApiCommentSort.hot
+                  : ApiCommentSort.latest,
+              context: ctx,
+            ),
     ),
     cancellation: cancellation,
   );

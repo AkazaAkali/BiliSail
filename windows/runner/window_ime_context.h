@@ -34,6 +34,7 @@ class WindowImeContext {
 
   static InputState ReadState(HWND window) noexcept;
   static void ReadProfile(InputState& state) noexcept;
+  static void ReadThreadState(InputState& state) noexcept;
   static bool SameProfile(const InputState& left,
                           const InputState& right) noexcept;
   static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam,

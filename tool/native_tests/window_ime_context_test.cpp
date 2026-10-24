@@ -1,7 +1,12 @@
 #include "window_ime_context.h"
 
+#include <msctf.h>
+#include <wrl/client.h>
+
 #include <cstdlib>
 #include <iostream>
+#include <string>
+#include <vector>
 
 namespace {
 void Check(bool condition, const char* description) {
@@ -18,6 +23,8 @@ HIMC Context(HWND window) {
 }
 bool blur_seen = false;
 HIMC context_at_blur = nullptr;
+HIMC watched_default_context = nullptr;
+bool default_context_activated = false;
 
 LRESULT CALLBACK TestWindowProc(HWND window, UINT message, WPARAM wparam,
                                 LPARAM lparam) {
@@ -25,11 +32,121 @@ LRESULT CALLBACK TestWindowProc(HWND window, UINT message, WPARAM wparam,
     blur_seen = true;
     context_at_blur = Context(window);
   }
+  if (message == WM_IME_SETCONTEXT && wparam && watched_default_context &&
+      Context(window) == watched_default_context) {
+    default_context_activated = true;
+  }
   return DefWindowProcW(window, message, wparam, lparam);
+}
+
+void PumpMessages() {
+  const ULONGLONG until = GetTickCount64() + 100;
+  do {
+    MSG message{};
+    while (GetTickCount64() < until &&
+           PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+      TranslateMessage(&message);
+      DispatchMessageW(&message);
+    }
+    MsgWaitForMultipleObjects(0, nullptr, FALSE, 10, QS_ALLINPUT);
+  } while (GetTickCount64() < until);
+}
+
+void CheckRealProfiles(HWND window, HWND other) {
+  Microsoft::WRL::ComPtr<ITfInputProcessorProfileMgr> profiles;
+  Check(SUCCEEDED(CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr,
+                                   CLSCTX_INPROC_SERVER,
+                                   IID_PPV_ARGS(&profiles))),
+        "obtain profile manager for opt-in real IME checks");
+  Microsoft::WRL::ComPtr<ITfInputProcessorProfiles> descriptions;
+  Check(SUCCEEDED(profiles.As(&descriptions)), "obtain profile descriptions");
+  Microsoft::WRL::ComPtr<IEnumTfInputProcessorProfiles> entries;
+  Check(SUCCEEDED(profiles->EnumProfiles(0x0804, &entries)),
+        "enumerate Chinese IME profiles");
+  std::vector<TF_INPUTPROCESSORPROFILE> chosen;
+  TF_INPUTPROCESSORPROFILE entry{};
+  ULONG fetched = 0;
+  while (entries->Next(1, &entry, &fetched) == S_OK) {
+    if (entry.dwProfileType != TF_PROFILETYPE_INPUTPROCESSOR ||
+        !(entry.dwFlags & TF_IPP_FLAG_ENABLED)) {
+      continue;
+    }
+    BSTR description = nullptr;
+    if (FAILED(descriptions->GetLanguageProfileDescription(
+            entry.clsid, entry.langid, entry.guidProfile, &description))) {
+      continue;
+    }
+    const std::wstring name = description ? description : L"";
+    SysFreeString(description);
+    // Explicitly opt into these locally installed services; no registry or
+    // default-input settings are changed, and no account/network is involved.
+    if (name == L"\u5fae\u4fe1\u8f93\u5165\u6cd5" ||
+        name == L"\u5fae\u8f6f\u62fc\u97f3") {
+      chosen.push_back(entry);
+    }
+  }
+  Check(chosen.size() == 2,
+        "real-profile checks require enabled WeChat and Microsoft Pinyin");
+  TF_INPUTPROCESSORPROFILE original{};
+  Check(profiles->GetActiveProfile(GUID_TFCAT_TIP_KEYBOARD, &original) == S_OK,
+        "save this test process's active profile");
+  const auto activate = [&](const TF_INPUTPROCESSORPROFILE& profile) {
+    Check(profiles->ActivateProfile(profile.dwProfileType, profile.langid,
+                                    profile.clsid, profile.guidProfile,
+                                    profile.hkl, TF_IPPMF_FORPROCESS) == S_OK,
+          "activate profile in this test process only");
+  };
+  const auto check_profile = [&](const TF_INPUTPROCESSORPROFILE& expected) {
+    TF_INPUTPROCESSORPROFILE actual{};
+    Check(
+        profiles->GetActiveProfile(GUID_TFCAT_TIP_KEYBOARD, &actual) == S_OK &&
+            IsEqualGUID(expected.clsid, actual.clsid) &&
+            IsEqualGUID(expected.guidProfile, actual.guidProfile),
+        "user-selected real IME remains active");
+  };
+  SetFocus(window);
+  const HIMC default_context = Context(window);
+  {
+    WindowImeContext policy(window);
+    for (int round = 0; round < 3; ++round) {
+      for (const auto& profile : chosen) {
+        Check(policy.SetActive(false), "leave editor before profile switch");
+        activate(profile);
+        PumpMessages();
+        check_profile(profile);
+        watched_default_context = default_context;
+        default_context_activated = false;
+        Check(policy.SetActive(true), "enter editor after real profile switch");
+        Check(!default_context_activated,
+              "real profile restore has no thread-default activation");
+        watched_default_context = nullptr;
+        PumpMessages();
+        check_profile(profile);
+        const HIMC editing_context = Context(window);
+        Check(editing_context != nullptr,
+              "real profile has an editing context");
+        Check(policy.SetActive(true), "reapply policy after real switch");
+        Check(Context(window) == editing_context,
+              "reapplying policy preserves the real IME composition context");
+        SetFocus(other);
+        PumpMessages();
+        SetFocus(window);
+        PumpMessages();
+        check_profile(profile);
+      }
+    }
+  }
+  activate(original);
+  std::cout << "PASS: real WeChat/Microsoft profile switching, editor restore, "
+               "native refocus (process scope only)\n";
 }
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+  const bool real_profiles =
+      argc == 2 && std::string(argv[1]) == "--real-profiles";
+  Check(argc == 1 || real_profiles,
+        "usage: window_ime_context_test [--real-profiles]");
   const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   WNDCLASSW definition{};
   definition.lpfnWndProc = TestWindowProc;
@@ -58,7 +175,12 @@ int main() {
     Check(GetKeyboardLayout(0) == layout, "input language is preserved");
     Check(ImmGetOpenStatus(context) == open, "conversion mode is preserved");
     Check(policy.SetActive(false), "repeated detach");
+    watched_default_context = context;
+    default_context_activated = false;
     Check(policy.SetActive(true), "restore IME inside editor");
+    Check(!default_context_activated,
+          "editor restore must not activate the detached thread default");
+    watched_default_context = nullptr;
     const HIMC editing_context = Context(window);
     Check(editing_context != nullptr && editing_context != context,
           "editing owns a context distinct from the stale thread default");
@@ -124,6 +246,9 @@ int main() {
           "detach newly associated context outside editor");
   }
   Check(Context(window) == context, "destruction restores the default context");
+  if (real_profiles) {
+    CheckRealProfiles(window, other);
+  }
   {
     WindowImeContext policy(window);
     policy.SetActive(false);

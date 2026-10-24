@@ -84,6 +84,31 @@ void main() {
   });
 
   test(
+    'comment submission preserves server visibility and toast without replay',
+    () async {
+      final transport = _Transport()
+        ..result = response({
+          'success_toast': '评论正在处理中',
+          'reply': {
+            'rpid_str': '9007199254740994',
+            'member': {'uname': 'Fixture'},
+            'content': {'message': 'fixture'},
+            'state': 17,
+            'invisible': true,
+          },
+        });
+      final result = await BiliApiClient(
+        transport: transport,
+        cookieJar: cookies(),
+      ).addVideoComment('42', 'fixture');
+      expect(result.state, 17);
+      expect(result.invisible, true);
+      expect(result.submissionMessage, '评论正在处理中');
+      expect(transport.posts, 1);
+    },
+  );
+
+  test(
     'CSRF comes from scoped cookie jar and caller cannot override it',
     () async {
       final transport = _Transport();

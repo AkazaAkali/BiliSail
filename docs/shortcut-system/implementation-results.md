@@ -105,6 +105,20 @@ AppInputHost 同时要求窗口、生命周期有效且存在可编辑焦点，�
 
 上述结果包含自动按键经过真实微信输入法的候选／组合检查及用户复测反馈，不等于所有输入法、长时间后台、Win+Space 切换和原生 WebView 场景已逐项完成验收。Android／macOS 本轮未构建或实机验证。直接原生消息注入仍只证明消息路径，不能替代真实输入法验收。
 
+### 切换输入法时避免激活旧默认上下文（2026-10-24）
+
+用户反馈选择微信输入法后返回微软输入法，快捷键和任务栏选择均可能失败。本轮核对发现：新编辑区间在创建独立 HIMC 之前，仍会先用 `IACE_DEFAULT` 临时关联线程默认上下文，以读取输入模式。新增原生回归观察 `WM_IME_SETCONTEXT`，在修复前确认恢复输入框时确实激活了默认 HIMC；现有独立编辑上下文并没有消除这个中间激活步骤。它会让旧默认会话参与刚选择的输入法恢复，不应依赖该路径获取新输入法的状态。
+
+[WindowImeContext](../../windows/runner/window_ime_context.cpp) 现在直接创建并关联新编辑上下文。已保存的打开／转换模式只用于相同 HKL、CLSID 和 profile GUID；切换到其他 profile 时只读当前线程已有 TSF manager 的打开／转换模式，不创建或激活 TSF manager，也不临时恢复默认 HIMC。关联后再次核对 profile，防止同步重入期间输入法改变后回写旧模式。当前编辑区间的上下文继续保留，不增加每次按键的重建或输入法监听，不主动选择微信／微软或修改系统默认输入法。销毁适配器时恢复系统默认关联的清理行为保留。
+
+原生回归增加“恢复编辑器期间不激活线程默认上下文”的行为检查。`tool/test-windows-ime.ps1 -NativeOnly -RealImeProfiles` 显式启用本机已安装的微信输入法／微软拼音检查：仅用 `TF_IPPMF_FORPROCESS` 在测试进程内反复切换，核对进入编辑器、重复同步及原生失焦／重新聚焦后的实际 CLSID／profile GUID，退出前恢复测试进程原来的 profile；不修改注册表或用户默认输入法。普通检查不要求安装这两种输入法。
+
+验证结果：修复前新增的“不激活线程默认上下文”断言失败，修复后原生回归及显式启用的真实微信／微软 profile 检查通过；最终日志为 `build/ime-test/native-profiles-final-20261024.log`。`tool/check.ps1 -SkipPub` 通过根应用和四个包的格式、静态分析及 2,635 项测试（根应用 2,025、bili_api 434、bili_player 81、bili_danmaku 93、bili_mux 2）；未配置 `BILI_MUX_LIBRARY` 的 10 项原生封装测试按配置跳过。日志为 `build/ime-test/check-20261024.log`。
+
+Windows 集成首轮在标点命令断言中收到空列表，保留 `build/ime-test/integration-20261024.log`；测试补充原生按键及分发原因的失败诊断后，复跑 1 项通过，见 `build/ime-test/integration-retry-20261024.log`。首轮失败原因未确认，不归因于输入法回退。补充诊断后的格式与 `flutter analyze` 通过。`flutter build windows --release --no-pub -t lib/main.dart` 通过，产物为 `build/windows/x64/runner/Release/bilisail.exe`，日志为 `build/ime-test/release-20261024.log`；既有 WebView CMP0175 警告未阻止构建。系统安装的 1.1.1+3 未被替换。
+
+尚未捕获同一故障窗口由微信 profile 变回微软 profile 的连续轨迹；修复针对已确认的默认上下文中间激活缺陷。两轮安装版的只读采样均没有收到测试按键，不能作为故障已复现或修复成功的证据。真实候选／提交、长时间后台和原生 WebView 仍待修复构建中的实际验证，不将 profile API 检查当作完整实键验收。Android／macOS 本轮未构建或实机验证。
+
 ## 页面刷新
 
 刷新只归活动页面，进行中重复触发合并；播放器不再独立解释 F5／侧键为 retry。首页保留频道，搜索使用 refresh 保留当前筛选，历史、消息、下载、用户页调用各自刷新。UGC 复用相关推荐／标签刷新与本页播放重试组合；PGC 先重新加载剧集，同一选择与源代次稳定才重试，变更选集由原激活路径开源；直播由房间 controller.load 驱动目标，不另发 retry。离线保留本地源 retry；设置等无能力页不注册空回调。页面销毁／账号和 source generation 继续由已有控制器及会话隔离。

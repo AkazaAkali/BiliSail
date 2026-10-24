@@ -471,6 +471,64 @@ final class BiliApiClient {
     context: context,
   );
 
+  Future<ApiPage<ApiVideoComment>> getVideoCommentsByCursor(
+    String aid, {
+    String? cursor,
+    ApiCommentSort sort = ApiCommentSort.hot,
+    ApiRequestContext? context,
+  }) async {
+    _validateCommentId(aid);
+    if (cursor != null && (cursor.isEmpty || cursor.length > 4096)) {
+      throw ArgumentError.value(cursor, 'cursor');
+    }
+    const endpoint = 'video_comments';
+    final data = await _wbiJson(
+      '/x/v2/reply/wbi/main',
+      {
+        'oid': aid,
+        'type': '1',
+        'mode': sort == ApiCommentSort.hot ? '3' : '2',
+        'pagination_str': jsonEncode({'offset': cursor ?? ''}),
+        'ps': '20',
+        'plat': '1',
+        'web_location': '1315875',
+      },
+      endpoint,
+      context,
+    );
+    final values = <Object?>[
+      if (cursor == null) ...[
+        ..._list(data['top_replies'] ?? const [], endpoint),
+        if (_optionalMap(data['upper'])?['top']
+            case final Map<String, Object?> top)
+          top,
+      ],
+      ..._list(data['replies'] ?? const [], endpoint),
+    ];
+    final items = <ApiVideoComment>[];
+    final seen = <String>{};
+    for (final value in values.take(100)) {
+      final entry = _comment(_map(value, endpoint), endpoint);
+      if (seen.add(entry.id)) items.add(entry);
+    }
+    final paging = _map(data['cursor'], endpoint);
+    final isEnd = _bool(paging['is_end']);
+    if (isEnd == null) {
+      throw const ApiFailure(ApiFailureCategory.protocol, endpoint);
+    }
+    final hasMore = !isEnd && items.isNotEmpty;
+    final next = _optionalMap(paging['pagination_reply'])?['next_offset'];
+    if (hasMore && (next is! String || next.isEmpty || next.length > 4096)) {
+      throw const ApiFailure(ApiFailureCategory.protocol, endpoint);
+    }
+    return ApiPage(
+      List.unmodifiable(items),
+      hasMore: hasMore,
+      nextCursor: hasMore ? next as String : null,
+      totalCount: _count(paging['all_count']),
+    );
+  }
+
   Future<ApiPage<ApiVideoComment>> getVideoReplies(
     String aid,
     String rootId, {
@@ -551,6 +609,7 @@ final class BiliApiClient {
     Map<String, Object?> entry,
     String endpoint, {
     int depth = 0,
+    String? submissionMessage,
   }) {
     final member = _map(entry['member'], endpoint);
     final content = _map(entry['content'], endpoint);
@@ -567,6 +626,9 @@ final class BiliApiClient {
       id: _id(entry['rpid_str'] ?? entry['rpid'], endpoint),
       author: _requiredString(member['uname'], endpoint),
       authorMid: _userMid(member['mid']),
+      state: _int(entry['state']),
+      invisible: _bool(entry['invisible']) ?? false,
+      submissionMessage: submissionMessage,
       avatarUrl: _commentImage(member['avatar']),
       level: _int(_commentMap(member['level_info'])['current_level']),
       verifyType: _int(_commentMap(member['official_verify'])['type']),
@@ -771,7 +833,11 @@ final class BiliApiClient {
       }, context: context),
       'comment_add',
     );
-    return _comment(_map(data['reply'], 'comment_add'), 'comment_add');
+    return _comment(
+      _map(data['reply'], 'comment_add'),
+      'comment_add',
+      submissionMessage: _text(data['success_toast'])?.trim(),
+    );
   }
 
   static void _validateCommentType(int type) {

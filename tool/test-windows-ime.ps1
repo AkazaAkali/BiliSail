@@ -1,4 +1,4 @@
-param([switch]$NativeOnly)
+param([switch]$NativeOnly, [switch]$RealImeProfiles)
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $output = Join-Path $repoRoot 'build/ime-test'
@@ -15,11 +15,13 @@ $compileScript = Join-Path $output 'compile-test.cmd'
 @echo off
 call "$environment" >nul
 if errorlevel 1 exit /b 1
-cl /nologo /std:c++17 /EHsc /W4 /WX /MT /I"$include" "$test" "$implementation" /Fo"$output/" /Fe"$output/window_ime_context_test.exe" /link user32.lib imm32.lib comctl32.lib ole32.lib uuid.lib
+cl /nologo /std:c++17 /EHsc /W4 /WX /MT /I"$include" "$test" "$implementation" /Fo"$output/" /Fe"$output/window_ime_context_test.exe" /link user32.lib imm32.lib comctl32.lib ole32.lib oleaut32.lib uuid.lib
 "@ | Set-Content -LiteralPath $compileScript -Encoding utf8
 & cmd /d /c $compileScript
 if ($LASTEXITCODE -ne 0) { throw 'Native IME test compilation failed.' }
-& "$output/window_ime_context_test.exe"
+$nativeArgs = @()
+if ($RealImeProfiles) { $nativeArgs += '--real-profiles' }
+& "$output/window_ime_context_test.exe" @nativeArgs
 if ($LASTEXITCODE -ne 0) { throw 'Native IME tests failed.' }
 if (!$NativeOnly) {
   Push-Location $repoRoot

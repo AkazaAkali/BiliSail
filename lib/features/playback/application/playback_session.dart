@@ -45,6 +45,7 @@ class PlaybackSession extends ChangeNotifier {
     int Function()? sessionEpoch,
     Duration Function()? historyNow,
     Duration Function()? danmakuNow,
+    this.startupNow,
     PlaybackRateMemory? rateMemory,
     PlaybackVolumeMemory? volumeMemory,
     PlaybackStartupDiagnostics? startupDiagnostics,
@@ -85,7 +86,8 @@ class PlaybackSession extends ChangeNotifier {
     _subscriptions.add(
       engine.failures.listen((failure) {
         if (failure.generation != engine.currentSnapshot.generation ||
-            _resolving) {
+            _resolving ||
+            _audioRecovery?.preparing == true) {
           return;
         }
         error = failure.message;
@@ -128,6 +130,8 @@ class PlaybackSession extends ChangeNotifier {
   int _epoch = 0;
   final String Function() accountScope;
   final _clock = Stopwatch();
+  final Duration Function()? startupNow;
+  _PlaybackStartupRecovery? _audioRecovery;
   final _subscriptions = <StreamSubscription<Object?>>[];
   final _owners = <Object>{};
   final _checkpoints = <Object, _PlaybackCheckpoint>{};
@@ -585,6 +589,7 @@ class PlaybackSession extends ChangeNotifier {
       return;
     }
     final generation = ++_generation;
+    _audioRecovery = null;
     // Capture source settings together; a preference change during resolution
     // applies to the next open rather than half of this source generation.
     final preferredCodec = _settings.preferredVideoCodec;
@@ -816,87 +821,107 @@ class PlaybackSession extends ChangeNotifier {
           ? null
           : backupMediaCdnUrl(audio.urls, mediaCdn);
       final hasBackup = videoBackup != null || audioBackup != null;
-      final openingWatch = Stopwatch()..start();
-      const totalOpenBudget = Duration(seconds: 35);
+      final recovery = _PlaybackStartupRecovery(
+        now: startupNow ?? () => _clock.elapsed,
+        hasBackup: hasBackup,
+        isCurrent: isCurrent,
+      )..start();
       var openedLiveLine = liveLineIndex;
       // At most two opens in one resolution, using only server-provided backups.
-      for (var attempt = 0; attempt < 2; attempt++) {
-        if (!isCurrent()) return;
-        final remaining = isLive || !hasBackup
-            ? totalOpenBudget
-            : totalOpenBudget - openingWatch.elapsed;
-        if (remaining <= Duration.zero) break;
-        // Leave time for a different returned CDN when the primary stalls.
-        // Single-URL and live sources retain their existing startup budget.
-        final attemptBudget =
-            !isLive &&
-                hasBackup &&
-                attempt == 0 &&
-                remaining > const Duration(seconds: 6)
-            ? const Duration(seconds: 6)
-            : remaining;
-        final videoUri = attempt == 0
-            ? videoPrimary
-            : videoBackup ?? videoPrimary;
-        final audioUri = audio == null
-            ? null
-            : attempt == 0
-            ? audio.urls.first
-            : audioBackup ?? audio.urls.first;
-        try {
-          await startupDiagnostics.measure(
-            generation,
-            PlaybackStartupStage.nativeOpen,
-            () => engine.open(
-              resolved.kind == PlaybackMediaKind.liveHls
-                  ? ManifestSource(
-                      MediaTrack(uri: videoUri, requestPolicy: policy),
-                      isLive: true,
-                    )
-                  : resolved.kind == PlaybackMediaKind.liveFlv ||
-                        resolved.kind == PlaybackMediaKind.progressive
-                  ? ProgressiveSource(
-                      MediaTrack(uri: videoUri, requestPolicy: policy),
-                    )
-                  : DashPairSource(
-                      video: MediaTrack(
-                        uri: videoUri,
-                        requestPolicy: policy,
-                        codec: resolved.video.codec,
-                        bandwidth: resolved.video.bandwidth,
+      Future<void> openMedia(PlaybackSnapshot? checkpoint) async {
+        for (; recovery.attempts < 2;) {
+          if (!isCurrent()) return;
+          final remaining = isLive || !hasBackup
+              ? _PlaybackStartupRecovery.totalBudget
+              : recovery.totalRemaining;
+          if (remaining <= Duration.zero) {
+            throw PlayerFailure(
+              PlayerFailureKind.nativePlayback,
+              'Playback preparation timed out.',
+              engine.currentSnapshot.generation,
+            );
+          }
+          final attempt = recovery.attempts++;
+          // Leave time for a different returned CDN when the primary stalls.
+          // Single-URL and live sources retain their existing startup budget.
+          final attemptBudget =
+              !isLive &&
+                  hasBackup &&
+                  attempt == 0 &&
+                  remaining > _PlaybackStartupRecovery.primaryBudget
+              ? _PlaybackStartupRecovery.primaryBudget
+              : remaining;
+          final videoUri = attempt == 0
+              ? videoPrimary
+              : videoBackup ?? videoPrimary;
+          final audioUri = audio == null
+              ? null
+              : attempt == 0
+              ? audio.urls.first
+              : audioBackup ?? audio.urls.first;
+          try {
+            await startupDiagnostics.measure(
+              generation,
+              PlaybackStartupStage.nativeOpen,
+              () => engine.open(
+                resolved.kind == PlaybackMediaKind.liveHls
+                    ? ManifestSource(
+                        MediaTrack(uri: videoUri, requestPolicy: policy),
+                        isLive: true,
+                      )
+                    : resolved.kind == PlaybackMediaKind.liveFlv ||
+                          resolved.kind == PlaybackMediaKind.progressive
+                    ? ProgressiveSource(
+                        MediaTrack(uri: videoUri, requestPolicy: policy),
+                      )
+                    : DashPairSource(
+                        video: MediaTrack(
+                          uri: videoUri,
+                          requestPolicy: policy,
+                          codec: resolved.video.codec,
+                          bandwidth: resolved.video.bandwidth,
+                        ),
+                        audio: audio == null || audioUri == null
+                            ? null
+                            : MediaTrack(
+                                uri: audioUri,
+                                requestPolicy: policy,
+                                codec: audio.codec,
+                                bandwidth: audio.bandwidth,
+                              ),
                       ),
-                      audio: audio == null || audioUri == null
-                          ? null
-                          : MediaTrack(
-                              uri: audioUri,
-                              requestPolicy: policy,
-                              codec: audio.codec,
-                              bandwidth: audio.bandwidth,
-                            ),
-                    ),
-              OpenOptions(
-                startPosition: resume,
-                play: false,
-                rate: isLive ? 1 : oldRate,
-                volume: oldVolume,
-                audioGainDb: _audioGainFor(resolved),
-                videoDecoding: videoDecoding,
-                openTimeout: attemptBudget,
+                OpenOptions(
+                  startPosition: checkpoint?.position ?? resume,
+                  play: false,
+                  rate: isLive ? 1 : checkpoint?.rate ?? oldRate,
+                  volume: checkpoint?.volume ?? oldVolume,
+                  audioGainDb: _audioGainFor(resolved),
+                  videoDecoding: videoDecoding,
+                  openTimeout: attemptBudget,
+                ),
               ),
-            ),
-          );
-          lastFailure = null;
-          if (isLive) openedLiveLine = resolved.video.urls.indexOf(videoUri);
-          break;
-        } on PlayerFailure catch (failure) {
-          lastFailure = failure;
-          if (!hasBackup || failure.kind != PlayerFailureKind.nativePlayback) {
+            );
+            lastFailure = null;
+            if (isLive) openedLiveLine = resolved.video.urls.indexOf(videoUri);
             break;
+          } on PlayerFailure catch (failure) {
+            lastFailure = failure;
+            if (!hasBackup ||
+                failure.kind != PlayerFailureKind.nativePlayback) {
+              break;
+            }
           }
         }
+        if (lastFailure case final failure?) throw failure;
       }
-      if (lastFailure != null) throw lastFailure;
+
+      recovery.reopen = (checkpoint) => openMedia(checkpoint);
+      await openMedia(null);
+      recovery.stop();
       if (!isCurrent()) return;
+      if (resolved.kind == PlaybackMediaKind.dash && audio != null) {
+        _audioRecovery = recovery;
+      }
       media = resolved;
       if (isLive) {
         _liveLine = openedLiveLine;
@@ -1844,6 +1869,78 @@ class PlaybackSession extends ChangeNotifier {
     return _syncPlayback();
   }
 
+  Future<void> _playWithAudioRecovery() async {
+    final recovery = _audioRecovery;
+    if (recovery == null) {
+      await engine.play();
+      return;
+    }
+    recovery.preparing = true;
+    recovery.start();
+    try {
+      while (recovery.isCurrent()) {
+        if (!_desiredPlaying || !_playbackAllowed) return;
+        try {
+          final remaining = recovery.remaining;
+          if (remaining <= Duration.zero) {
+            throw PlayerFailure(
+              PlayerFailureKind.nativePlayback,
+              'Playback preparation timed out.',
+              engine.currentSnapshot.generation,
+            );
+          }
+          // Future timeout alone cannot cancel native I/O. The backup path
+          // stops this generation before reopening, also interrupting decoding.
+          await engine.play().timeout(
+            remaining,
+            onTimeout: () {
+              throw PlayerFailure(
+                PlayerFailureKind.nativePlayback,
+                'Audio preparation timed out.',
+                engine.currentSnapshot.generation,
+              );
+            },
+          );
+        } on PlayerFailure catch (failure) {
+          if (!recovery.isCurrent()) return;
+          if (failure.kind != PlayerFailureKind.nativePlayback ||
+              !recovery.canRetry) {
+            // Exhausting a deadline must also cancel the underlying command.
+            if (recovery.remaining <= Duration.zero) await engine.stop();
+            rethrow;
+          }
+          final checkpoint = engine.currentSnapshot;
+          _resolving = true;
+          _notify();
+          await engine.stop();
+          if (!recovery.isCurrent()) return;
+          await recovery.reopen(checkpoint);
+          if (!recovery.isCurrent()) return;
+          await _applyAudioGain();
+          if (!recovery.isCurrent()) return;
+          danmaku.seekConfirmed(engine.currentSnapshot.position);
+          _resolving = false;
+          continue;
+        }
+        if (!recovery.isCurrent()) return;
+        _audioRecovery = null;
+        if (!_desiredPlaying || !_playbackAllowed) await engine.pause();
+        return;
+      }
+    } on PlayerFailure {
+      if (!recovery.isCurrent()) return;
+      _audioRecovery = null;
+      rethrow;
+    } finally {
+      recovery.stop();
+      recovery.preparing = false;
+      if (recovery.isCurrent()) {
+        _resolving = false;
+        _notify();
+      }
+    }
+  }
+
   Future<void> _syncPlayback({bool forcePause = false}) {
     final generation = _generation;
     final operation = (_playbackCommands ?? Future<void>.value()).then((
@@ -1857,7 +1954,7 @@ class PlaybackSession extends ChangeNotifier {
         }
       } else if (!_resolving && media != null) {
         if (_desiredPlaying && !engine.currentSnapshot.desiredPlaying) {
-          await engine.play();
+          await _playWithAudioRecovery();
         } else if (!_desiredPlaying &&
             (forcePause || engine.currentSnapshot.desiredPlaying)) {
           await engine.pause();
@@ -2150,6 +2247,7 @@ class PlaybackSession extends ChangeNotifier {
   }
 
   Future<void> stop({bool clearCheckpoints = true}) async {
+    _audioRecovery = null;
     _nextSourceIntent = null;
     if (clearCheckpoints) _checkpoints.clear();
     _activeOwner = null;
@@ -2228,6 +2326,46 @@ class PlaybackSession extends ChangeNotifier {
     if (firstError != null) {
       Error.throwWithStackTrace(firstError!, firstStack!);
     }
+  }
+}
+
+// A resolution owns one opening budget, including the first audio decode.
+// Paused user time is excluded, and a deferred first play keeps the same attempts.
+final class _PlaybackStartupRecovery {
+  static const totalBudget = Duration(seconds: 35);
+  static const primaryBudget = Duration(seconds: 6);
+
+  _PlaybackStartupRecovery({
+    required this.now,
+    required this.hasBackup,
+    required this.isCurrent,
+  });
+
+  final Duration Function() now;
+  final bool hasBackup;
+  final bool Function() isCurrent;
+  late final Future<void> Function(PlaybackSnapshot) reopen;
+  int attempts = 0;
+  bool preparing = false;
+  Duration _elapsed = Duration.zero;
+  Duration? _startedAt;
+
+  Duration get elapsed =>
+      _elapsed +
+      switch (_startedAt) {
+        final started? => now() - started,
+        null => Duration.zero,
+      };
+  Duration get remaining =>
+      (hasBackup && attempts == 1 ? primaryBudget : totalBudget) - elapsed;
+  Duration get totalRemaining => totalBudget - elapsed;
+  bool get canRetry =>
+      hasBackup && attempts < 2 && totalRemaining > Duration.zero;
+
+  void start() => _startedAt ??= now();
+  void stop() {
+    _elapsed = elapsed;
+    _startedAt = null;
   }
 }
 

@@ -3,6 +3,8 @@ import '../../../domain/request_cancellation.dart';
 
 enum CommentSort { hot, latest }
 
+enum CommentVisibility { unknown, normal, restricted }
+
 final class CommentEntry {
   const CommentEntry({
     required this.id,
@@ -30,7 +32,11 @@ final class CommentEntry {
     this.emotes = const {},
     this.mentionedUsers = const {},
     this.pictures = const [],
+    this.visibility = CommentVisibility.unknown,
+    this.submissionMessage,
   });
+  final CommentVisibility visibility;
+  final String? submissionMessage;
   final int? level, verifyType, medalLevel;
   final String? vipLabel, medalName;
   final Uri? decorationImageUrl;
@@ -54,6 +60,8 @@ final class CommentEntry {
     id: id,
     author: author,
     message: message,
+    visibility: visibility,
+    submissionMessage: submissionMessage,
     level: level,
     verifyType: verifyType,
     vipLabel: vipLabel,
@@ -82,6 +90,8 @@ final class CommentEntry {
         id: id,
         author: author,
         message: message,
+        visibility: visibility,
+        submissionMessage: submissionMessage,
         level: level,
         verifyType: verifyType,
         vipLabel: vipLabel,
@@ -112,10 +122,12 @@ final class CommentPage {
     required this.items,
     required this.hasMore,
     this.totalCount,
+    this.nextCursor,
   });
   final List<CommentEntry> items;
   final bool hasMore;
   final int? totalCount;
+  final String? nextCursor;
 }
 
 final class CommentWriteUncertain implements Exception {
@@ -129,8 +141,9 @@ abstract interface class CommentsRepository {
     String oid,
     int page,
     CommentSort sort,
-    RequestCancellation cancellation,
-  );
+    RequestCancellation cancellation, {
+    String? cursor,
+  });
   Future<CommentPage> replies(
     String oid,
     String rootId,

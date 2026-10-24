@@ -344,8 +344,9 @@ class _Comments extends Fake implements CommentsRepository {
     String oid,
     int page,
     CommentSort sort,
-    RequestCancellation cancellation,
-  ) async => const CommentPage(items: [_root], hasMore: false);
+    RequestCancellation cancellation, {
+    String? cursor,
+  }) async => const CommentPage(items: [_root], hasMore: false);
   @override
   Future<CommentPage> replies(
     String oid,

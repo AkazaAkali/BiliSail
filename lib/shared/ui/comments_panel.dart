@@ -821,6 +821,11 @@ class _CommentTile extends StatelessWidget {
                   onOpenLink: onOpenLink,
                   onSeek: onSeek,
                 ),
+                if (c.visibility == CommentVisibility.restricted)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text('暂未公开', style: styles.metadata),
+                  ),
                 Row(
                   children: [
                     IconButton(
@@ -888,6 +893,9 @@ class _CommentTile extends StatelessWidget {
                                         onOpenLink: onOpenLink,
                                         onSeek: onSeek,
                                       ),
+                                      if (r.visibility ==
+                                          CommentVisibility.restricted)
+                                        Text('暂未公开', style: styles.metadata),
                                     ],
                                   ),
                                 ),

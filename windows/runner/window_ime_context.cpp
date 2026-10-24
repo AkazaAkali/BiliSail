@@ -5,6 +5,18 @@
 #include <wrl/client.h>
 
 namespace {
+bool ReadCompartment(ITfCompartmentMgr* manager, REFGUID key,
+                     DWORD& output) noexcept {
+  Microsoft::WRL::ComPtr<ITfCompartment> compartment;
+  if (FAILED(manager->GetCompartment(key, &compartment))) return false;
+  VARIANT value{};
+  const HRESULT result = compartment->GetValue(&value);
+  const bool valid = result == S_OK && value.vt == VT_I4;
+  if (valid) output = static_cast<DWORD>(value.lVal);
+  VariantClear(&value);
+  return valid;
+}
+
 HIMC Context(HWND window) noexcept {
   const HIMC context = ImmGetContext(window);
   if (context) ImmReleaseContext(window, context);
@@ -68,6 +80,35 @@ void WindowImeContext::ReadProfile(InputState& state) noexcept {
   }
 }
 
+void WindowImeContext::ReadThreadState(InputState& state) noexcept {
+  // Read the selected TSF service without activating the detached default HIMC.
+  // TF_GetThreadMgr returns an existing manager; never activate one here.
+  const HMODULE module = GetModuleHandleW(L"msctf.dll");
+  if (!module) return;
+  using GetThreadManager = HRESULT(WINAPI*)(ITfThreadMgr**);
+  const auto get = reinterpret_cast<GetThreadManager>(
+      GetProcAddress(module, "TF_GetThreadMgr"));
+  if (!get) return;
+  Microsoft::WRL::ComPtr<ITfThreadMgr> thread;
+  if (FAILED(get(&thread)) || !thread) return;
+  Microsoft::WRL::ComPtr<ITfCompartmentMgr> compartments;
+  if (FAILED(thread.As(&compartments))) return;
+  DWORD open = 0;
+  if (!ReadCompartment(compartments.Get(), GUID_COMPARTMENT_KEYBOARD_OPENCLOSE,
+                       open)) {
+    return;
+  }
+  state.valid = true;
+  state.open = open != 0;
+  state.conversion_valid =
+      ReadCompartment(compartments.Get(),
+                      GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION,
+                      state.conversion) &&
+      ReadCompartment(compartments.Get(),
+                      GUID_COMPARTMENT_KEYBOARD_INPUTMODE_SENTENCE,
+                      state.sentence);
+}
+
 WindowImeContext::InputState WindowImeContext::ReadState(HWND window) noexcept {
   InputState state;
   ReadProfile(state);
@@ -110,11 +151,10 @@ bool WindowImeContext::Enable() noexcept {
   }
   auto state = ReadState(window_);
   if (!state.valid) {
-    const auto profile = state;
-    if (!ImmAssociateContextEx(window_, nullptr, IACE_DEFAULT)) return false;
-    state = ReadState(window_);
-    if (saved_state_.valid && SameProfile(saved_state_, profile)) {
+    if (saved_state_.valid && SameProfile(saved_state_, state)) {
       state = saved_state_;
+    } else {
+      ReadThreadState(state);
     }
   }
   NewContext fresh;
@@ -123,7 +163,11 @@ bool WindowImeContext::Enable() noexcept {
   // Only this interval's allocation is owned; never destroy a borrowed context.
   DestroyOwnedContext();
   owned_context_ = fresh.release();
-  if (state.valid) {
+  InputState associated_profile;
+  ReadProfile(associated_profile);
+  // Associating a context can synchronously enter TSF/IME window procedures.
+  // Never apply an old method's modes if the user-selected profile changed.
+  if (state.valid && SameProfile(state, associated_profile)) {
     if (state.conversion_valid) {
       ImmSetConversionStatus(owned_context_, state.conversion, state.sentence);
     }

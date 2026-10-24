@@ -37,6 +37,7 @@ final class CommentsState {
     this.items = const [],
     this.sort = CommentSort.hot,
     this.page = 0,
+    this.nextCursor,
     this.totalCount,
     this.hasMore = true,
     this.loading = false,
@@ -61,6 +62,7 @@ final class CommentsState {
   final List<CommentEntry> items, replyItems;
   final CommentSort sort;
   final int page, replyPage;
+  final String? nextCursor;
   final int? totalCount;
   final bool hasMore, loading, signedIn, busy, replyHasMore, replyLoading;
   final String? message;
@@ -73,6 +75,8 @@ final class CommentsState {
     List<CommentEntry>? items,
     CommentSort? sort,
     int? page,
+    String? nextCursor,
+    bool clearCursor = false,
     int? totalCount,
     bool? hasMore,
     bool? loading,
@@ -94,6 +98,7 @@ final class CommentsState {
     items: items ?? this.items,
     sort: sort ?? this.sort,
     page: page ?? this.page,
+    nextCursor: clearCursor ? null : nextCursor ?? this.nextCursor,
     totalCount: totalCount ?? this.totalCount,
     hasMore: hasMore ?? this.hasMore,
     loading: loading ?? this.loading,
@@ -195,18 +200,29 @@ class CommentsController extends Notifier<CommentsState> {
       loading: true,
       items: reset ? [] : null,
       page: reset ? 0 : null,
+      clearCursor: reset,
       closeRoot: reset,
       clearTarget: reset,
     );
     try {
-      final p = await r.load(oid, page, selected, _read);
+      final p = await r.load(
+        oid,
+        page,
+        selected,
+        _read,
+        cursor: reset ? null : state.nextCursor,
+      );
       if (!_current(generation, scope, epoch)) return;
+      final previousCount = reset ? 0 : state.items.length;
       final items = _merge(reset ? [] : state.items, p.items);
       state = state.copy(
         items: items,
         page: page,
+        nextCursor: p.nextCursor,
+        clearCursor: p.nextCursor == null,
         totalCount: p.totalCount,
-        hasMore: p.hasMore && p.items.isNotEmpty && items.length < 500,
+        hasMore:
+            p.hasMore && items.length > previousCount && items.length < 500,
         loading: false,
         uncertain: Set.unmodifiable(
           state.uncertain.where(
@@ -395,12 +411,21 @@ class CommentsController extends Notifier<CommentsState> {
     });
     final entry = sent;
     if (!ok || entry == null) return false;
+    final label = rootId == null ? '评论' : '回复';
+    final serverMessage = entry.submissionMessage?.trim();
+    final notice = entry.visibility == CommentVisibility.restricted
+        ? '$label已提交，暂未公开，请稍后查看'
+        : serverMessage != null && serverMessage.isNotEmpty
+        ? serverMessage
+        : entry.visibility == CommentVisibility.normal
+        ? '$label已发送'
+        : '$label已提交，请刷新确认显示状态';
     if (rootId == null) {
       state = state.copy(
         items: _merge([entry], state.items),
         totalCount: (state.totalCount ?? state.items.length) + 1,
         clearTarget: true,
-        message: '评论已发送',
+        message: notice,
       );
     } else {
       CommentEntry update(CommentEntry c) => c.id == rootId
@@ -411,7 +436,7 @@ class CommentsController extends Notifier<CommentsState> {
         openRoot: state.openRoot == null ? null : update(state.openRoot!),
         replyItems: _merge(state.replyItems, [entry]),
         clearTarget: true,
-        message: '回复已发送',
+        message: notice,
       );
     }
     return true;

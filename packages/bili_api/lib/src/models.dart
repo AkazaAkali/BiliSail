@@ -160,7 +160,13 @@ final class ApiVideoComment {
     this.mentionedUsers = const {},
     this.pictures = const [],
     this.authorMid,
+    this.state,
+    this.invisible = false,
+    this.submissionMessage,
   });
+  final int? state;
+  final bool invisible;
+  final String? submissionMessage;
   final int? level, verifyType, medalLevel;
   final String? vipLabel, medalName;
   final Uri? decorationImageUrl;

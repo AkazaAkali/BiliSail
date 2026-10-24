@@ -1021,6 +1021,346 @@ void main() {
     );
   });
 
+  for (final deferred in [false, true]) {
+    test(
+      'audio decode failure uses the existing backup (deferred=$deferred)',
+      () async {
+        final engine = _FakeEngine()..playFailuresRemaining = 1;
+        final repository = _FakeRepository();
+        final session = PlaybackSession(
+          engine: engine,
+          repository: repository,
+          progress: _FakeProgress(),
+          accountScope: () => 'guest',
+        );
+        addTearDown(session.close);
+        final opening = session.open(
+          _detail('one'),
+          _part('one'),
+          position: const Duration(seconds: 17),
+          rate: 1.5,
+          volume: 42,
+          desiredPlaying: !deferred,
+        );
+        await _flush();
+        repository.pendingResolves['one']!.complete(_backupMedia());
+        await opening;
+        if (deferred) {
+          expect(engine.playCount, 0);
+          await session.togglePlaying();
+        }
+        expect(engine.openOptions, hasLength(2));
+        expect(
+          (engine.sources.last as DashPairSource).audio?.uri,
+          _backupMedia().audio?.urls.last,
+        );
+        expect(engine.currentSnapshot.position, const Duration(seconds: 17));
+        expect(engine.currentSnapshot.rate, 1.5);
+        expect(engine.currentSnapshot.volume, 42);
+        expect(engine.currentSnapshot.phase, PlaybackPhase.playing);
+        expect(engine.maxSimultaneousPlayers, 1);
+        expect(session.error, isNull);
+      },
+    );
+  }
+
+  test(
+    'audio-only backup preserves the primary video and PGC target',
+    () async {
+      final pair = _backupMedia();
+      final resolved = PlaybackMedia(
+        video: PlaybackTrack(
+          urls: [pair.video.urls.first],
+          codec: pair.video.codec,
+          bandwidth: pair.video.bandwidth,
+        ),
+        audio: pair.audio,
+        quality: pair.quality,
+        qualities: pair.qualities,
+        duration: pair.duration,
+        headers: pair.headers,
+      );
+      final content = _FakeContentRepository()
+        ..pending = (Completer<PlaybackMedia>()..complete(resolved));
+      final engine = _FakeEngine()..playFailuresRemaining = 1;
+      final session = PlaybackSession(
+        engine: engine,
+        repository: _FakeRepository(),
+        contentRepository: content,
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      const target = PgcPlaybackTarget('7', cid: '700');
+      await session.open(null, null, target: target);
+      expect(engine.openedUris, [pair.video.urls.first, pair.video.urls.first]);
+      expect(
+        (engine.sources.last as DashPairSource).audio?.uri,
+        pair.audio?.urls.last,
+      );
+      expect(content.targets, [target]);
+      expect(session.contentTarget, target);
+      expect(session.error, isNull);
+    },
+  );
+
+  testWidgets(
+    'audio timeout shares the opening budget and ignores paused time',
+    (tester) async {
+      final baseline = tester.binding.clock.now();
+      final openingGate = Completer<void>();
+      final decoding = Completer<void>();
+      final engine = _FakeEngine()..nextOpen = openingGate;
+      final repository = _FakeRepository();
+      final session = PlaybackSession(
+        engine: engine,
+        repository: repository,
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+        startupNow: () => tester.binding.clock.now().difference(baseline),
+      );
+      addTearDown(session.close);
+      final opening = session.open(
+        _detail('one'),
+        _part('one'),
+        desiredPlaying: false,
+        position: const Duration(seconds: 17),
+      );
+      await tester.pump();
+      repository.pendingResolves['one']!.complete(_backupMedia());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 5));
+      openingGate.complete();
+      await tester.pump();
+      await opening;
+      await tester.pump(const Duration(minutes: 10));
+      engine.nextPlay = decoding;
+      final playing = session.togglePlaying();
+      await tester.pump();
+      expect(engine.playCount, 1);
+      await tester.pump(const Duration(milliseconds: 999));
+      expect(engine.openOptions, hasLength(1));
+      await tester.pump(const Duration(milliseconds: 1));
+      await playing;
+      expect(engine.openOptions, hasLength(2));
+      expect(engine.openOptions.last.openTimeout, const Duration(seconds: 29));
+      expect(engine.currentSnapshot.phase, PlaybackPhase.playing);
+      final generation = engine.currentSnapshot.generation;
+      decoding.complete();
+      await tester.pump();
+      expect(engine.currentSnapshot.generation, generation);
+      expect(engine.currentSnapshot.position, const Duration(seconds: 17));
+      expect(session.error, isNull);
+    },
+  );
+
+  testWidgets('audio recovery cannot reset an exhausted 35 second budget', (
+    tester,
+  ) async {
+    final baseline = tester.binding.clock.now();
+    final decoding = Completer<void>();
+    final engine = _FakeEngine()
+      ..nextOpenFailure = PlayerFailureKind.nativePlayback
+      ..nextPlay = decoding;
+    final repository = _FakeRepository();
+    final session = PlaybackSession(
+      engine: engine,
+      repository: repository,
+      progress: _FakeProgress(),
+      accountScope: () => 'guest',
+      startupNow: () => tester.binding.clock.now().difference(baseline),
+    );
+    addTearDown(session.close);
+    final opening = session.open(_detail('one'), _part('one'));
+    await tester.pump();
+    repository.pendingResolves['one']!.complete(_backupMedia());
+    await tester.pump();
+    expect(engine.openOptions, hasLength(2));
+    await tester.pump(const Duration(seconds: 35));
+    await opening;
+    expect(engine.openOptions, hasLength(2));
+    expect(session.error, 'Audio preparation timed out.');
+    final snapshot = engine.currentSnapshot;
+    decoding.complete();
+    await tester.pump();
+    expect(engine.currentSnapshot, snapshot);
+  });
+
+  for (final action in ['pause', 'permission']) {
+    test('audio recovery preserves a new $action intent', () async {
+      final decoding = Completer<void>();
+      final reopening = Completer<void>();
+      final engine = _FakeEngine()..nextPlay = decoding;
+      final repository = _FakeRepository();
+      final session = PlaybackSession(
+        engine: engine,
+        repository: repository,
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      final opening = session.open(_detail('one'), _part('one'));
+      await _flush();
+      repository.pendingResolves['one']!.complete(_backupMedia());
+      await _flush();
+      engine.nextOpen = reopening;
+      decoding.completeError(
+        const PlayerFailure(
+          PlayerFailureKind.nativePlayback,
+          'fixture audio decode failure',
+          1,
+        ),
+      );
+      await _flush();
+      final changed = action == 'pause'
+          ? session.togglePlaying()
+          : session.setPlaybackAllowed(false);
+      reopening.complete();
+      await Future.wait([opening, changed]);
+      expect(engine.openOptions, hasLength(2));
+      expect(engine.playCount, 1);
+      expect(engine.currentSnapshot.desiredPlaying, false);
+      expect(session.error, isNull);
+      if (action == 'pause') {
+        await session.togglePlaying();
+      } else {
+        await session.setPlaybackAllowed(true);
+      }
+      expect(engine.playCount, 2);
+      expect(engine.openOptions, hasLength(2));
+    });
+  }
+
+  test(
+    'pause failure after successful audio decode cannot consume a backup',
+    () async {
+      final decoding = Completer<void>();
+      final pausing = Completer<void>();
+      final engine = _FakeEngine()..nextPlay = decoding;
+      final repository = _FakeRepository();
+      final session = PlaybackSession(
+        engine: engine,
+        repository: repository,
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      final opening = session.open(_detail('one'), _part('one'));
+      await _flush();
+      repository.pendingResolves['one']!.complete(_backupMedia());
+      await _flush();
+      final permission = session.setPlaybackAllowed(false);
+      engine.nextPause = pausing;
+      decoding.complete();
+      await _flush();
+      pausing.completeError(
+        const PlayerFailure(
+          PlayerFailureKind.nativePlayback,
+          'fixture pause failure',
+          1,
+        ),
+      );
+      await Future.wait([opening, permission]);
+      expect(engine.openOptions, hasLength(1));
+      expect(session.error, 'fixture pause failure');
+    },
+  );
+
+  for (final exhaustedBy in ['audio', 'open', 'noBackup', 'invalidSource']) {
+    test('audio recovery is bounded after $exhaustedBy', () async {
+      final engine = _FakeEngine()
+        ..playFailuresRemaining = exhaustedBy == 'audio' ? 2 : 1
+        ..playFailureKind = exhaustedBy == 'invalidSource'
+            ? PlayerFailureKind.invalidSource
+            : PlayerFailureKind.nativePlayback
+        ..nextOpenFailure = exhaustedBy == 'open'
+            ? PlayerFailureKind.nativePlayback
+            : null;
+      final repository = _FakeRepository();
+      final session = PlaybackSession(
+        engine: engine,
+        repository: repository,
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      final opening = session.open(_detail('one'), _part('one'));
+      await _flush();
+      repository.pendingResolves['one']!.complete(
+        exhaustedBy == 'noBackup'
+            ? _media('one', 80, const Duration(minutes: 2))
+            : _backupMedia(),
+      );
+      await opening;
+      expect(
+        engine.openOptions,
+        hasLength(
+          exhaustedBy == 'noBackup' || exhaustedBy == 'invalidSource' ? 1 : 2,
+        ),
+      );
+      expect(session.error, isNotNull);
+      expect(engine.currentSnapshot.phase, PlaybackPhase.failed);
+      expect(repository.qualities, hasLength(1));
+    });
+  }
+
+  for (final action in ['stop', 'close', 'replace', 'account', 'epoch']) {
+    test(
+      'audio failure cannot recover an obsolete source after $action',
+      () async {
+        var scope = 'old';
+        var epoch = 1;
+        final pending = Completer<void>();
+        final engine = _FakeEngine()..nextPlay = pending;
+        final repository = _FakeRepository();
+        final session = PlaybackSession(
+          engine: engine,
+          repository: repository,
+          progress: _FakeProgress(),
+          accountScope: () => scope,
+          sessionEpoch: () => epoch,
+        );
+        addTearDown(session.close);
+        final opening = session.open(_detail('one'), _part('one'));
+        await _flush();
+        repository.pendingResolves['one']!.complete(_backupMedia());
+        await _flush();
+        expect(engine.playCount, 1);
+        Future<void>? changed;
+        switch (action) {
+          case 'stop':
+            changed = session.stop();
+          case 'close':
+            changed = session.close();
+          case 'replace':
+            changed = session.open(_detail('two'), _part('two'));
+          case 'account':
+            scope = 'new';
+          case 'epoch':
+            epoch++;
+        }
+        pending.completeError(
+          const PlayerFailure(
+            PlayerFailureKind.nativePlayback,
+            'fixture audio decode failure',
+            1,
+          ),
+        );
+        await opening;
+        expect(engine.openOptions, hasLength(1));
+        if (action == 'replace') {
+          await _flush();
+          repository.completeResolve('two');
+          await changed;
+          expect(engine.openOptions, hasLength(2));
+          expect(session.error, isNull);
+        } else {
+          await changed;
+        }
+      },
+    );
+  }
+
   for (final failure in [
     PlayerFailureKind.nativePlayback,
     PlayerFailureKind.invalidSource,
@@ -5004,6 +5344,9 @@ final class _FakeEngine implements PlayerEngine, AudioGainControl {
   Completer<void>? nextStop;
   PlayerFailureKind? nextOpenFailure;
   void Function()? onOpenFailure;
+  Completer<void>? nextPlay;
+  int playFailuresRemaining = 0;
+  PlayerFailureKind playFailureKind = PlayerFailureKind.nativePlayback;
 
   @override
   PlaybackSnapshot get currentSnapshot => _current;
@@ -5071,6 +5414,24 @@ final class _FakeEngine implements PlayerEngine, AudioGainControl {
   @override
   Future<void> play() async {
     playCount++;
+    final generation = _current.generation;
+    final pending = nextPlay;
+    nextPlay = null;
+    if (pending != null) await pending.future;
+    if (disposed || generation != _current.generation) return;
+    if (playFailuresRemaining > 0) {
+      playFailuresRemaining--;
+      emit(
+        _current.copyWith(phase: PlaybackPhase.failed, desiredPlaying: true),
+      );
+      final failure = PlayerFailure(
+        playFailureKind,
+        'fixture audio decode failure',
+        generation,
+      );
+      _failures.add(failure);
+      throw failure;
+    }
     emit(_current.copyWith(phase: PlaybackPhase.playing, desiredPlaying: true));
   }
 

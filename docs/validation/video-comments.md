@@ -1,5 +1,24 @@
 # 播放页与评论交互
 
+## 评论发送反馈与刷新可见性（2026-10-24）
+
+用户反馈评论发布后本地可见，刷新后消失。经用户授权，使用现有 Release 的系统安全存储会话进行只读核验：在用户指定视频中，新版 `/x/v2/reply/wbi/main` 返回一条当前账号的评论，`state=17`、`invisible=false`；旧 `/x/v2/reply` 的最新列表前五页均未返回该条。游客读取该评论的楼中楼入口返回业务码 `12006`，同一视频正常公开评论的游客对照读取成功。这说明该评论已被服务端接收、当前未向游客公开；不把状态 17 进一步断言为永久删除、封禁或某种确定的审核结论。
+
+此前发送代码丢弃 `reply.state`、`reply.invisible` 和 `success_toast`，把成功响应中的评论直接插入本地并固定提示“已发送”；刷新又使用不能返回上述本人条目的旧列表接口，造成前后表现不一致。本次调整：
+
+- 视频（含使用视频评论身份的影视）主评论改用 Web Cookie 可选、WBI 签名的 GET `api.bilibili.com/x/v2/reply/wbi/main`。参数为 `oid`、`type=1`、`mode=3/2`（最热／最新）、`ps=20`、`plat=1`、`web_location=1315875` 和 `pagination_str={"offset":"…"}`，原样传递服务端 `cursor.pagination_reply.next_offset`，不从页码推算游标。沿用已有 WBI key 单飞、取消、deadline 与 session epoch；排序、刷新和账号变化重置游标。非视频身份和楼中楼保持已有端点。
+- 首屏置顶与正文按评论 ID 去重，服务端总数取 `cursor.all_count`；读取不滤掉本人的非零状态评论。在线发现热门分页可以返回相同的 opaque offset 但提供不同条目，因此允许重复游标；若一页未增加任何新评论，则终止后续加载，继续保留 500 条上限。
+- 协议模型保留原始状态、不可见标志和提交提示；Repository 映射为普通／受限／未知三种领域状态。非零状态或 `invisible=true` 显示“暂未公开”，发送反馈为“评论／回复已提交，暂未公开，请稍后查看”；普通状态优先显示服务端提交提示，缺少状态和提示时仅说明已提交、需要刷新确认。点赞和替换回复列表保留这些字段。
+- 发送仍为单次 POST `/x/v2/reply/add`，正文、root/parent、Cookie/CSRF 和不确定写入保护保持既有规则。已被服务端接收的受限评论清空对应旧草稿，不自动重新发送；输入期间形成的新草稿继续保留。不通过本地持久缓存掩盖服务端后续删除或状态变化。
+
+协议字段参考[评论分页调查](https://github.com/bilibili-plugins/bilibili-api-collect/blob/master/docs/comment/list.md)及本次实际 API 响应，独立实现 Dart 映射，没有复制第三方代码。新生产 API 的登录态只读复验中，最热和最新均返回该本人条目及状态 17，两种排序的第二页各返回 20 条、与首屏没有重复。未新增真实评论、点赞或删除操作，未输出或落盘凭据、账号身份及评论正文。
+
+定向回归 42 项、`bili_api` 完整 434 项通过，覆盖 opaque 游标编码、置顶去重、空页／非法游标、重复游标下的有进展与无进展、刷新／排序重置、受限与未知发送反馈、单次写、草稿保护、刷新后的状态标签以及现有账号与详情导航隔离。其余包检查：`bili_player` 81、`bili_danmaku` 93、`bili_mux` 2 项通过；mux 的 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。
+
+首次根检查遇到同期播放器任务未完成的格式／语法修改；本次不修改该任务文件。该任务更新后重新运行 `tool/check.ps1 -SkipPub`：打包边界、根格式与根静态分析通过，根测试 2024 项通过、1 项失败。失败为同期修改的 `test/features/playback/playback_session_test.dart:1255` 中 `pause failure after successful audio decode cannot consume a backup`，预期原生打开一次、实际两次；未为消除此失败改动播放器。四个包另行完成上述格式、分析及测试。日志在本机忽略目录 `artifacts/comment-send-check.log`、`comment-send-analyze.log`、`comment-send-root-tests.log`、`comment-send-final-check.log`，定向与 API 日志为 `comment-send-targeted-tests.log`、`comment-send-api-tests.log`。
+
+未重新构建应用或完成 Windows／Android／macOS 实机发送交互验收；当前没有可连接的 Flutter 调试进程，无法热重载已安装的 Release。只读 API 和离线测试不等于公开发布验收。
+
 后续简介侧栏已调整为 UP 统计与关注、一体合集卡片和常驻推荐；当前布局及本次验证以 [播放页简介侧栏](video-sidebar.md) 为准，下面保留前序记录。
 
 日期：2026-10-05。Windows x64、Flutter 3.47.6 / Dart 3.13.5。工作区尚无初始提交，代码包含既有未提交功能；本轮不修改相邻参考仓库。

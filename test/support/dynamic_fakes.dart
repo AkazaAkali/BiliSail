@@ -106,8 +106,9 @@ final class DynamicCommentsFake
     String aid,
     int page,
     CommentSort sort,
-    RequestCancellation cancellation,
-  ) async {
+    RequestCancellation cancellation, {
+    String? cursor,
+  }) async {
     reads.add(aid);
     return CommentPage(items: items, hasMore: false, totalCount: items.length);
   }

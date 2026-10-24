@@ -35,6 +35,7 @@ void main() {
       repeats: (_) => false,
       editorException: (_, _) => false,
     );
+    input.diagnosticsEnabled = true;
     final routes = InputRouteObserver();
     input.replaceBindings({
       const ShortcutChord('Semicolon'): 'slower',
@@ -103,7 +104,13 @@ void main() {
     native.key(0xba, 0x27, character: 0x3b);
     native.key(0xde, 0x28, character: 0x27);
     await tester.pump(const Duration(milliseconds: 100));
-    expect(calls, ['slower', 'faster']);
+    expect(
+      calls,
+      ['slower', 'faster'],
+      reason:
+          'Native events: $received; dispatch reasons: '
+          '${input.diagnostics.map((trace) => trace.result.reason).toList()}',
+    );
     expect(received.length, 4);
 
     for (var i = 0; i < 2; i++) {
