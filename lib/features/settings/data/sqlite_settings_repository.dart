@@ -169,10 +169,11 @@ class SqliteSettingsRepository implements SettingsRepository {
           SponsorBlockMode.values
               .where((item) => item.name == decoded['sponsorBlockMode'])
               .firstOrNull ??
-          SponsorBlockMode.disabled,
-      sponsorBlockCategories: strings('sponsorBlockCategories', const [
-        'sponsor',
-      ]),
+          const AppSettings.defaults().sponsorBlockMode,
+      sponsorBlockCategories: strings(
+        'sponsorBlockCategories',
+        AppSettings.supportedSponsorCategories,
+      ),
     ).normalized();
   }
 

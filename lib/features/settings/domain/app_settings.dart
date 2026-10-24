@@ -90,8 +90,8 @@ final class AppSettings {
     this.subtitleFontScale = 1.0,
     this.subtitleBackgroundOpacity = 0.45,
     this.subtitleBottomPadding = 24.0,
-    this.sponsorBlockMode = SponsorBlockMode.disabled,
-    List<String> sponsorBlockCategories = const ['sponsor'],
+    this.sponsorBlockMode = SponsorBlockMode.manual,
+    List<String> sponsorBlockCategories = supportedSponsorCategories,
   }) : _danmakuBlockedWords = List.unmodifiable(danmakuBlockedWords),
        _sponsorBlockCategories = List.unmodifiable(sponsorBlockCategories);
 
@@ -143,9 +143,9 @@ final class AppSettings {
        subtitleFontScale = 1.0,
        subtitleBackgroundOpacity = 0.45,
        subtitleBottomPadding = 24.0,
-       sponsorBlockMode = SponsorBlockMode.disabled,
+       sponsorBlockMode = SponsorBlockMode.manual,
        _danmakuBlockedWords = const [],
-       _sponsorBlockCategories = const ['sponsor'];
+       _sponsorBlockCategories = supportedSponsorCategories;
 
   final ShortcutSettings shortcuts;
   final AppThemePreference theme;

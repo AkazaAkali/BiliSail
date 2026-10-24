@@ -101,7 +101,7 @@ void main() {
             .requireValue
             .shortcuts
             .keysFor(ShortcutAction.closeTab),
-        ['Ctrl+W'],
+        ['Ctrl+W', 'MouseBack'],
       );
       repository.failNext();
       await assertion;
@@ -113,7 +113,7 @@ void main() {
             .requireValue
             .shortcuts
             .keysFor(ShortcutAction.closeTab),
-        ['Ctrl+W'],
+        ['Ctrl+W', 'MouseBack'],
       );
       repository.completeNext();
       await success;

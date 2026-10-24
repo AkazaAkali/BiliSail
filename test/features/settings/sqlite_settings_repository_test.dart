@@ -15,6 +15,47 @@ void main() {
     repository = SqliteSettingsRepository(database);
   });
   tearDown(() => database.close());
+  test(
+    'sponsor defaults preserve saved modes and category selections',
+    () async {
+      final defaults = await repository.load();
+      expect(defaults.sponsorBlockMode, SponsorBlockMode.manual);
+      expect(
+        defaults.sponsorBlockCategories,
+        AppSettings.supportedSponsorCategories,
+      );
+      for (final mode in SponsorBlockMode.values) {
+        for (final categories in <List<String>>[
+          [],
+          ['sponsor'],
+          ['intro', 'preview'],
+        ]) {
+          await repository.save(
+            AppSettings(
+              sponsorBlockMode: mode,
+              sponsorBlockCategories: categories,
+            ),
+          );
+          final loaded = await repository.load();
+          expect(loaded.sponsorBlockMode, mode);
+          expect(loaded.sponsorBlockCategories, categories);
+        }
+      }
+      await database.writeSetting(
+        'preferences.v1',
+        jsonEncode({
+          'sponsorBlockMode': 'unknown',
+          'sponsorBlockCategories': 7,
+        }),
+      );
+      final fallback = await repository.load();
+      expect(fallback.sponsorBlockMode, SponsorBlockMode.manual);
+      expect(
+        fallback.sponsorBlockCategories,
+        AppSettings.supportedSponsorCategories,
+      );
+    },
+  );
   test('wheel damping migrates and survives save and reload', () async {
     expect((await repository.load()).wheelDampingRatio, 1.3);
     for (final invalid in ['null', '"invalid"', 'true', '1e999']) {
@@ -374,8 +415,11 @@ void main() {
       expect(settings.preferredQuality, 80);
       expect(settings.preferredVideoCodec, VideoCodecPreference.h264);
       expect(settings.videoDecoding, VideoDecodingPreference.automatic);
-      expect(settings.sponsorBlockMode, SponsorBlockMode.disabled);
-      expect(settings.sponsorBlockCategories, ['sponsor']);
+      expect(settings.sponsorBlockMode, SponsorBlockMode.manual);
+      expect(
+        settings.sponsorBlockCategories,
+        AppSettings.supportedSponsorCategories,
+      );
       await repository.save(settings);
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
@@ -657,7 +701,7 @@ void main() {
     expect(s.danmakuOffset, const Duration(seconds: -60));
     expect(s.danmakuBlockedWords, ['x']);
     expect(s.subtitleBottomPadding, 240);
-    expect(s.sponsorBlockMode, SponsorBlockMode.disabled);
+    expect(s.sponsorBlockMode, SponsorBlockMode.manual);
     expect(s.sponsorBlockCategories, ['intro']);
     final nonFinite = AppSettings(
       defaultVolume: double.nan,

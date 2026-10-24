@@ -1623,6 +1623,7 @@ void main() {
         session,
         settings: AppSettings(
           shortcuts: const ShortcutSettings.defaults()
+              .withKeys(ShortcutAction.closeTab, ['Ctrl+W'])
               .withKeys(ShortcutAction.volumeDown, ['MouseBack'])
               .withKeys(ShortcutAction.seekForward, ['Ctrl+MouseForward']),
         ),
@@ -1670,10 +1671,9 @@ void main() {
           session,
           _FakeWindowService(),
           AppSettings(
-            shortcuts: const ShortcutSettings.defaults().withKeys(
-              ShortcutAction.volumeDown,
-              ['MouseBack'],
-            ),
+            shortcuts: const ShortcutSettings.defaults()
+                .withKeys(ShortcutAction.closeTab, ['Ctrl+W'])
+                .withKeys(ShortcutAction.volumeDown, ['MouseBack']),
           ),
         ),
       );

@@ -265,7 +265,10 @@ void main() {
       expect(copy.danmakuBlockedWords, ['replacement']);
       expect(copy.sponsorBlockCategories, ['intro']);
       expect(original.danmakuBlockedWords, isEmpty);
-      expect(original.sponsorBlockCategories, ['sponsor']);
+      expect(
+        original.sponsorBlockCategories,
+        AppSettings.supportedSponsorCategories,
+      );
       expect(
         () => original.sponsorBlockCategories.add('mutation'),
         throwsUnsupportedError,

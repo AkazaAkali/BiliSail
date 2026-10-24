@@ -108,7 +108,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester.widget<TextField>(find.byType(TextField)).controller?.text,
-      'Ctrl+W',
+      'Ctrl+W, MouseBack',
     );
     await tester.tap(find.text('录制组合键'));
     await tester.pumpAndSettle();

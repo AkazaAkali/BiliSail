@@ -3380,6 +3380,44 @@ void main() {
     expect(engine.openedUris, hasLength(1));
   });
 
+  test(
+    'default sponsor mode queries all categories and waits for manual skip',
+    () async {
+      final engine = _FakeEngine();
+      final sponsor = _FakeSponsor();
+      final session = PlaybackSession(
+        engine: engine,
+        repository: _FakeRepository(autoResolve: true),
+        progress: _FakeProgress(),
+        accountScope: () => 'guest',
+        sponsorRepository: sponsor,
+      );
+      addTearDown(session.close);
+      session.configureSettings(AppSettings());
+      final owner = Object();
+      session.attach(owner);
+      await session.activate(owner, _detail('one'), _part('one'));
+      expect(sponsor.requestedCategories['one'], [
+        'sponsor',
+        'intro',
+        'outro',
+        'selfpromo',
+        'interaction',
+        'preview',
+      ]);
+      sponsor.pending['one']!.complete([_sponsorSegment]);
+      await _flush();
+      engine.emit(
+        engine.currentSnapshot.copyWith(position: const Duration(seconds: 11)),
+      );
+      await _flush();
+      expect(session.currentSponsor, _sponsorSegment);
+      expect(engine.seekTargets, isEmpty);
+      await session.skipSponsor(_sponsorSegment);
+      expect(engine.seekTargets, [const Duration(seconds: 20)]);
+    },
+  );
+
   test('pause before deferred automatic skip prevents seek', () async {
     final engine = _FakeEngine();
     final sponsor = _FakeSponsor();
@@ -3480,6 +3518,7 @@ void main() {
         preferredQuality: 64,
         defaultPlaybackRate: 1.5,
         defaultVolume: 35,
+        sponsorBlockMode: SponsorBlockMode.disabled,
       ),
     );
     final owner = Object();
@@ -5108,6 +5147,7 @@ const _sponsorSegment = SponsorSegment(
 
 final class _FakeSponsor implements SponsorRepository {
   final pending = <String, Completer<List<SponsorSegment>>>{};
+  final requestedCategories = <String, List<String>>{};
   @override
   Future<List<SponsorSegment>> segments(
     VideoId video,
@@ -5117,6 +5157,7 @@ final class _FakeSponsor implements SponsorRepository {
   }) {
     final result = Completer<List<SponsorSegment>>();
     pending[cid] = result;
+    requestedCategories[cid] = List.of(categories);
     return result.future;
   }
 }

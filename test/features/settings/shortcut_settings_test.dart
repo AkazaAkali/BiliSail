@@ -40,7 +40,7 @@ void main() {
       2,
     );
   });
-  test('defaults mirror UWP and immutable caller bindings', () {
+  test('default shortcuts and immutable caller bindings', () {
     const defaults = ShortcutSettings.defaults();
     expect(defaults.holdRate, 2);
     expect(ShortcutSettings().holdRate, 2);
@@ -48,12 +48,48 @@ void main() {
     expect(ShortcutSettings.fromJson({}).holdRate, 2);
     expect(defaults.actionFor('F11'), ShortcutAction.fullscreen);
     expect(defaults.actionFor('Ctrl+T'), ShortcutAction.newTab);
+    expect(defaults.actionFor('Ctrl+W'), ShortcutAction.closeTab);
+    expect(defaults.actionFor('MouseBack'), ShortcutAction.closeTab);
     final keys = ['Ctrl+K'];
     final settings = ShortcutSettings(
       overrides: {ShortcutAction.playPause: keys},
     );
     keys.add('F7');
     expect(settings.keysFor(ShortcutAction.playPause), ['Ctrl+K']);
+  });
+  test('new close-tab default preserves saved custom bindings', () {
+    final legacy = ShortcutSettings.fromJson({
+      'bindings': {
+        'playPause': ['MouseBack'],
+      },
+    });
+    expect(legacy.actionFor('MouseBack'), ShortcutAction.playPause);
+    expect(legacy.keysFor(ShortcutAction.closeTab), ['Ctrl+W']);
+    expect(legacy.issues, isEmpty);
+    expect(legacy.conflict, isNull);
+    expect(
+      ShortcutSettings.fromJson(legacy.toJson()).actionFor('MouseBack'),
+      ShortcutAction.playPause,
+    );
+    for (final keys in <List<String>>[
+      ['Ctrl+W'],
+      ['Ctrl+Q'],
+      [],
+    ]) {
+      final custom = ShortcutSettings.fromJson({
+        'bindings': {'closeTab': keys},
+      });
+      expect(custom.keysFor(ShortcutAction.closeTab), keys);
+      expect(custom.actionFor('MouseBack'), isNull);
+    }
+    final explicitConflict = ShortcutSettings.fromJson({
+      'bindings': {
+        'playPause': ['MouseBack'],
+        'closeTab': ['MouseBack'],
+      },
+    });
+    expect(explicitConflict.actionFor('MouseBack'), isNull);
+    expect(explicitConflict.issues, isNotEmpty);
   });
   test('custom bindings, action switches and playback values survive JSON', () {
     final settings = const ShortcutSettings.defaults()

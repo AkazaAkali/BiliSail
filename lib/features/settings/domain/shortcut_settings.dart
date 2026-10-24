@@ -84,6 +84,13 @@ final class ShortcutSettings {
         }
       }
     }
+    // The new default must not displace an existing custom side-button binding.
+    if (!overrides.containsKey(ShortcutAction.closeTab) &&
+        overrides.values.any((keys) => keys.contains('MouseBack'))) {
+      overrides[ShortcutAction.closeTab] = ShortcutAction.closeTab.defaultKeys
+          .where((key) => key != 'MouseBack')
+          .toList();
+    }
     final result = ShortcutSettings(
       seekSeconds: value['seekSeconds'] is int
           ? (value['seekSeconds'] as int).clamp(1, 90)

@@ -656,10 +656,7 @@ void main() {
     (tester) async {
       final router = _router(
         (context, tab) => Text('page ${tab.id}'),
-        shortcuts: const ShortcutSettings.defaults().withKeys(
-          ShortcutAction.closeTab,
-          ['Ctrl+W', 'MouseBack'],
-        ),
+        shortcuts: const ShortcutSettings.defaults(),
       );
       addTearDown(router.dispose);
       await tester.pumpWidget(InputTestApp.router(routerConfig: router));
@@ -816,7 +813,9 @@ void main() {
     ) async {
       final router = _router(
         (_, tab) => Text('page ${tab.id}'),
-        shortcuts: const ShortcutSettings.defaults().withKeys(action, [key]),
+        shortcuts: const ShortcutSettings.defaults()
+            .withKeys(ShortcutAction.closeTab, ['Ctrl+W'])
+            .withKeys(action, [key]),
       );
       addTearDown(router.dispose);
       await tester.pumpWidget(InputTestApp.router(routerConfig: router));
@@ -851,9 +850,10 @@ void main() {
       (tester) async {
         final router = _router(
           (context, tab) => Text('page ${tab.id}'),
-          shortcuts: const ShortcutSettings.defaults()
-              .withKeys(ShortcutAction.closeTab, ['MouseBack'])
-              .withActionEnabled(ShortcutAction.closeTab, enabled),
+          shortcuts: const ShortcutSettings.defaults().withActionEnabled(
+            ShortcutAction.closeTab,
+            enabled,
+          ),
         );
         addTearDown(router.dispose);
         await tester.pumpWidget(InputTestApp.router(routerConfig: router));

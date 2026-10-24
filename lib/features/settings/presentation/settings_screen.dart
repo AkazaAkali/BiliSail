@@ -436,7 +436,7 @@ final class _SettingsCategoryPageState
                       if (widget.category == SettingsCategory.sponsorBlock)
                         _section('空降助手', [
                           const Text(
-                            '开启后向第三方 bsbsb.top 查询当前视频片段，不传账号。可手动提示或自动跳过所选类别。默认关闭。',
+                            '开启后向第三方 bsbsb.top 查询当前视频片段，不传账号。默认手动提示并选中全部类别，也可关闭或改为自动跳过。',
                           ),
                           _choices('工作模式', s.sponsorBlockMode, const {
                             SponsorBlockMode.disabled: '关闭',

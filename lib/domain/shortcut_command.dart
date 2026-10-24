@@ -18,7 +18,7 @@ enum ShortcutAction {
   previousPart('上一分 P', ['Z', 'N', 'Comma']),
   nextPart('下一分 P', ['X', 'M', 'Period']),
   newTab('新建浏览标签', ['Ctrl+T']),
-  closeTab('关闭当前标签页', ['Ctrl+W']),
+  closeTab('关闭当前标签页', ['Ctrl+W', 'MouseBack']),
   refresh('刷新当前页面', ['Ctrl+R', 'F5']);
 
   const ShortcutAction(this.label, this.defaultKeys);
