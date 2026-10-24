@@ -74,8 +74,10 @@ class MessageRepositoryFake implements MessageRepository {
   Completer<MessagePage<InboxEntry>>? inboxPending;
   Completer<MessagePage<PrivateMessage>>? threadPending;
   Completer<void>? writePending;
+  Completer<Map<InboxSection, int>>? unreadPending;
   Object? writeFailure;
   Object? inboxFailure;
+  Object? unreadFailure;
   Map<InboxSection, int> counts = {InboxSection.private: 3};
   RequestCancellation? inboxRead, threadRead, writeRead;
   int sends = 0, marks = 0, reads = 0, systemMarks = 0, unreadReads = 0;
@@ -86,7 +88,8 @@ class MessageRepositoryFake implements MessageRepository {
     required RequestCancellation cancellation,
   }) async {
     unreadReads++;
-    return Map.unmodifiable(counts);
+    if (unreadFailure case final error?) throw error;
+    return unreadPending?.future ?? Map.unmodifiable(counts);
   }
 
   @override

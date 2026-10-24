@@ -115,8 +115,15 @@ void main() {
       expect(repo.systemMarks, 1);
       expect((accountBadge(tester).label as Text).data, '3');
       expect(find.text('系统通知 · 2'), findsNothing);
+      expect(repo.unreadReads, 2);
       await tester.pump();
       expect(repo.systemMarks, 1);
+      await tester.tap(find.byKey(const ValueKey('message-section-private')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('message-section-system')));
+      await tester.pumpAndSettle();
+      expect(repo.unreadReads, 2);
+      expect((accountBadge(tester).label as Text).data, '3');
     },
   );
 
@@ -134,8 +141,38 @@ void main() {
       await tester.tap(find.byKey(ValueKey('message-section-${section.name}')));
       await tester.pumpAndSettle();
       expect((accountBadge(tester).label as Text).data, '3');
+      expect(repo.unreadReads, 2);
+      await tester.tap(find.byKey(const ValueKey('message-section-private')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(ValueKey('message-section-${section.name}')));
+      await tester.pumpAndSettle();
+      expect(repo.unreadReads, 2);
     });
   }
+
+  testWidgets('switching read categories never refreshes the avatar count', (
+    tester,
+  ) async {
+    await mountWithAccount(tester);
+    expect(repo.unreadReads, 1);
+    repo.entries = const [systemNotification];
+    for (var round = 0; round < 2; round++) {
+      for (final section in [
+        InboxSection.replies,
+        InboxSection.mentions,
+        InboxSection.likes,
+        InboxSection.system,
+        InboxSection.private,
+      ]) {
+        await tester.tap(
+          find.byKey(ValueKey('message-section-${section.name}')),
+        );
+        await tester.pumpAndSettle();
+        expect(repo.unreadReads, 1, reason: '$round: ${section.name}');
+        expect((accountBadge(tester).label as Text).data, '3');
+      }
+    }
+  });
 
   testWidgets('private acknowledgement updates the avatar from a page scope', (
     tester,

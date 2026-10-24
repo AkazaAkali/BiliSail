@@ -262,6 +262,115 @@ void main() {
       expect(repo.systemMarks, 1);
     },
   );
+  test(
+    'a pending unread snapshot is reconciled after notifications are read',
+    () async {
+      final pending = repo.unreadPending = Completer<Map<InboxSection, int>>();
+      container.listen(unreadMessagesProvider, (_, _) {});
+      controller.selectSection(InboxSection.replies);
+      await flush();
+      expect(state().inbox.loading, isFalse);
+      expect(repo.unreadReads, 1);
+      repo.unreadPending = null;
+      pending.complete(const {InboxSection.replies: 2});
+      await flush();
+      expect(
+        (await container.read(
+          unreadMessagesProvider.future,
+        ))[InboxSection.replies],
+        0,
+      );
+      expect(repo.unreadReads, 2);
+    },
+  );
+  test(
+    'rapid tab switches reconcile a shared unread snapshot only once',
+    () async {
+      final pending = repo.unreadPending = Completer<Map<InboxSection, int>>();
+      container.listen(unreadMessagesProvider, (_, _) {});
+      controller.selectSection(InboxSection.replies);
+      await flush();
+      controller.selectSection(InboxSection.private);
+      await flush();
+      controller.selectSection(InboxSection.replies);
+      await flush();
+      repo.unreadPending = null;
+      pending.complete(const {InboxSection.replies: 2});
+      await flush();
+      await container.read(unreadMessagesProvider.future);
+      expect(repo.unreadReads, 2);
+    },
+  );
+  test(
+    'new unread counts after a previous read can trigger reconciliation again',
+    () async {
+      repo.counts = {InboxSection.replies: 2};
+      container.listen(unreadMessagesProvider, (_, _) {});
+      await container.read(unreadMessagesProvider.future);
+      controller.selectSection(InboxSection.replies);
+      await flush();
+      await container.read(unreadMessagesProvider.future);
+      expect(repo.unreadReads, 2);
+      controller.selectSection(InboxSection.private);
+      await flush();
+      repo.counts[InboxSection.replies] = 1;
+      container.invalidate(unreadMessagesProvider);
+      await container.read(unreadMessagesProvider.future);
+      controller.selectSection(InboxSection.replies);
+      await flush();
+      expect(
+        (await container.read(
+          unreadMessagesProvider.future,
+        ))[InboxSection.replies],
+        0,
+      );
+      expect(repo.unreadReads, 4);
+    },
+  );
+  test(
+    'failed and empty notification reads do not refresh a positive badge',
+    () async {
+      repo.counts = {InboxSection.replies: 2, InboxSection.mentions: 1};
+      container.listen(unreadMessagesProvider, (_, _) {});
+      await container.read(unreadMessagesProvider.future);
+      repo.inboxFailure = const AppFailure(AppFailureKind.network, 'offline');
+      controller.selectSection(InboxSection.replies);
+      await flush();
+      expect(state().inbox.error, isNotNull);
+      expect(repo.unreadReads, 1);
+      repo.inboxFailure = null;
+      repo.entries = [];
+      controller.selectSection(InboxSection.mentions);
+      await flush();
+      expect(state().inbox.items, isEmpty);
+      expect(repo.unreadReads, 1);
+    },
+  );
+  test(
+    'unavailable unread counts do not block lists or cause refresh retries',
+    () async {
+      repo.unreadFailure = const AppFailure(AppFailureKind.network, 'offline');
+      container.listen(unreadMessagesProvider, (_, _) {});
+      controller.selectSection(InboxSection.replies);
+      await flush();
+      expect(state().inbox.items, isNotEmpty);
+      expect(state().inbox.error, isNull);
+      expect(container.read(unreadMessagesProvider).hasError, isTrue);
+      expect(repo.unreadReads, 1);
+    },
+  );
+  test('sending or acknowledging an already-read conversation does not refresh counts', () async {
+    container.listen(unreadMessagesProvider, (_, _) {});
+    await container.read(unreadMessagesProvider.future);
+    controller.selectConversation(otherConversation);
+    await flush();
+    expect(await controller.send('测试'), isTrue);
+    await flush();
+    expect(repo.unreadReads, 1);
+    expect(await controller.markRead(), isTrue);
+    await flush();
+    expect(repo.unreadReads, 1);
+  });
   test('failed system acknowledgement is not replayed by rebuilds', () async {
     repo.entries = const [systemNotification];
     repo.counts = {InboxSection.system: 2};

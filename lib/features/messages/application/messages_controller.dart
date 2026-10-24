@@ -84,6 +84,7 @@ class MessagesController extends Notifier<MessagesState> {
   final Set<RequestCancellation> _writes = {};
   MessageListState<InboxEntry>? _systemReadAttempt;
   (String, int)? _inboxAccount;
+  final Map<InboxSection, Map<InboxSection, int>> _readUnreadSnapshots = {};
 
   @override
   MessagesState build() {
@@ -107,6 +108,7 @@ class MessagesController extends Notifier<MessagesState> {
   void _cancel() {
     _systemReadAttempt = null;
     _inboxAccount = null;
+    _readUnreadSnapshots.clear();
     _inboxRead?.cancel();
     _threadRead?.cancel();
     for (final write in _writes) {
@@ -122,6 +124,37 @@ class MessagesController extends Notifier<MessagesState> {
       generation == _generation &&
       ref.read(messageRepositoryProvider).accountScope == scope &&
       ref.read(messageRepositoryProvider).sessionEpoch == epoch;
+
+  Future<Map<InboxSection, int>?> _unreadSnapshot() async {
+    try {
+      return await ref.read(unreadMessagesProvider.future);
+    } catch (_) {
+      // The shared provider retains the error. An unavailable count is not
+      // evidence of a read transition and must not block the message list.
+      return null;
+    }
+  }
+
+  Future<void> _refreshUnreadAfterRead(
+    InboxSection section,
+    Future<Map<InboxSection, int>?> snapshot,
+    int generation,
+    String scope,
+    int epoch,
+  ) async {
+    final counts = await snapshot;
+    if (!_current(generation, scope, epoch) ||
+        counts == null ||
+        (counts[section] ?? 0) == 0 ||
+        identical(_readUnreadSnapshots[section], counts)) {
+      return;
+    }
+    // Rapid tab switches can finish against the same unread snapshot.
+    // Each category needs only one reconciliation for that snapshot.
+    _readUnreadSnapshots[section] = counts;
+    ref.invalidate(unreadMessagesProvider);
+  }
+
   String? _error(Object error, {bool write = false}) => error is AppFailure
       ? error.kind == AppFailureKind.cancelled
             ? null
@@ -170,6 +203,10 @@ class MessagesController extends Notifier<MessagesState> {
         section = state.section;
     _inboxRead?.cancel();
     final read = _inboxRead = RequestCancellation();
+    final unreadBefore =
+        section != InboxSection.private && section != InboxSection.system
+        ? _unreadSnapshot()
+        : null;
     state = state.copy(
       inbox: MessageListState(
         items: old.items,
@@ -205,10 +242,16 @@ class MessagesController extends Notifier<MessagesState> {
               unique.length < 500,
         ),
       );
-      // Reply/mention/like reads also advance their server-side unread state.
-      // Refresh after the read completes, so every badge sees the new counts.
-      if (section != InboxSection.private && section != InboxSection.system) {
-        ref.invalidate(unreadMessagesProvider);
+      // These reads acknowledge notifications, but revisiting a read category
+      // must not refresh the account badge.
+      if (unreadBefore != null && page.items.isNotEmpty) {
+        await _refreshUnreadAfterRead(
+          section,
+          unreadBefore,
+          generation,
+          scope,
+          epoch,
+        );
       }
     } catch (error) {
       if (_current(generation, scope, epoch) && version == _inboxVersion) {
@@ -407,6 +450,7 @@ class MessagesController extends Notifier<MessagesState> {
         scope = repository.accountScope,
         epoch = repository.sessionEpoch;
     final cancellation = RequestCancellation();
+    final unreadBefore = _unreadSnapshot();
     _writes.add(cancellation);
     state = state.copy(markingRead: true, clearWriteMessage: true);
     try {
@@ -416,7 +460,13 @@ class MessagesController extends Notifier<MessagesState> {
       );
       if (!_current(generation, scope, epoch)) return false;
       state = state.copy(markingRead: false);
-      ref.invalidate(unreadMessagesProvider);
+      await _refreshUnreadAfterRead(
+        InboxSection.system,
+        unreadBefore,
+        generation,
+        scope,
+        epoch,
+      );
       return true;
     } catch (error) {
       if (_current(generation, scope, epoch)) {
@@ -465,7 +515,9 @@ class MessagesController extends Notifier<MessagesState> {
             : null,
         clearWriteMessage: state.selected?.id != entry.id,
       );
-      ref.invalidate(unreadMessagesProvider);
+      if (!send && entry.unread > 0) {
+        ref.invalidate(unreadMessagesProvider);
+      }
       if (state.selected?.id == entry.id && send) {
         unawaited(loadThread(refresh: true));
       }
