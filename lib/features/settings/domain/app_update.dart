@@ -20,6 +20,8 @@ final class AppVersion implements Comparable<AppVersion> {
   final int major, minor, patch, build;
   final List<String> prerelease;
 
+  String get baseVersion => '$major.$minor.$patch';
+
   static AppVersion? tryParse(String value) {
     if (value.length > 128) return null;
     final match = RegExp(
@@ -104,4 +106,5 @@ abstract interface class AppUpdateRepository {
 abstract interface class UpdateCheckStore {
   /// Persist the local calendar day before the automatic network attempt.
   Future<bool> claimStartupDay(String day);
+  Future<bool> claimAutomaticPrompt(AppVersion version);
 }

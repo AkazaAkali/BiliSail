@@ -6,16 +6,18 @@
 
 关于页显示真实应用版本、可点击的 `https://github.com/CKopoer/BiliSail` 和“检查更新”。应用启动后不阻塞首屏，每个本地日历日首次启动检查一次；先持久化尝试日期，自动检查失败或没有新版本时不弹窗，当天重启不再次检查。手动检查不受日期限制，有加载状态和明确结果，与正在进行的自动检查共享同一次请求。
 
+2026-10-24 调整自动提醒规则：按 `major.minor.patch` 持久化最后自动提醒的版本，同一版本跨日、重启或仅增加 `+N` 构建号均不再自动弹窗；例如已提醒 `1.1.1+3` 后，`1.1.1+4` 保持安静，发现 `1.1.2` 时再次提醒。记录只向更新的版本推进，远端候选回退不会重新提醒旧版本。每日查询仍照常进行；手动点击“检查更新”绕过自动提醒记录，每次仍可提示包含最新构建号的新版本，合并进自动请求的手动检查也遵守此规则。
+
 新版本弹窗显示版本、预览标记与更新说明；“稍后再说”关闭弹窗，“前往 Release”调用系统浏览器打开该版本页面。只有用户点击才打开外部页面，不自动下载、安装或打开浏览器。提示由进程级宿主管理，切换或关闭设置标签不会取消整个应用的更新检查；同一请求不产生重复弹窗。退出或请求超时会取消网络读取，迟到响应不更新状态。
 
 ## 协议、版本与存储
 
 - 独立无凭据 `HttpClient`，单次 GET `https://api.github.com/repos/CKopoer/BiliSail/releases?per_page=100`；`Accept: application/vnd.github+json`、`X-GitHub-Api-Version: 2026-03-10`。不附 Bilibili Cookie/token，不跟随重定向、不自动重试，保留系统 TLS 验证。
 - 检查最近最多 100 个 Release，排除草稿，包含已公开的预览版本，按版本大小选候选。空列表表示暂无发布，错误格式不伪装成“已是最新”。依据 [GitHub Releases REST 文档](https://docs.github.com/en/rest/releases/releases#list-releases) 使用列表端点，兼容本项目的 prerelease 发布流程。
-- 版本先按 `major.minor.patch` 与预发布标识比较，再比较数字 Flutter `+N` 构建号，支持 `v0.1.0+2`。同一语义版本的不同数字构建可提示更新；非数字构建元数据不改变优先级，不按字符串字典序比较。
+- 版本先按 `major.minor.patch` 与预发布标识比较，再比较数字 Flutter `+N` 构建号，支持 `v0.1.0+2`。同一语义版本的不同数字构建仍被识别为更新，但自动弹窗按三段版本号去重，手动检查不受此限制；非数字构建元数据不改变优先级，不按字符串字典序比较。
 - `package_info_plus 10.2.2` 从已有锁定的传递依赖提升为直接依赖，BSD-3-Clause，支持 Android/Windows/macOS，未改变解析版本。常规运行读取平台包版本，[Release 脚本](../../tool/build-release.ps1) 通过 `BILISAIL_RELEASE_VERSION` 注入实际 `x.y.z+N`，避免 Android split APK 的 `versionCode +2000` 被当作 Release 构建号。自行执行 split APK 构建时应传相同 Dart define。
 - 网络总读取期限 12 秒，整个检查期限 20 秒；响应最多 2 MiB，展示说明最多 12000 字符。说明以纯文本显示；只接受本仓库的 HTTPS Release 链接，拒绝其他 host、仓库、端口、userinfo、query 或 fragment。
-- 日期写入既有 `settings` 表的 `app_update.last_startup_day.v1`，与账号无关。不改表、不改变 SQLite schemaVersion 2、不清空设置或历史；版本查询、HTTP、日期存储与链接打开均通过应用层注入。
+- 日期写入既有 `settings` 表的 `app_update.last_startup_day.v1`，最后自动提醒的三段版本号写入 `app_update.last_prompted_version.v1`，与账号无关。提醒记录在发布待显示提示前通过事务认领，读取或保存失败时自动检查保持安静；退出或超时后的存储响应不能恢复弹窗。不改表、不改变当前 SQLite schemaVersion 3、不清空设置或历史；版本查询、HTTP、日期及提醒存储与链接打开均通过应用层注入。
 
 ## 参考与采用范围
 
@@ -31,6 +33,8 @@
 ## 验证
 
 离线测试覆盖版本及构建号排序、预览/草稿、空列表、错误协议与链接、容量、SQLite 日期重开、跨日/失败后重启、手动合并、取消/超时与迟到结果、窄窗口、弹窗确认及浏览器打开失败。Windows 原生入口为 [windows_app_updates_test.dart](../../integration_test/windows_app_updates_test.dart)，在线读取需显式 `--dart-define=BILI_UPDATES_ONLINE=true`，正常检查不访问真实账号或外网。
+
+2026-10-24 自动提醒调整：更新专项 28 项离线测试通过，包含数据库重开后保留提醒记录、同版本跨日与构建号变化静默、下一三段版本再次弹窗、手动重复检查与合并请求仍提示、存储迟到响应不恢复弹窗。`tool/check.ps1 -SkipPub` 通过根应用与四个包的格式、静态分析、离线测试和打包边界检查；mux 的 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过，日志 `artifacts/app-updates-version-reminders-check.log`。此次未构建或进行 Windows／Android／macOS 实机验收，无运行中的调试实例可供热重载；下方为 2026-10-06 的历史验证记录。
 
 本轮在 Windows / Flutter 3.47.6 / Dart 3.13.5 完成：
 

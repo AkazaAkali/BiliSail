@@ -73,13 +73,14 @@ Widget _app(
   List<Uri> opened, {
   Widget home = const Scaffold(body: Text('首页')),
   bool openSucceeds = true,
+  DateTime? now,
 }) {
   final navigatorKey = GlobalKey<NavigatorState>();
   return ProviderScope(
     overrides: [
       appUpdateRepositoryProvider.overrideWithValue(repository),
       updateCheckStoreProvider.overrideWithValue(store),
-      updateClockProvider.overrideWithValue(() => DateTime(2026, 10, 6)),
+      updateClockProvider.overrideWithValue(() => now ?? DateTime(2026, 10, 6)),
       settingsRepositoryProvider.overrideWithValue(_SettingsRepository()),
       appUpdateLinkOpenerProvider.overrideWithValue((uri) async {
         opened.add(uri);
@@ -284,12 +285,23 @@ void main() {
     final store = SqliteUpdateCheckStore(first);
     expect(await store.claimStartupDay('2026-10-06'), isTrue);
     expect(await store.claimStartupDay('2026-10-06'), isFalse);
+    expect(await store.claimAutomaticPrompt(_version('1.1.1+3')), isTrue);
+    expect(
+      await first.readSetting(SqliteUpdateCheckStore.lastPromptedVersionKey),
+      '1.1.1',
+    );
     await first.close();
     final second = AppDatabase(NativeDatabase(file));
     addTearDown(second.close);
     final restored = SqliteUpdateCheckStore(second);
     expect(await restored.claimStartupDay('2026-10-06'), isFalse);
     expect(await restored.claimStartupDay('2026-10-07'), isTrue);
+    expect(await restored.claimAutomaticPrompt(_version('1.1.1+3')), isFalse);
+    expect(await restored.claimAutomaticPrompt(_version('v1.1.1+4')), isFalse);
+    expect(await restored.claimAutomaticPrompt(_version('1.1.2+0')), isTrue);
+    expect(await restored.claimAutomaticPrompt(_version('1.1.1+99')), isFalse);
+    expect(await restored.claimAutomaticPrompt(_version('1.2.0+0')), isTrue);
+    expect(await restored.claimAutomaticPrompt(_version('2.0.0+0')), isTrue);
     expect(
       await second.readSetting('preferences.v1'),
       '{"font":"harmonyOsSans"}',
@@ -349,6 +361,41 @@ void main() {
     await controller.checkManually();
     expect(container.read(appUpdateControllerProvider).message, '暂无已发布版本');
   });
+  test('manual checks bypass automatic version reminders every time', () async {
+    final repository = _UpdateRepository()..release = _release('1.1.1+4');
+    final store = _CheckStore()..promptedVersion = '1.1.1';
+    final container = _container(repository, store);
+    final controller = container.read(appUpdateControllerProvider.notifier);
+    await controller.checkOnStartup();
+    expect(container.read(appUpdateControllerProvider).pendingRelease, isNull);
+    for (var i = 0; i < 2; i++) {
+      await controller.checkManually();
+      expect(controller.takePendingRelease()?.version.label, '1.1.1+4');
+      expect(
+        container.read(appUpdateControllerProvider).message,
+        '发现新版本 1.1.1+4',
+      );
+    }
+    expect(repository.calls, 3);
+  });
+  test(
+    'manual check joining automatic reminder storage still prompts',
+    () async {
+      final pending = Completer<bool>();
+      final repository = _UpdateRepository()..release = _release('1.1.1+4');
+      final store = _CheckStore()..pendingPrompt = pending;
+      final container = _container(repository, store);
+      final controller = container.read(appUpdateControllerProvider.notifier);
+      final automatic = controller.checkOnStartup();
+      await Future<void>.delayed(Duration.zero);
+      final manual = controller.checkManually();
+      expect(identical(automatic, manual), isTrue);
+      pending.complete(false);
+      await manual;
+      expect(controller.takePendingRelease()?.version.label, '1.1.1+4');
+      expect(repository.calls, 1);
+    },
+  );
   test(
     'manual check shares the automatic request and surfaces its failure',
     () async {
@@ -414,6 +461,62 @@ void main() {
       );
     },
   );
+  testWidgets('late reminder storage cannot prompt after the check deadline', (
+    tester,
+  ) async {
+    final pending = Completer<bool>();
+    final repository = _UpdateRepository()..release = _release('1.1.1+3');
+    final container = _container(
+      repository,
+      _CheckStore()..pendingPrompt = pending,
+    );
+    final operation = container
+        .read(appUpdateControllerProvider.notifier)
+        .checkOnStartup();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 21));
+    await operation;
+    expect(repository.cancellation?.isCancelled, isTrue);
+    pending.complete(true);
+    await tester.pump();
+    expect(container.read(appUpdateControllerProvider).pendingRelease, isNull);
+    expect(container.read(appUpdateControllerProvider).message, isNull);
+  });
+  testWidgets(
+    'automatic prompts persist across days and ignore build-only releases',
+    (tester) async {
+      final repository = _UpdateRepository();
+      final store = _CheckStore();
+      final opened = <Uri>[];
+      var day = 6;
+      for (final (version, shouldPrompt) in [
+        ('1.1.1+3', true),
+        ('1.1.1+3', false),
+        ('1.1.1+4', false),
+        ('1.1.2+0', true),
+      ]) {
+        repository.release = _release(version);
+        await tester.pumpWidget(
+          _app(repository, store, opened, now: DateTime(2026, 10, day++)),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.byType(AlertDialog),
+          shouldPrompt ? findsOneWidget : findsNothing,
+          reason: version,
+        );
+        if (shouldPrompt) {
+          expect(find.text('发现新版本 $version'), findsOneWidget);
+          await tester.tap(find.text('稍后再说'));
+          await tester.pumpAndSettle();
+        }
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+      expect(repository.calls, 4);
+      expect(opened, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets(
     'startup prompt appears outside settings and opens exact Release only on click',
     (tester) async {
@@ -446,7 +549,9 @@ void main() {
       await tester.pumpWidget(
         _app(
           repository,
-          _CheckStore()..day = '2026-10-06',
+          _CheckStore()
+            ..day = '2026-10-06'
+            ..promptedVersion = '0.2.0',
           opened,
           home: const Scaffold(
             body: SettingsScreen(category: SettingsCategory.about),
@@ -528,10 +633,20 @@ final class _UpdateRepository implements AppUpdateRepository {
 
 final class _CheckStore implements UpdateCheckStore {
   String? day;
+  String? promptedVersion;
+  Completer<bool>? pendingPrompt;
   @override
   Future<bool> claimStartupDay(String value) async {
     if (value == day) return false;
     day = value;
+    return true;
+  }
+
+  @override
+  Future<bool> claimAutomaticPrompt(AppVersion version) async {
+    if (pendingPrompt case final result?) return result.future;
+    if (promptedVersion == version.baseVersion) return false;
+    promptedVersion = version.baseVersion;
     return true;
   }
 }

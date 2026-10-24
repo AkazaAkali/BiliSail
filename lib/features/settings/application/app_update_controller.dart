@@ -109,8 +109,16 @@ final class AppUpdateController extends Notifier<AppUpdateState> {
         if (!ref.mounted || cancellation.isCancelled) return;
         final newer =
             release != null && release.version.compareTo(installed) > 0;
+        var shouldPrompt = newer;
+        if (newer && !_manualRequested) {
+          final claimed = await ref
+              .read(updateCheckStoreProvider)
+              .claimAutomaticPrompt(release.version);
+          if (!ref.mounted || cancellation.isCancelled) return;
+          shouldPrompt = claimed || _manualRequested;
+        }
         state = AppUpdateState(
-          pendingRelease: newer ? release : null,
+          pendingRelease: shouldPrompt ? release : null,
           message: !_manualRequested
               ? null
               : newer

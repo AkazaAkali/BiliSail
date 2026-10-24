@@ -547,7 +547,7 @@ final class _AboutSettingsContent extends ConsumerWidget {
           label: Text(update.checking ? '正在检查更新…' : '检查更新'),
         ),
         const SizedBox(height: 8),
-        const Text('每天首次打开应用时会自动检查更新。'),
+        const Text('每天首次打开应用时会自动检查更新，同一版本仅自动提醒一次（不区分构建号）。'),
         if (update.message case final message?) ...[
           const SizedBox(height: 8),
           Text(message),
