@@ -511,6 +511,93 @@ void main() {
     expect(find.textContaining('新消息 15 ').hitTestable(), findsOneWidget);
   });
 
+  testWidgets(
+    'paused chat retains its reading window after all live messages are evicted',
+    (tester) async {
+      repository.chatMessages = List.generate(
+        LiveController.maxChatMessages,
+        (index) => LiveChatMessage(
+          id: 'history-$index',
+          userName: '观众',
+          text: '保留消息 $index ${'换行内容' * (index % 15)}',
+        ),
+      );
+      await showPage(tester);
+      await tester.pumpAndSettle();
+      await wheelChat(tester, -240);
+      await tester.pumpAndSettle();
+      final position = chatPosition(tester);
+      final before = position.pixels;
+      final extent = position.maxScrollExtent;
+      final visible = find.byType(LiveChatBubble).hitTestable().first;
+      final bubble = tester.widget<LiveChatBubble>(visible);
+      final anchor = find.byKey(bubble.key!);
+      final element = tester.element(anchor);
+      final top = tester.getTopLeft(anchor).dy;
+
+      for (var batch = 0; batch < 4; batch++) {
+        if (batch == 1) {
+          realtime.events.add(const [
+            LiveConnectionChanged(LiveConnectionPhase.reconnecting),
+          ]);
+        }
+        receiveMessages(batch * 150, 150);
+        await tester.pumpAndSettle();
+        expect(tester.element(anchor), same(element));
+        expect(tester.getTopLeft(anchor).dy, closeTo(top, .1));
+        expect(position.pixels, before);
+        expect(position.maxScrollExtent, extent);
+        expect(
+          container.read(liveControllerProvider(room.id)).messages,
+          hasLength(LiveController.maxChatMessages),
+        );
+      }
+      expect(
+        container
+            .read(liveControllerProvider(room.id))
+            .messages
+            .any((message) => message.id == bubble.message.id),
+        isFalse,
+      );
+
+      await wheelChat(tester, 50000);
+      await tester.pumpAndSettle();
+      expect(position.extentAfter, 0);
+      expect(find.textContaining('新消息 599 ').hitTestable(), findsOneWidget);
+      receiveMessages(600, 3);
+      await tester.pumpAndSettle();
+      expect(position.extentAfter, 0);
+      expect(find.textContaining('新消息 602 ').hitTestable(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('downward wheel resumes a paused window that now fits', (
+    tester,
+  ) async {
+    repository.chatMessages = List.generate(
+      20,
+      (index) => LiveChatMessage(userName: '观众', text: '历史消息 $index'),
+    );
+    await showPage(tester, height: 450);
+    await tester.pumpAndSettle();
+    await wheelChat(tester, -120);
+    await tester.pumpAndSettle();
+    expect(chatPosition(tester).extentAfter, greaterThan(0));
+    receiveMessages(0, 100);
+    await tester.pumpAndSettle();
+    await tester.binding.setSurfaceSize(const Size(1280, 1600));
+    await tester.pumpAndSettle();
+    expect(chatPosition(tester).maxScrollExtent, 0);
+    expect(find.textContaining('新消息 99 '), findsNothing);
+
+    await wheelChat(tester, 120);
+    await tester.pumpAndSettle();
+    expect(chatPosition(tester).extentAfter, 0);
+    expect(find.textContaining('新消息 99 ').hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final disableAnimations in [false, true]) {
     testWidgets(
       'manual wheel pauses even near bottom and resumes there (reduced motion: $disableAnimations)',
@@ -591,7 +678,7 @@ void main() {
     await tester.pumpAndSettle();
     receiveMessages(24, 6);
     await tester.pumpAndSettle();
-    expect(position.pixels, 0);
+    expect(position.extentAfter, 0);
     expect(
       find.byKey(const ValueKey('live-sc-card-sc-1')).hitTestable(),
       findsOneWidget,
@@ -679,7 +766,10 @@ void main() {
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset(rect.right - 4, rect.bottom - 20));
     await tester.pumpAndSettle();
-    Future<void> dragThumb(double delta) async {
+    Future<void> dragThumb(
+      double delta, {
+      Future<void> Function()? whileHeld,
+    }) async {
       final thumbHeight =
           (rect.height - 6) *
           position.viewportDimension /
@@ -696,11 +786,33 @@ void main() {
       await tester.pump();
       await mouse.down(center);
       await mouse.moveBy(Offset(0, delta));
+      if (whileHeld != null) await whileHeld();
       await mouse.up();
       await tester.pumpAndSettle();
     }
 
-    await dragThumb(-80);
+    await dragThumb(
+      -80,
+      whileHeld: () async {
+        await tester.pumpAndSettle();
+        final before = position.pixels;
+        final extent = position.maxScrollExtent;
+        // Scrollbar dragging temporarily ignores pointer hits in the viewport.
+        final bubble = tester
+            .widgetList<LiveChatBubble>(find.byType(LiveChatBubble))
+            .firstWhere(
+              (bubble) =>
+                  rect.contains(tester.getCenter(find.byKey(bubble.key!))),
+            );
+        final anchor = find.byKey(bubble.key!);
+        final top = tester.getTopLeft(anchor).dy;
+        receiveMessages(100, 600);
+        await tester.pumpAndSettle();
+        expect(position.pixels, before);
+        expect(position.maxScrollExtent, extent);
+        expect(tester.getTopLeft(anchor).dy, closeTo(top, .1));
+      },
+    );
     expect(position.extentAfter, greaterThan(48));
     final before = position.pixels;
     receiveMessages(0, 8);
@@ -708,10 +820,35 @@ void main() {
     expect(position.pixels, before);
     await dragThumb(rect.height);
     expect(position.extentAfter, 0);
+    expect(find.textContaining('新消息 7 ').hitTestable(), findsOneWidget);
     receiveMessages(8, 8);
     await tester.pumpAndSettle();
     expect(position.extentAfter, 0);
     await mouse.removePointer();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('reloading the room clears a paused reading window', (
+    tester,
+  ) async {
+    repository.chatMessages = List.generate(
+      80,
+      (index) => LiveChatMessage(userName: '观众', text: '旧消息 $index'),
+    );
+    await showPage(tester);
+    await tester.pumpAndSettle();
+    await wheelChat(tester, -240);
+    await tester.pumpAndSettle();
+    expect(chatPosition(tester).extentAfter, greaterThan(0));
+    repository.chatMessages = List.generate(
+      80,
+      (index) => LiveChatMessage(userName: '观众', text: '重载消息 $index'),
+    );
+    await container.read(liveControllerProvider(room.id).notifier).load();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('旧消息'), findsNothing);
+    expect(find.textContaining('重载消息 79').hitTestable(), findsOneWidget);
+    expect(chatPosition(tester).extentAfter, 0);
     expect(tester.takeException(), isNull);
   });
 
@@ -780,7 +917,7 @@ void main() {
       ]);
 
       await tester.tap(find.byKey(const ValueKey('live-sc-chip-sc-1')));
-      await tester.pump();
+      await tester.pumpAndSettle();
       await tester.tap(find.text('观众甲'));
       expect(opened.last, const UserId('456'));
     },
@@ -852,15 +989,15 @@ void main() {
 
     final player = tester.state(find.byType(_PlayerProbe));
     await tester.tap(find.byKey(const ValueKey('live-sc-chip-sc-1')));
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(find.text('第一条完整的 SC 内容'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('live-sc-chip-sc-2')));
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(find.text('第一条完整的 SC 内容'), findsNothing);
     expect(find.text('第二条完整的 SC 内容'), findsOneWidget);
     expect(find.text('关闭 SC 详情'), findsNothing);
     await tester.tap(find.byKey(const ValueKey('live-sc-chip-sc-2')));
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(find.text('第二条完整的 SC 内容'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('live-tab-1')));
@@ -879,7 +1016,85 @@ void main() {
     expect(tester.state(find.byType(_PlayerProbe)), same(player));
   });
 
+  testWidgets(
+    'SC stays visible while reading chat and reopens with one click',
+    (tester) async {
+      repository.chatMessages = List.generate(
+        80,
+        (index) => LiveChatMessage(userName: '观众', text: '聊天消息 $index'),
+      );
+      await showPage(tester);
+      await tester.pumpAndSettle();
+      final bubble = find.byKey(const ValueKey('live-sc-chip-sc-1'));
+      final card = find.byKey(const ValueKey('live-sc-card-sc-1'));
+      await tester.tap(bubble);
+      await tester.pumpAndSettle();
+      expect(card.hitTestable(), findsOneWidget);
+
+      await wheelChat(tester, -600);
+      await tester.pumpAndSettle();
+      expect(chatPosition(tester).extentAfter, greaterThan(0));
+      expect(card.hitTestable(), findsOneWidget);
+      final offset = chatPosition(tester).pixels;
+      receiveMessages(0, 20);
+      await tester.pumpAndSettle();
+      expect(card.hitTestable(), findsOneWidget);
+      expect(chatPosition(tester).pixels, offset);
+
+      await tester.tap(bubble);
+      await tester.pumpAndSettle();
+      expect(card, findsNothing);
+      expect(chatPosition(tester).pixels, offset);
+
+      await tester.tap(bubble);
+      await tester.pumpAndSettle();
+      expect(card.hitTestable(), findsOneWidget);
+      expect(chatPosition(tester).pixels, offset);
+    },
+  );
+
   for (final disableAnimations in [false, true]) {
+    testWidgets(
+      'SC opens and closes smoothly (reduced motion: $disableAnimations)',
+      (tester) async {
+        await showPage(tester, disableAnimations: disableAnimations);
+        await tester.pumpAndSettle();
+        final details = find.byKey(const ValueKey('live-sc-details'));
+        final bubble = find.byKey(const ValueKey('live-sc-chip-sc-1'));
+        final card = find.byKey(const ValueKey('live-sc-card-sc-1'));
+        final player = tester.state(find.byType(_PlayerProbe));
+        expect(tester.getSize(details).height, 0);
+
+        await tester.tap(bubble);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        final openingHeight = tester.getSize(details).height;
+        expect(openingHeight, greaterThan(0));
+        await tester.pumpAndSettle();
+        final expandedHeight = tester.getSize(details).height;
+        expect(
+          openingHeight,
+          disableAnimations ? expandedHeight : lessThan(expandedHeight),
+        );
+        expect(card.hitTestable(), findsOneWidget);
+
+        await tester.tap(bubble);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        final closingHeight = tester.getSize(details).height;
+        if (disableAnimations) {
+          expect(closingHeight, 0);
+        } else {
+          expect(closingHeight, inExclusiveRange(0, expandedHeight));
+          expect(card.hitTestable(), findsNothing);
+        }
+        await tester.pumpAndSettle();
+        expect(tester.getSize(details).height, 0);
+        expect(card, findsNothing);
+        expect(tester.state(find.byType(_PlayerProbe)), same(player));
+      },
+    );
+
     testWidgets(
       'overflow SC supports wheel and bottom thumb (reduced motion: $disableAnimations)',
       (tester) async {
@@ -957,6 +1172,70 @@ void main() {
     );
   }
 
+  testWidgets('rapid SC changes settle on the latest selection', (
+    tester,
+  ) async {
+    await showPage(tester);
+    final first = find.byKey(const ValueKey('live-sc-chip-sc-1'));
+    final second = find.byKey(const ValueKey('live-sc-chip-sc-2'));
+    for (final bubble in [first, second, second, first]) {
+      await tester.tap(bubble);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    await tester.pumpAndSettle();
+    expect(find.text('第一条完整的 SC 内容').hitTestable(), findsOneWidget);
+    expect(find.text('第二条完整的 SC 内容'), findsNothing);
+    expect(tester.widget<LiveSuperChatBubble>(first).selected, isTrue);
+    expect(tester.widget<LiveSuperChatBubble>(second).selected, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('long SC scrolls independently in a narrow large-text sidebar', (
+    tester,
+  ) async {
+    repository.scMessages = [
+      LiveSuperChatMessage(
+        id: 'long',
+        userName: '观众',
+        text: List.generate(40, (index) => '长留言第 $index 行').join('\n'),
+        price: 30,
+      ),
+    ];
+    await showPage(tester, width: 320, height: 740, textScale: 2);
+    await tester.tap(find.byKey(const ValueKey('live-sc-chip-long')));
+    await tester.pumpAndSettle();
+    final details = find.byKey(const ValueKey('live-sc-details'));
+    final list = find.byKey(const ValueKey('live-chat-list'));
+    expect(tester.getSize(details).height, greaterThan(0));
+    expect(
+      tester.getSize(list).height,
+      greaterThanOrEqualTo(tester.getSize(details).height - 1),
+    );
+    final scrollable = find.descendant(
+      of: details,
+      matching: find.byType(Scrollable),
+    );
+    final position = tester.state<ScrollableState>(scrollable).position;
+    final chatOffset = chatPosition(tester).pixels;
+    expect(position.maxScrollExtent, greaterThan(0));
+    await tester.drag(details, const Offset(0, -150));
+    await tester.pumpAndSettle();
+    expect(position.pixels, greaterThan(0));
+    expect(chatPosition(tester).pixels, chatOffset);
+    expect(tester.takeException(), isNull);
+
+    // The outgoing card must also respect a smaller viewport during collapse.
+    await tester.tap(find.byKey(const ValueKey('live-sc-chip-long')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+    await tester.binding.setSurfaceSize(const Size(320, 500));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(details).height, 0);
+  });
+
   testWidgets('320 px with large text keeps chat and SC reachable', (
     tester,
   ) async {
@@ -1005,9 +1284,8 @@ void main() {
     expect(after, before);
 
     await tester.tap(find.byKey(const ValueKey('live-sc-chip-sc-1')));
-    await tester.pump();
-    await tester.pump();
-    expect(tester.state<ScrollableState>(scrollable).position.pixels, 0);
+    await tester.pumpAndSettle();
+    expect(tester.state<ScrollableState>(scrollable).position.pixels, before);
     expect(
       find.byKey(const ValueKey('live-sc-card-sc-1')).hitTestable(),
       findsOneWidget,
@@ -1044,7 +1322,7 @@ void main() {
       expect(find.text('3s'), findsNWidgets(2));
       now = now.add(const Duration(seconds: 3));
       await tester.pump(const Duration(seconds: 3));
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('live-sc-chip-timed')), findsNothing);
       expect(find.byKey(const ValueKey('live-sc-card-timed')), findsNothing);
       expect(find.text('SC (0)'), findsOneWidget);

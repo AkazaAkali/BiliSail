@@ -79,3 +79,17 @@
 `tool/check.ps1 -SkipPub` 完整通过：根应用 608、`bili_api` 207、`bili_player` 16、`bili_danmaku` 19，共 850 项测试；根应用和三个包的格式检查及静态分析均通过，日志为 `artifacts/live-chat-follow-check.log`。其中直播播放页面共 19 项组件测试，本轮新增 8 项滚动行为回归。
 
 `flutter build windows --release --no-pub` 通过，产物为 `build/windows/x64/runner/Release/bilisail.exe`，日志为 `artifacts/live-chat-follow-windows-build.log`。真实直播窗口的拖动体验、Android/macOS 实机与长时间性能未在本轮实测。
+
+## 回看弹幕时固定阅读窗口（2026-10-24）
+
+前序实现暂停了自动跟随，但仍将新消息及 500 条上限的头部淘汰同步到正在阅读的列表。布局后的可见行补偿只覆盖仍挂载的消息，连续变高消息批次可能让锚点离开挂载区域；正在拖动滚动条时还会跳过补偿，导致文字位置或滚动条范围改变。
+
+现在人工上滚、触摸拖动或上拖滚动条后，聊天展示保留当前不可变消息列表及列表内连接提示。后台控制器继续接收最新消息，播放器画面弹幕和当前错误提示继续更新；新消息、历史元数据补充及头部淘汰不再替换回看列表。向下回到列表底部时立即显示最新消息并恢复持续跟随，不需要等待下一条消息。换房、账号重建或房间重新加载清空回看状态。聊天／SC 切换、收起侧栏继续保留原跟随意图。
+
+展示窗口和控制器最新窗口分别最多 500 条，不累计暂停期间的无限历史。行缓存及内容缓存随展示窗口清理；恢复跟随后释放旧窗口。移除布局后扫描 GlobalKey 和跳转补偿，继续使用稳定 key 和懒构建列表。
+
+新增回归覆盖变高消息分批累计超过 500 条后，原可见 Element、纵向坐标、像素偏移和滚动范围保持；上拖滚动条并按住期间收到 600 条消息仍保持位置；回到底部立即显示最新消息；房间重载清除旧阅读窗口。连接阶段变化、已有触摸／滚轮、减少动画、侧栏／子标签／窗口与换房回归一并保留。本项只修改 Flutter 展示逻辑，真实直播窗口手感、Android／macOS 实机及性能尚未验收。
+
+本任务 11 项定向回归通过，包括窗口扩大至可完整显示回看列表后，向下滚轮仍能主动恢复跟随；日志为 `build/live-chat-reading-window-targeted.log`。四个独立包的格式、分析和测试另行完成：`bili_api` 426、`bili_player` 78、`bili_danmaku` 93、`bili_mux` 2 项通过；mux 的 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过，见 `build/live-chat-reading-window-packages.log`。
+
+工作区同时存在 SC 展示等其他修改。`tool/check.ps1 -SkipPub` 首次运行根应用 1990 项通过、同期 SC 重开用例失败；该处继续修改后，复核被 `SizeTransition.axisAlignment` 废弃 API 提示阻断，日志为 `build/live-chat-reading-window-check-final.log`。直播页面整文件复核另有同期窄屏长 SC 滚动用例失败；不将本次定向通过记作当前工作区全量通过。保留同期修改，没有重新构建；未发现可连接的调试实例，热重载未执行。

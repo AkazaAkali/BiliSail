@@ -63,23 +63,22 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
   bool _adjustingChatScroll = false;
   bool _chatFollowScheduled = false;
   String? _chatStatusAfterMessageKey;
+  String? _displayedChatStatusAfterMessageKey;
+  LiveConnectionPhase _displayedChatConnectionPhase = LiveConnectionPhase.idle;
   LiveRoom? _playerRoom;
   String? _playerRequestedId;
   LivePlayerBuilder? _playerBuilder;
   Widget? _playerWidget;
   final _chatContent = LiveChatContentCache();
-  final _chatViewportKey = GlobalKey();
   final _chatRows =
       <
         String,
         ({
           LiveChatMessage message,
           ValueChanged<UserId>? onOpenUser,
-          GlobalKey anchor,
           Widget widget,
         })
       >{};
-  bool _chatAnchorScheduled = false;
   List<LiveChatMessage>? _indexedMessages;
   Map<String, int> _messageIndices = const {};
 
@@ -109,6 +108,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
       _followChat = true;
       _chatUserScrolling = false;
       _chatStatusAfterMessageKey = null;
+      _indexedMessages = null;
     }
   }
 
@@ -155,10 +155,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
           !_chatScrollController.hasClients) {
         return;
       }
-      final state = ref.read(liveControllerProvider(RoomId(widget.roomId)));
-      if (state.superChats.any((item) => item.id == _selectedSuperChatId)) {
-        return;
-      }
       final position = _chatScrollController.position;
       if (position.hasContentDimensions &&
           position.pixels != position.maxScrollExtent) {
@@ -175,6 +171,13 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
     }
     final position = _chatScrollController.position;
     final delta = event.scrollDelta.dy;
+    if (delta > 0 && position.extentAfter <= 1 && !_followChat) {
+      // A resized viewport can already fit the frozen window. Downward input
+      // still means returning to live chat even without a scroll update.
+      setState(() => _followChat = true);
+      _scheduleChatFollow();
+      return;
+    }
     if ((delta < 0 && position.pixels > position.minScrollExtent) ||
         (delta > 0 && position.pixels < position.maxScrollExtent)) {
       _chatUserScrolling = true;
@@ -192,7 +195,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
       _chatUserScrolling = true;
     }
     if (_chatUserScrolling && notification is ScrollUpdateNotification) {
-      _followChat = notification.metrics.extentAfter <= 1;
+      final delta = notification.scrollDelta ?? 0;
+      if (delta < 0 || (delta > 0 && notification.metrics.extentAfter > 1)) {
+        _followChat = false;
+      } else if (delta > 0 &&
+          notification.metrics.extentAfter <= 1 &&
+          !_followChat) {
+        // Publish the latest bounded window even if no further message arrives.
+        setState(() => _followChat = true);
+        _scheduleChatFollow();
+      }
     }
     if (notification is ScrollEndNotification && _chatUserScrolling) {
       _chatUserScrolling = false;
@@ -228,6 +240,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
       }
       if (next.room == null || next.messages.isEmpty) {
         _chatStatusAfterMessageKey = null;
+        // Account/room reloads must also release the previous reading snapshot.
+        _indexedMessages = null;
+        _followChat = true;
+        _chatUserScrolling = false;
       } else if (previous?.connectionPhase != next.connectionPhase) {
         // Anchor before this update's new messages, including a batch that
         // contains both authentication success and the first live chats.
@@ -683,111 +699,150 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
     LiveState state,
     LiveController controller,
   ) {
-    if (!identical(_indexedMessages, state.messages)) {
-      _indexedMessages = state.messages;
+    // Freeze only the displayed window while reading history. The controller
+    // keeps receiving up to 500 latest messages independently, so eviction or
+    // metadata updates cannot move the text or scrollbar under the user's hand.
+    final messages = _followChat
+        ? state.messages
+        : (_indexedMessages ?? state.messages);
+    if (_followChat || _indexedMessages == null) {
+      _displayedChatStatusAfterMessageKey = _chatStatusAfterMessageKey;
+      _displayedChatConnectionPhase = state.connectionPhase;
+    }
+    if (!identical(_indexedMessages, messages)) {
+      _indexedMessages = messages;
       _messageIndices = {
-        for (var index = 0; index < state.messages.length; index++)
-          state.messages[index].deduplicationKey: index,
+        for (var index = 0; index < messages.length; index++)
+          messages[index].deduplicationKey: index,
       };
-      _preserveChatAnchor(_messageIndices.keys.toSet());
       _chatRows.removeWhere((key, _) => !_messageIndices.containsKey(key));
       _chatContent.retain(_messageIndices.keys.toSet());
     }
     final selected = state.superChats
         .where((message) => message.id == _selectedSuperChatId)
         .firstOrNull;
-    if (selected == null) _scheduleChatFollow();
-    final bodyCount = state.messages.isEmpty ? 1 : state.messages.length;
-    final statusAnchor = _chatStatusAfterMessageKey;
+    _scheduleChatFollow();
+    final bodyCount = messages.isEmpty ? 1 : messages.length;
+    final statusAnchor = _displayedChatStatusAfterMessageKey;
     final anchorIndex = _messageIndices[statusAnchor] ?? -1;
     // Drop the notice with its message once the bounded chat window evicts it.
     final statusIndex = statusAnchor == null
-        ? (state.messages.isEmpty ? bodyCount : 0)
+        ? (messages.isEmpty ? bodyCount : 0)
         : anchorIndex < 0
         ? null
         : anchorIndex + 1;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Divider(height: 1),
-        Expanded(
-          child: Listener(
-            key: _chatViewportKey,
-            onPointerSignal: _onChatPointerSignal,
-            child: NotificationListener<ScrollMetricsNotification>(
-              onNotification: (notification) {
-                if (notification.depth == 0) _scheduleChatFollow();
-                return false;
-              },
-              child: NotificationListener<ScrollNotification>(
-                onNotification: _onChatScroll,
-                child: ListView.builder(
-                  key: const ValueKey('live-chat-list'),
-                  controller: _chatScrollController,
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                  itemCount:
-                      (selected == null ? 0 : 1) +
-                      bodyCount +
-                      (statusIndex == null ? 0 : 1),
-                  findChildIndexCallback: (key) {
-                    if (key == const ValueKey('live-selected-sc')) {
-                      return selected == null ? null : 0;
-                    }
-                    final prefix = selected == null ? 0 : 1;
-                    if (key == const ValueKey('live-chat-status')) {
-                      return statusIndex == null ? null : prefix + statusIndex;
-                    }
-                    if (key is! ValueKey<(String, String)>) return null;
-                    final index = _messageIndices[key.value.$2];
-                    if (index == null) return null;
-                    return prefix +
-                        index +
-                        (statusIndex != null && index >= statusIndex ? 1 : 0);
-                  },
-                  itemBuilder: (context, index) {
-                    if (selected != null && index == 0) {
-                      return Padding(
-                        key: const ValueKey('live-selected-sc'),
-                        padding: const EdgeInsets.only(bottom: 8),
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Keep the selected SC visible independently of chat scroll/eviction.
+          // Bound long messages so chat remains reachable on small windows.
+          ConstrainedBox(
+            key: const ValueKey('live-sc-details'),
+            constraints: BoxConstraints(maxHeight: constraints.maxHeight * .5),
+            child: AnimatedSwitcher(
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 220),
+              reverseDuration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 180),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) => SizeTransition(
+                sizeFactor: animation,
+                alignment: Alignment.topCenter,
+                child: FadeTransition(opacity: animation, child: child),
+              ),
+              layoutBuilder: (current, previous) => Stack(
+                alignment: Alignment.topCenter,
+                children: [
+                  for (final child in previous)
+                    ExcludeFocus(
+                      child: ExcludeSemantics(
+                        child: IgnorePointer(
+                          child: TickerMode(enabled: false, child: child),
+                        ),
+                      ),
+                    ),
+                  ?current,
+                ],
+              ),
+              child: selected == null
+                  ? const SizedBox.shrink(key: ValueKey('live-sc-collapsed'))
+                  : SingleChildScrollView(
+                      key: ValueKey(('live-selected-sc', selected.id)),
+                      primary: false,
+                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                      child: SizedBox(
+                        width: double.infinity,
                         child: _superChatCard(selected),
-                      );
-                    }
-                    final bodyIndex = index - (selected == null ? 0 : 1);
-                    if (bodyIndex == statusIndex) {
-                      return KeyedSubtree(
-                        key: const ValueKey('live-chat-status'),
-                        child: _chatConnectionStatus(context, state),
-                      );
-                    }
-                    if (state.messages.isEmpty) {
-                      return switch (state.chatMessage) {
-                        final String message => StateView.error(
-                          message: message,
-                          onAction: controller.refreshChat,
-                        ),
-                        null when state.chatLoading => const StateView.loading(
-                          message: '正在读取最近消息…',
-                        ),
-                        null => const StateView.empty(
-                          message: '暂无聊天消息',
-                          icon: Icons.chat_bubble_outline,
-                        ),
-                      };
-                    }
-                    final messageIndex =
-                        bodyIndex -
-                        (statusIndex != null && bodyIndex > statusIndex
-                            ? 1
-                            : 0);
-                    final message = state.messages[messageIndex];
-                    return _chatRow(message);
-                  },
+                      ),
+                    ),
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: Listener(
+              onPointerSignal: _onChatPointerSignal,
+              child: NotificationListener<ScrollMetricsNotification>(
+                onNotification: (notification) {
+                  if (notification.depth == 0) _scheduleChatFollow();
+                  return false;
+                },
+                child: NotificationListener<ScrollNotification>(
+                  onNotification: _onChatScroll,
+                  child: ListView.builder(
+                    key: const ValueKey('live-chat-list'),
+                    controller: _chatScrollController,
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                    itemCount: bodyCount + (statusIndex == null ? 0 : 1),
+                    findChildIndexCallback: (key) {
+                      if (key == const ValueKey('live-chat-status')) {
+                        return statusIndex;
+                      }
+                      if (key is! ValueKey<(String, String)>) return null;
+                      final index = _messageIndices[key.value.$2];
+                      if (index == null) return null;
+                      return index +
+                          (statusIndex != null && index >= statusIndex ? 1 : 0);
+                    },
+                    itemBuilder: (context, bodyIndex) {
+                      if (bodyIndex == statusIndex) {
+                        return KeyedSubtree(
+                          key: const ValueKey('live-chat-status'),
+                          child: _chatConnectionStatus(context, state),
+                        );
+                      }
+                      if (messages.isEmpty) {
+                        return switch (state.chatMessage) {
+                          final String message => StateView.error(
+                            message: message,
+                            onAction: controller.refreshChat,
+                          ),
+                          null when state.chatLoading =>
+                            const StateView.loading(message: '正在读取最近消息…'),
+                          null => const StateView.empty(
+                            message: '暂无聊天消息',
+                            icon: Icons.chat_bubble_outline,
+                          ),
+                        };
+                      }
+                      final messageIndex =
+                          bodyIndex -
+                          (statusIndex != null && bodyIndex > statusIndex
+                              ? 1
+                              : 0);
+                      final message = messages[messageIndex];
+                      return _chatRow(message);
+                    },
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -799,11 +854,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
         previous.onOpenUser == widget.onOpenUser) {
       return previous.widget;
     }
-    final anchor = previous?.anchor ?? GlobalKey();
     final row = KeyedSubtree(
       key: ValueKey(('live-message', key)),
       child: LiveChatBubble(
-        key: anchor,
+        key: ValueKey(('live-chat-bubble', key)),
         message: message,
         content: _chatContent.resolve(message),
         onOpenUser: widget.onOpenUser,
@@ -812,83 +866,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
     _chatRows[key] = (
       message: message,
       onOpenUser: widget.onOpenUser,
-      anchor: anchor,
       widget: row,
     );
     return row;
-  }
-
-  // Pixel offsets alone cannot retain the reading position when the bounded
-  // window evicts a variable-height head. Anchor a surviving visible row for
-  // one layout; following and active user scrolling keep their own semantics.
-  void _preserveChatAnchor(Set<String> retained) {
-    if (_followChat ||
-        _chatUserScrolling ||
-        _chatAnchorScheduled ||
-        _lastActive != true ||
-        !_infoVisible ||
-        _tab != 0 ||
-        !_chatScrollController.hasClients) {
-      return;
-    }
-    final viewport = _chatViewportKey.currentContext?.findRenderObject();
-    if (viewport is! RenderBox || !viewport.attached || !viewport.hasSize) {
-      return;
-    }
-    final top = viewport.localToGlobal(Offset.zero).dy;
-    final bottom = top + viewport.size.height;
-    GlobalKey? selected;
-    double? selectedTop;
-    for (final entry in _chatRows.entries) {
-      if (!retained.contains(entry.key)) continue;
-      final box = entry.value.anchor.currentContext?.findRenderObject();
-      if (box is! RenderBox || !box.attached || !box.hasSize) continue;
-      final dy = box.localToGlobal(Offset.zero).dy;
-      if (dy < bottom &&
-          dy + box.size.height > top &&
-          (selectedTop == null || dy < selectedTop)) {
-        selected = entry.value.anchor;
-        selectedTop = dy;
-      }
-    }
-    if (selected == null || selectedTop == null) return;
-    final anchor = selected;
-    final oldTop = selectedTop - top;
-    _chatAnchorScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _chatAnchorScheduled = false;
-      if (!mounted ||
-          _followChat ||
-          _chatUserScrolling ||
-          !_chatScrollController.hasClients ||
-          _lastActive != true ||
-          !_infoVisible ||
-          _tab != 0) {
-        return;
-      }
-      final box = anchor.currentContext?.findRenderObject();
-      if (box is! RenderBox || !box.attached || !box.hasSize) return;
-      final currentViewport = _chatViewportKey.currentContext
-          ?.findRenderObject();
-      if (currentViewport is! RenderBox ||
-          !currentViewport.attached ||
-          !currentViewport.hasSize) {
-        return;
-      }
-      final delta =
-          box.localToGlobal(Offset.zero).dy -
-          currentViewport.localToGlobal(Offset.zero).dy -
-          oldTop;
-      final position = _chatScrollController.position;
-      if (delta.abs() > 0.1 && position.hasContentDimensions) {
-        _jumpChatTo(
-          (position.pixels + delta).clamp(
-            position.minScrollExtent,
-            position.maxScrollExtent,
-          ),
-        );
-      }
-    });
   }
 
   Widget _chatConnectionStatus(BuildContext context, LiveState state) {
@@ -900,7 +880,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
         children: [
           Expanded(
             child: Text(
-              switch (state.connectionPhase) {
+              switch (_displayedChatConnectionPhase) {
                 LiveConnectionPhase.connected => '实时弹幕已连接',
                 LiveConnectionPhase.fetching ||
                 LiveConnectionPhase.connecting ||
@@ -999,23 +979,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen>
       selected: selected,
       clock: ref.read(liveClockProvider),
       onPressed: () {
-        if (!selected && _chatScrollController.hasClients) {
-          // Reset the old list anchor before inserting a full SC card at index 0.
-          _jumpChatTo(0);
-        }
         setState(() {
           _tab = 0;
-          _selectedSuperChatId = selected ? null : message.id;
+          _selectedSuperChatId = _selectedSuperChatId == message.id
+              ? null
+              : message.id;
         });
-        if (!selected) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted &&
-                _selectedSuperChatId == message.id &&
-                _chatScrollController.hasClients) {
-              _jumpChatTo(0);
-            }
-          });
-        }
       },
     );
   }
