@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:bili_danmaku/bili_danmaku.dart';
+import 'package:bili_player/bili_player.dart';
+import 'package:bilisail/core/platform/window_service.dart';
 import 'package:bilisail/core/presentation/workspace_activity.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/features/auth/application/auth_controller.dart';
@@ -10,10 +12,18 @@ import 'package:bilisail/features/live/domain/live_chat_repository.dart';
 import 'package:bilisail/features/live/domain/live_repository.dart';
 import 'package:bilisail/features/live/domain/live_room.dart';
 import 'package:bilisail/features/live/presentation/live_player_danmaku.dart';
+import 'package:bilisail/features/playback/application/playback_session.dart';
+import 'package:bilisail/features/playback/domain/content_playback.dart';
+import 'package:bilisail/features/playback/domain/playback_repository.dart';
+import 'package:bilisail/features/playback/presentation/playback_panel.dart';
 import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../../support/input_test_app.dart';
+import '../../support/video_card_fake_engine.dart';
 
 void main() {
   late _Realtime realtime;
@@ -57,6 +67,7 @@ void main() {
                     height: 240,
                     child: LivePlayerDanmaku(
                       roomId: canonical,
+                      builder: (_, overlay) => overlay,
                       settings:
                           settings ??
                           AppSettings(
@@ -80,6 +91,200 @@ void main() {
   LiveDanmakuController drawing(WidgetTester tester) => tester
       .widget<LiveDanmakuOverlay>(find.byType(LiveDanmakuOverlay))
       .controller;
+
+  Future<void> pumpFrames(WidgetTester tester) async {
+    for (var i = 0; i < 8; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+  }
+
+  Future<void> showPlayer(
+    WidgetTester tester,
+    PlaybackSession session,
+    _Window window, {
+    bool active = true,
+    AppSettings settings = const AppSettings.defaults(),
+  }) async {
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: ProviderScope(
+          overrides: [playbackSessionProvider.overrideWithValue(session)],
+          child: InputTestApp(
+            home: Scaffold(
+              body: WorkspaceActivity(
+                active: active,
+                child: LiveDanmakuRoomScope(
+                  requestedId: requested,
+                  child: Center(
+                    child: SizedBox(
+                      width: 600,
+                      height: 300,
+                      child: LivePlayerDanmaku(
+                        roomId: canonical,
+                        settings: settings,
+                        builder: (_, overlay) => PlaybackPanel(
+                          target: const LivePlaybackTarget('12345'),
+                          settings: settings,
+                          window: window,
+                          onToggleComments: () {},
+                          danmakuOverlayBuilder: (_) => overlay,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await pumpFrames(tester);
+  }
+
+  testWidgets(
+    'live fullscreen round trips preserve arrivals and drawing state',
+    (tester) async {
+      final engine = _Engine();
+      final session = PlaybackSession(
+        engine: engine,
+        repository: _UnusedPlayback(),
+        contentRepository: _LivePlayback(),
+        progress: _UnusedProgress(),
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      final window = _Window();
+      await showPlayer(tester, session, window);
+      final live = container.read(liveControllerProvider(requested).notifier);
+      live.setActive(true);
+      await pumpFrames(tester);
+      realtime.events.add(const [
+        LiveChatReceived(
+          LiveChatMessage(userName: '甲', text: 'scroll', id: 'scroll'),
+        ),
+        LiveChatReceived(
+          LiveChatMessage(userName: '乙', text: 'top', id: 'top', mode: 5),
+        ),
+        LiveChatReceived(
+          LiveChatMessage(userName: '丙', text: 'bottom', id: 'bottom', mode: 4),
+        ),
+      ]);
+      await pumpFrames(tester);
+      final original = drawing(tester);
+      final events = original.frame().map((p) => p.event).toList();
+      expect(events.map((e) => e.text), ['scroll', 'top', 'bottom']);
+      final layouts = original.textLayoutBuildCount;
+      final generation = session.sourceGeneration;
+
+      void expectPreserved() {
+        expect(drawing(tester), same(original));
+        expect(original.frame().map((p) => p.event), events);
+        expect(original.textLayoutBuildCount, layouts);
+        expect(realtime.rooms, [canonical]);
+        expect(engine.opens, 1);
+        expect(session.sourceGeneration, generation);
+        expect(find.byType(VideoSurface), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      }
+
+      for (var cycle = 0; cycle < 3; cycle++) {
+        if (cycle == 1) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+        } else {
+          await tester.tap(find.byTooltip('全屏（F）'));
+        }
+        await pumpFrames(tester);
+        expect(window.fullScreen, isTrue);
+        expectPreserved();
+        if (cycle == 1) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        } else {
+          await tester.tap(find.byTooltip('退出全屏（Esc）'));
+        }
+        await pumpFrames(tester);
+        expect(window.fullScreen, isFalse);
+        expectPreserved();
+      }
+
+      await showPlayer(tester, session, window, active: false);
+      expect(original.frame(), isEmpty);
+      realtime.events.add(const [
+        LiveChatReceived(
+          LiveChatMessage(userName: '甲', text: 'hidden', id: 'hidden'),
+        ),
+      ]);
+      await pumpFrames(tester);
+      await showPlayer(tester, session, window);
+      expect(drawing(tester), same(original));
+      expect(original.frame(), isEmpty);
+      live.setActive(false);
+      await tester.pumpWidget(const SizedBox());
+      await pumpFrames(tester);
+      expect(original.isAnimating, isFalse);
+    },
+  );
+
+  testWidgets(
+    'live messages received between fullscreen surfaces are retained',
+    (tester) async {
+      final session = PlaybackSession(
+        engine: _Engine(),
+        repository: _UnusedPlayback(),
+        contentRepository: _LivePlayback(),
+        progress: _UnusedProgress(),
+        accountScope: () => 'guest',
+      );
+      addTearDown(session.close);
+      final window = _Window();
+      await showPlayer(tester, session, window);
+      final live = container.read(liveControllerProvider(requested).notifier);
+      live.setActive(true);
+      await pumpFrames(tester);
+      final original = drawing(tester);
+      final entering = Completer<void>();
+      window.transition = entering;
+      await tester.tap(find.byTooltip('全屏（F）'));
+      await pumpFrames(tester);
+      expect(find.byType(LiveDanmakuOverlay), findsNothing);
+      realtime.events.add(const [
+        LiveChatReceived(
+          LiveChatMessage(userName: '甲', text: 'during entry', id: 'entry'),
+        ),
+      ]);
+      await tester.pump();
+      expect(original.pendingCount, 1);
+      entering.complete();
+      await pumpFrames(tester);
+      expect(drawing(tester), same(original));
+      expect(original.frame().single.event.text, 'during entry');
+
+      final leaving = Completer<void>();
+      window.transition = leaving;
+      await tester.tap(find.byTooltip('退出全屏（Esc）'));
+      await pumpFrames(tester);
+      expect(find.byType(LiveDanmakuOverlay), findsNothing);
+      realtime.events.add(const [
+        LiveChatReceived(
+          LiveChatMessage(userName: '乙', text: 'during exit', id: 'exit'),
+        ),
+      ]);
+      await tester.pump();
+      expect(original.pendingCount, 1);
+      leaving.complete();
+      await pumpFrames(tester);
+      expect(drawing(tester), same(original));
+      expect(original.frame().map((p) => p.event.text), [
+        'during entry',
+        'during exit',
+      ]);
+      expect(realtime.rooms, [canonical]);
+      live.setActive(false);
+      await tester.pumpWidget(const SizedBox());
+      await pumpFrames(tester);
+    },
+  );
 
   testWidgets(
     'live bridge applies color blocking, duplicate merge and same-screen density',
@@ -354,4 +559,65 @@ final class _Auth implements AuthRepository {
   Future<void> signOut() async {}
   @override
   void cancelSignIn() {}
+}
+
+final class _Window extends WindowService {
+  bool fullScreen = false;
+  Completer<void>? transition;
+  @override
+  Future<void> setFullScreen(
+    bool value, {
+    FullScreenOrientation? orientation,
+  }) async {
+    final pending = transition;
+    transition = null;
+    await pending?.future;
+    fullScreen = value;
+  }
+}
+
+final class _Engine extends CardFakeEngine {
+  @override
+  PlayerCapabilities get capabilities => const PlayerCapabilities(
+    externalAudio: false,
+    externalAudioHeaders: false,
+  );
+  @override
+  Future<void> play() async =>
+      publish(snapshot.copyWith(phase: PlaybackPhase.playing));
+  @override
+  Future<void> pause() async =>
+      publish(snapshot.copyWith(phase: PlaybackPhase.paused));
+  @override
+  Future<void> setVolume(double volume) async =>
+      publish(snapshot.copyWith(volume: volume));
+  @override
+  Future<void> setRate(double rate) async =>
+      publish(snapshot.copyWith(rate: rate));
+}
+
+final class _UnusedPlayback extends Fake implements PlaybackRepository {}
+
+final class _UnusedProgress extends Fake implements PlaybackProgressStore {}
+
+final class _LivePlayback implements ContentPlaybackRepository {
+  @override
+  Future<PlaybackMedia> resolve(
+    ContentPlaybackTarget target, {
+    required int quality,
+    VideoCodecPreference preferredCodec = VideoCodecPreference.h264,
+    required RequestCancellation cancellation,
+  }) async => PlaybackMedia(
+    kind: PlaybackMediaKind.liveHls,
+    video: PlaybackTrack(
+      urls: [Uri.parse('https://example.test/live.m3u8')],
+      codec: 'avc1',
+      bandwidth: 1000,
+    ),
+    audio: null,
+    quality: 80,
+    qualities: const [80],
+    duration: Duration.zero,
+    headers: const {},
+  );
 }

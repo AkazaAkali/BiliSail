@@ -187,24 +187,27 @@ class _BiliAppState extends ConsumerState<BiliApp> {
               const AppSettings.defaults();
           final requestedId =
               LiveDanmakuRoomScope.requestedIdOf(context) ?? room.id;
-          return PlaybackPanel(
-            target: LivePlaybackTarget(room.id.value),
-            title: room.title,
-            danmakuComposerBuilder: (context) => LiveDanmakuComposer(
-              roomId: requestedId,
-              playerStyle: true,
-              onLogin: () => showDialog<void>(
-                context: context,
-                builder: (_) => const AccountDialog(),
-              ),
-            ),
+          return LivePlayerDanmaku(
+            roomId: requestedId,
             settings: settings,
-            danmakuOverlayBuilder: (_) =>
-                LivePlayerDanmaku(roomId: requestedId, settings: settings),
-            window: widget.dependencies.window,
-            onToggleComments: () => ref
-                .read(settingsControllerProvider.notifier)
-                .setDanmakuEnabled(!settings.danmakuEnabled),
+            builder: (context, overlay) => PlaybackPanel(
+              target: LivePlaybackTarget(room.id.value),
+              title: room.title,
+              danmakuComposerBuilder: (context) => LiveDanmakuComposer(
+                roomId: requestedId,
+                playerStyle: true,
+                onLogin: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => const AccountDialog(),
+                ),
+              ),
+              settings: settings,
+              danmakuOverlayBuilder: (_) => overlay,
+              window: widget.dependencies.window,
+              onToggleComments: () => ref
+                  .read(settingsControllerProvider.notifier)
+                  .setDanmakuEnabled(!settings.danmakuEnabled),
+            ),
           );
         },
       ),

@@ -31,3 +31,17 @@
 [原生测试](../../integration_test/windows_playback_test.dart) 现在通过已有的 `PlaybackSession.danmakuNow` 接缝注入可控单调时钟，用 500 毫秒、Playing 的样本累积五秒动画时间，再同步为原生源的实际暂停位置。500 毫秒小于 700 毫秒过期样本边界。仍保留 `warmup`／容量丢弃项／`visible`／未来项，并额外确认未来队列和丢弃计数各为 1；六次 F／按钮／Esc 和显隐两种状态下的鼠标双击往返断言保持。只修正测试准备，不修改弹幕运行代码或放宽断言。
 
 调整后 Windows 原生播放套件报告 8 项全部通过（公网 UGC 分支未启用），包括该全屏用例、本地音视频分轨、headers／重定向／Range／seek、独立标签与工作区切换；日志 `build/hover-preview-idle-playback-corrected.log`。真实线上悬停另行验证，见 [预览初始化复查](video-preview-loading.md#静止窗口初始化阻塞复查)。Android/macOS 本轮原生未测。
+
+## 直播全屏切换（2026-10-24）
+
+直播的 `LiveDanmakuController.setViewport()` 已保留有效视口变化时的活动弹幕、到达时间和文字缓存，但原先 `LivePlayerDanmaku` 位于 `PlaybackPanel` 的 overlay builder 内。进入／退出全屏会卸载旧 `_PlayerView`，连带销毁直播弹幕控制器、时钟和消息订阅，新画面因此从空状态开始。点播控制器归持续存活的 `PlaybackSession` 所有，没有这个组件生命周期问题。
+
+应用组合根现在将 `LivePlayerDanmaku` 放在 `PlaybackPanel` 外，通过 builder 将共用控制器的 `LiveDanmakuOverlay` 交给普通／全屏画面。视图可以重新创建，直播弹幕的状态、时钟和实时消息订阅持续保留；切换空档收到的消息进入原有有界队列，仍遵守过期和限流规则。隐藏页面、系统后台、关闭弹幕、换房、账号变化和销毁继续走原有清理流程，历史聊天不重播。
+
+- 修改前，新增组件回归确认进入全屏后控制器身份发生改变；日志 `build/live-fullscreen-before.log`。
+- 修改后 `test/features/live/live_player_danmaku_test.dart` 7 项通过，覆盖滚动／顶部／底部弹幕三次往返、按钮及 F／Esc、消息身份和文字布局保留、短房号连接复用、同一媒体 generation、单一 surface、进出全屏空档收消息，以及隐藏后不重播积压。日志 `build/live-fullscreen-targeted.log`。
+- `tool/check.ps1 -SkipPub` 的脚本边界检查、根应用格式及静态分析通过；根应用测试 1990 项通过、1 项失败，失败为同期修改的 `live_screen_test.dart` 中 `one click reveals an SC again after its card scrolls away`（SC 卡片滚动后的可点击性断言），未修改该任务文件。日志 `build/live-fullscreen-check.log`。
+- 根检查在上述失败处停止后，单独完成四个包的格式、静态分析和测试：`bili_api` 426、`bili_player` 78、`bili_danmaku` 93、`bili_mux` 2 项通过；mux 另有 10 项因未配置 `BILI_MUX_LIBRARY` 跳过，不能算作原生验证。日志 `build/live-fullscreen-packages.log`。
+- `tool/test-windows-content.ps1` 通过 Windows 受控 HLS／FLV 原生解码、headers 和共享会话回归，并完成 Windows Debug 构建；未启用 `-Online`，其中公网 PGC／直播分支未执行。日志 `build/live-fullscreen-windows-content.log`。
+- 随后以 `flutter run -d windows --no-pub -t lib/main.dart` 恢复普通应用入口，Debug 启动和热重载成功；连接 DTD 后未发现运行时错误，检查结束正常退出应用。这不替代真实直播全屏的手动验收。
+- 两份更新文档的 47 条本地链接及本任务差异空白检查通过。真实直播手动全屏、Android／macOS 实机和性能尚未验收。

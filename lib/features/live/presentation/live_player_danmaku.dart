@@ -33,9 +33,14 @@ final class LivePlayerDanmaku extends ConsumerStatefulWidget {
     super.key,
     required this.roomId,
     required this.settings,
+    required this.builder,
   });
   final RoomId roomId;
   final AppSettings settings;
+
+  /// Builds the player around a shared overlay. Keep this owner above the
+  /// player's inline/fullscreen views so their replacement preserves arrivals.
+  final Widget Function(BuildContext context, Widget overlay) builder;
   @override
   ConsumerState<LivePlayerDanmaku> createState() => _LivePlayerDanmakuState();
 }
@@ -177,6 +182,6 @@ final class _LivePlayerDanmakuState extends ConsumerState<LivePlayerDanmaku>
           WorkspaceActivity.isActive(context) &&
           widget.settings.danmakuEnabled,
     );
-    return LiveDanmakuOverlay(controller: _danmaku);
+    return widget.builder(context, LiveDanmakuOverlay(controller: _danmaku));
   }
 }
