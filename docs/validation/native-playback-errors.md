@@ -39,3 +39,19 @@
 修复前，窗口/全屏两项回归均复现提示残留，Windows 原生队列测试确认完播后 `isBuffering` 实际为 true。修复后两项界面回归及 `integration_test/windows_watch_later_queue_test.dart` 通过，覆盖结束时/延后一秒/末尾重播均无残留提示、分 P 与下条自动推进，以及重播沿用原 source generation。使用本地分轨夹具，未启用在线 smoke；Android/macOS 原生运行尚未验证。
 
 原生修复前后日志分别为 `build/playback-completion-native-before.log` 与 `build/playback-completion-native-after.log`。
+
+## 打开视频黑屏、重新打开恢复（2026-10-24）
+
+系统安装版 1.1.1.0 用户反馈打开视频时画面黑屏、声音正常，重新打开同一视频恢复。排查发现并通过组件测试复现了控制器替换时保留旧画面状态的路径；故障现场已消失，现有日志没有控制器身份、Texture 挂载及逐帧时序，尚不能将该路径定为本次实机事件的唯一原因。
+
+固定 media-kit fork `24f5c7cb6b78f68fa7c23c73ffe7294f0bd962ab` 的 `VideoState` 只在初始化时订阅播放器宽高，`didUpdateWidget` 不会在 controller 变化后重新订阅。共享输出原先未给 `Video` 设置控制器身份 key：若旧源未取得尺寸，清空和重新绑定控制器发生在同一 Flutter 帧内，ValueListenableBuilder 可以跳过中间空值，保留旧 `_visible=false` 与旧播放器监听。新播放器和纹理已就绪，界面仍不创建 Texture；重新进入页面则会重建状态并恢复。
+
+[共享输出](../../packages/bili_player/lib/src/media_kit_video_output.dart)现使用 `ObjectKey(controller)`，更换控制器时同步重建画面状态及监听；同一控制器的普通重建保留状态。修复覆盖使用该输出的视频、PGC、直播、离线及悬停预览，不改变 engine 所有权、播放命令或原生解码配置。
+
+当前 Windows 的“首帧完成”由原生 Resize 的正尺寸通知触发，`hasVideoOutput` 也只检查纹理 ID 和尺寸，不能证明 Flutter 已实际显示画面。日志中 10:27:57 有一次 TLS 打开失败后切换备用地址、随后音视频及输出就绪的过程，但没有准确的视频身份和故障时间关联，不能据此断言 TLS 直接造成了本次黑屏。
+
+[正式回归](../../packages/bili_player/test/media_kit_video_output_test.dart)直接使用生产输出构建的组件及固定依赖的真实 `Video`，注入 fake 播放器和纹理元数据，覆盖新尺寸在替换前／后就绪、旧播放器迟到尺寸不能隐藏新画面，以及同一控制器重建保留状态。修改前两项替换用例失败，修改后三项通过；日志为 `build/black-screen-regression-before.log` 和 `build/black-screen-regression-after.log`。这些用例验证组件生命周期和 Texture 挂载，不等同于原生 GPU 实机画面或可听音频验证。
+
+`tool/check.ps1 -SkipPub` 最终通过格式、静态分析、打包边界与根应用／四包测试，共 2,604 项（2,002／426／81／93／2）；另有 10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过，不计为通过。日志为 `build/black-screen-fix-check-final.log`。首轮静态分析发现新测试直接读取受保护的 controller 字段，改为 fake 子类的只读 getter 后完整重跑通过。文档相对链接和 `git diff --check` 通过。
+
+本轮没有构建或替换系统安装包；Windows 原生 GPU 实机播放及 Android/macOS 运行尚未验证。没有活动 DTD／debug 应用，热重载尝试返回无应用连接，不能将组件测试或全量离线检查当作已安装程序的修复验收。

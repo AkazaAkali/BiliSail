@@ -110,7 +110,13 @@ final class MediaKitVideoOutput implements FlutterVideoOutput {
     valueListenable: _controller,
     builder: (context, controller, _) => controller == null
         ? const ColoredBox(color: Color(0xFF000000))
-        : mkv.Video(controller: controller, controls: mkv.NoVideoControls),
+        : mkv.Video(
+            // VideoState subscribes to its initial player's dimensions. A
+            // same-frame clear/rebind must not retain the old subscriptions.
+            key: ObjectKey(controller),
+            controller: controller,
+            controls: mkv.NoVideoControls,
+          ),
   );
 
   @override
