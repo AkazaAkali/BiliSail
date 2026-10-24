@@ -41,10 +41,10 @@ try {
     -RedirectStandardError (Join-Path $validation "windows-real-$Label.err")
   $sampler = Join-Path $PSScriptRoot 'validation/windows_gpu_engine_probe.ps1'
   $gpuJob = Start-Job -ScriptBlock {
-    param($scriptPath, $sampleLabel, $probePid)
-    & pwsh -NoProfile -File $scriptPath -Label $sampleLabel -Seconds 360 -TargetProcessId $probePid -Continuous
+    param($scriptPath, $sampleLabel, $probePath, $probeStartedUtc)
+    & pwsh -NoProfile -File $scriptPath -Label $sampleLabel -Seconds 360 -ExePath $probePath -ProcessStartAfterUtc $probeStartedUtc
     if ($LASTEXITCODE -ne 0) { throw 'Continuous GPU sampling failed.' }
-  } -ArgumentList $sampler, $Label, $probe.Id
+  } -ArgumentList $sampler, $Label, $ExePath, $probe.StartTime.ToUniversalTime().ToString('o')
   $clockJob = Start-Job -ScriptBlock {
     param($probePid)
     while (Get-Process -Id $probePid -ErrorAction SilentlyContinue) {

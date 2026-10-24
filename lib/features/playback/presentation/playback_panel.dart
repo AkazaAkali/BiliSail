@@ -1196,56 +1196,59 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                   left: 0,
                                   right: 0,
                                   bottom: 0,
-                                  child: IgnorePointer(
-                                    child: CustomPaint(
-                                      foregroundPainter: ChapterBoundaryPainter(
-                                        chapters: session.chapters,
-                                        duration: snapshot.duration,
-                                        textDirection: Directionality.of(
-                                          context,
-                                        ),
-                                      ),
-                                      child: SizedBox(
-                                        height: 2,
-                                        child: Stack(
-                                          fit: StackFit.expand,
-                                          children: [
-                                            LinearProgressIndicator(
-                                              key: const ValueKey(
-                                                'player-collapsed-buffer',
+                                  child: RepaintBoundary(
+                                    child: IgnorePointer(
+                                      child: CustomPaint(
+                                        foregroundPainter:
+                                            ChapterBoundaryPainter(
+                                              chapters: session.chapters,
+                                              duration: snapshot.duration,
+                                              textDirection: Directionality.of(
+                                                context,
                                               ),
-                                              minHeight: 2,
-                                              borderRadius: BorderRadius.zero,
-                                              value:
-                                                  (snapshot
-                                                              .buffered
-                                                              .inMilliseconds /
-                                                          snapshot
-                                                              .duration
-                                                              .inMilliseconds)
-                                                      .clamp(0, 1),
-                                              color: Colors.white38,
-                                              backgroundColor: Colors.white24,
                                             ),
-                                            LinearProgressIndicator(
-                                              key: const ValueKey(
-                                                'player-collapsed-progress',
+                                        child: SizedBox(
+                                          height: 2,
+                                          child: Stack(
+                                            fit: StackFit.expand,
+                                            children: [
+                                              LinearProgressIndicator(
+                                                key: const ValueKey(
+                                                  'player-collapsed-buffer',
+                                                ),
+                                                minHeight: 2,
+                                                borderRadius: BorderRadius.zero,
+                                                value:
+                                                    (snapshot
+                                                                .buffered
+                                                                .inMilliseconds /
+                                                            snapshot
+                                                                .duration
+                                                                .inMilliseconds)
+                                                        .clamp(0, 1),
+                                                color: Colors.white38,
+                                                backgroundColor: Colors.white24,
                                               ),
-                                              minHeight: 2,
-                                              borderRadius: BorderRadius.zero,
-                                              value:
-                                                  (snapshot
-                                                              .position
-                                                              .inMilliseconds /
-                                                          snapshot
-                                                              .duration
-                                                              .inMilliseconds)
-                                                      .clamp(0, 1),
-                                              color: const Color(0xffdf6589),
-                                              backgroundColor:
-                                                  Colors.transparent,
-                                            ),
-                                          ],
+                                              LinearProgressIndicator(
+                                                key: const ValueKey(
+                                                  'player-collapsed-progress',
+                                                ),
+                                                minHeight: 2,
+                                                borderRadius: BorderRadius.zero,
+                                                value:
+                                                    (snapshot
+                                                                .position
+                                                                .inMilliseconds /
+                                                            snapshot
+                                                                .duration
+                                                                .inMilliseconds)
+                                                        .clamp(0, 1),
+                                                color: const Color(0xffdf6589),
+                                                backgroundColor:
+                                                    Colors.transparent,
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -1253,12 +1256,10 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                 ),
                               ),
                             Positioned.fill(
-                              child: CustomMultiChildLayout(
-                                delegate: _BottomPlayerLayout(
-                                  controlsVisible: controls && widget.active,
-                                  subtitleBottomPadding:
-                                      settings.subtitleBottomPadding,
-                                ),
+                              child: _BottomPlayerLayers(
+                                controlsVisible: controls && widget.active,
+                                subtitleBottomPadding:
+                                    settings.subtitleBottomPadding,
                                 children: [
                                   PlaybackSnapshotBuilder(
                                     snapshots: session.snapshots,
@@ -1515,6 +1516,31 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
 }
 
 enum _BottomPlayerSlot { controls, subtitle, subtitleMessage }
+
+// Progress, subtitle layout and control fades change independently of video.
+// Keep their paint invalidations inside this layer even when a cue changes size.
+class _BottomPlayerLayers extends StatelessWidget {
+  const _BottomPlayerLayers({
+    required this.controlsVisible,
+    required this.subtitleBottomPadding,
+    required this.children,
+  });
+
+  final bool controlsVisible;
+  final double subtitleBottomPadding;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: CustomMultiChildLayout(
+      delegate: _BottomPlayerLayout(
+        controlsVisible: controlsVisible,
+        subtitleBottomPadding: subtitleBottomPadding,
+      ),
+      children: children,
+    ),
+  );
+}
 
 class _BottomPlayerLayout extends MultiChildLayoutDelegate {
   _BottomPlayerLayout({

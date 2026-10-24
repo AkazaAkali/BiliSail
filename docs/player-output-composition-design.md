@@ -46,6 +46,7 @@ media_kit.Player    MediaKitVideoOutput
 
 - [VideoCompositionAdapter](../packages/bili_player/lib/src/video_composition.dart) 提供输出 surface 构建与有序图层组合两个入口。
 - 默认 `FlutterVideoCompositionAdapter` 使用现有 media-kit Video（NoVideoControls）和 `Stack(fit: StackFit.expand)`；传入图层顺序、Positioned、Opacity、手势、字幕、菜单和控件原样保留。
+- 2026-10-24 为默认 Stack 和播放面板底部增加绘制边界，隔离外部布局与进度／字幕更新；仍使用同一路 Flutter 合成，不代表独立平台合成已实现。定位与本轮验证见[重绘性能记录](validation/playback-composition-performance-2026-10-24.md)。
 - `VideoCompositionScope` 在应用组合根注入适配器，普通页面、全屏 Navigator 和悬停预览使用同一策略；独立测试没有 scope 时仍有当前 Flutter 默认值。
 - `VideoSurface(engine: ...)` 保留为兼容入口，只解析 VideoOutputSource；新增显式 output 入口，使输出组件可以独立于 PlayerEngine 测试与复用。
 - 不支持的输出类型必须明确报错，不能将“原生输出尚未实现”伪装成成功的黑屏。没有视频能力的 engine 保留原黑色后备。

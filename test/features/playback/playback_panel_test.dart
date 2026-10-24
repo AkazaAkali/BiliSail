@@ -40,6 +40,71 @@ import 'package:flutter_test/flutter_test.dart';
 final _composerScopeProvider = Provider<String>((ref) => 'root');
 
 void main() {
+  for (final (controlsVisible, fullScreen) in [
+    for (final controls in [true, false])
+      for (final fullscreen in [false, true]) (controls, fullscreen),
+  ]) {
+    testWidgets('progress repaint stays inside HUD: controls $controlsVisible, '
+        'fullscreen $fullScreen', (tester) async {
+      final engine = _FakeEngine();
+      final session = _session(engine, repository: _MenuRepository());
+      addTearDown(session.close);
+      final composition = _PaintCountingComposition();
+      await tester.pumpWidget(
+        VideoCompositionScope(
+          adapter: composition,
+          child: _app(
+            session,
+            _FakeWindowService(),
+            const AppSettings.defaults().copyWith(
+              danmakuEnabled: false,
+              playerControlsMode: PlayerControlsMode.click,
+            ),
+          ),
+        ),
+      );
+      await _pumpFrames(tester);
+      await session.selectSubtitle(0);
+      await _pumpFrames(tester);
+      if (fullScreen) {
+        await tester.tap(find.byTooltip('全屏（F）'));
+        await _pumpFrames(tester);
+      }
+      if (!controlsVisible) {
+        await tester.tapAt(_surfacePoint(tester));
+        await _pumpSurfaceTap(tester);
+      }
+      final before = composition.paints;
+      for (var i = 1; i <= 12; i++) {
+        engine._emit(
+          engine.currentSnapshot.copyWith(
+            position: Duration(milliseconds: i * 250),
+            buffered: Duration(seconds: 30 + i),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      if (controlsVisible) {
+        expect(find.text('00:03 / 03:00'), findsOneWidget);
+      } else {
+        final progress = tester.widget<LinearProgressIndicator>(
+          find.byKey(const ValueKey('player-collapsed-progress')),
+        );
+        expect(progress.value, closeTo(3 / 180, .0001));
+      }
+      expect(composition.paints - before, 0);
+      expect(find.text('字幕回归'), findsOneWidget);
+      engine._emit(
+        engine.currentSnapshot.copyWith(position: const Duration(minutes: 3)),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(find.text('字幕回归'), findsNothing);
+      expect(composition.paints - before, 0);
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+    });
+  }
+
   testWidgets('composition strategy follows the same output into fullscreen', (
     tester,
   ) async {
@@ -4679,6 +4744,33 @@ final class _FocusAtPopObserver extends NavigatorObserver {
     popCount++;
     focusAtPop = FocusManager.instance.primaryFocus?.debugLabel;
   }
+}
+
+final class _PaintCountingComposition implements VideoCompositionAdapter {
+  int paints = 0;
+
+  @override
+  Widget buildVideoSurface(BuildContext context, VideoOutput output) =>
+      const FlutterVideoCompositionAdapter().buildVideoSurface(context, output);
+
+  @override
+  Widget compose(BuildContext context, {required List<Widget> layers}) =>
+      const FlutterVideoCompositionAdapter().compose(
+        context,
+        layers: [
+          CustomPaint(painter: _CountPaint(() => paints++)),
+          ...layers,
+        ],
+      );
+}
+
+final class _CountPaint extends CustomPainter {
+  _CountPaint(this.onPaint);
+  final VoidCallback onPaint;
+  @override
+  void paint(Canvas canvas, Size size) => onPaint();
+  @override
+  bool shouldRepaint(_CountPaint oldDelegate) => false;
 }
 
 final class _RecordingComposition implements VideoCompositionAdapter {

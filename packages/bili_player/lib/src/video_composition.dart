@@ -32,7 +32,11 @@ final class FlutterVideoCompositionAdapter implements VideoCompositionAdapter {
 
   @override
   Widget compose(BuildContext context, {required List<Widget> layers}) =>
-      Stack(fit: StackFit.expand, children: layers);
+      // Layout-builder callbacks above the player may repaint their ancestors
+      // even when only an isolated foreground layer changed.
+      RepaintBoundary(
+        child: Stack(fit: StackFit.expand, children: layers),
+      );
 }
 
 /// Supplies one composition strategy to pages, fullscreen routes, and previews.

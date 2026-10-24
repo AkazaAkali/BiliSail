@@ -92,6 +92,8 @@ Future<void> main() async {
     ),
   );
   await windowManager.setSize(const Size(1280, 720));
+  // A hidden/minimized runner has no representative Flutter frame cadence.
+  await windowManager.show();
   final repository = _ObservedRepository(dependencies);
   PlaybackSession? playing;
   final manager = PlaybackManager(
@@ -176,8 +178,10 @@ Future<void> main() async {
     await waitFor(
       () =>
           engine.inspectDiagnostics().hasDecodedAudio &&
-          engine.inspectDiagnostics().hasVideoOutput,
-      'decoded audio and video',
+          engine.inspectDiagnostics().hasVideoOutput &&
+          session.snapshots.value.phase == PlaybackPhase.playing &&
+          !session.snapshots.value.isBuffering,
+      'playing decoded audio and video',
     );
     await write({
       'type': 'metadata',
@@ -251,7 +255,9 @@ Future<void> main() async {
           .read(settingsControllerProvider.notifier)
           .setDanmakuEnabled(comments);
       await session.seek(Duration(seconds: (start - 8).clamp(0, 100000)));
-      if (session.snapshots.value.phase != PlaybackPhase.playing) {
+      // A seek may still be buffering while playback intent remains true.
+      // Toggling based on phase would pause it and invalidate the measurement.
+      if (!session.snapshots.value.desiredPlaying) {
         await session.togglePlaying();
       }
       await waitFor(
