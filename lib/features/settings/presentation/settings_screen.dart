@@ -245,7 +245,7 @@ final class _SettingsCategoryPageState
                             WorkspaceNavigationMode.multipleTabs: '多标签页',
                           }, controller.setNavigationMode),
                           const Text(
-                            '各平台默认双标签页。Windows 和 macOS 使用独立播放窗口，视频、影视和直播共用；Android 在应用内保留浏览与播放两个页面，同一时间只显示一个。返回可播放上一个视频，关闭播放回到浏览。切换模式保留未关闭页面。',
+                            '各平台默认双标签页。Windows 和 macOS 使用独立播放窗口，视频、影视和直播共用；Android 在应用内保留浏览与播放两个页面，同一时间只显示一个。返回可播放上一个视频，关闭播放回到浏览。切换模式保留未关闭页面。macOS 切换到双标签页模式后，需要重启应用。',
                             style: TextStyle(fontSize: 12),
                           ),
                           _choices('应用主题', s.theme, const {
