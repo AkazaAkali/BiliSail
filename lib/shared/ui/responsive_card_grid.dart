@@ -9,11 +9,14 @@ const _desktopSpacing = 20.0;
   final compact = extent < 600;
   final spacing = compact ? 6.0 : _desktopSpacing;
   final textScaler = MediaQuery.textScalerOf(context);
-  final minimum = textScaler.scale(300).clamp(300, 450);
+  // Sample the 15px card title. Android's nonlinear font scaling leaves large
+  // reference sizes unchanged, so scaling a card width misses enlarged text.
+  final titleScale = textScaler.scale(15) / 15;
+  final minimum = (300 * titleScale).clamp(300, 450);
   // Two cards remain readable on phones; tablet rows can use three smaller
   // cards before the regular desktop minimum permits additional columns.
-  final compactMinimum = textScaler.scale(140).clamp(140, 210);
-  final threeCardMinimum = textScaler.scale(160).clamp(160, 240);
+  final compactMinimum = (140 * titleScale).clamp(140, 210);
+  final threeCardMinimum = (160 * titleScale).clamp(160, 240);
   final minimumColumns = extent >= threeCardMinimum * 3 + spacing * 2
       ? 3
       : extent >= compactMinimum * 2 + _desktopSpacing

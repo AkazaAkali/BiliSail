@@ -5,6 +5,7 @@
 #include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "window_size_constraints.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -111,6 +112,12 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
         flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
                                                       lparam);
     if (result) {
+      if (message == WM_GETMINMAXINFO && lparam != 0) {
+        // The plugin scales its logical minimum to physical pixels first.
+        // Clamp against this monitor's current work area, including taskbars.
+        window_layout::ConstrainMinimumTrackSizeToMonitor(
+            hwnd, *reinterpret_cast<MINMAXINFO*>(lparam));
+      }
       return *result;
     }
   }

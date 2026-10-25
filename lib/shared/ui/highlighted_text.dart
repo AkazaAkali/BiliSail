@@ -166,7 +166,7 @@ final class _OverflowTooltipState extends State<_OverflowTooltip> {
         return Tooltip(
           message: _overflowing ? widget.text : '',
           excludeFromSemantics: true,
-          triggerMode: TooltipTriggerMode.manual,
+          triggerMode: TooltipTriggerMode.longPress,
           child: child,
         );
       },

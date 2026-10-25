@@ -117,6 +117,7 @@
 | [API 端点验证](validation/api-endpoints.md) | 首版端点、协议与在线只读烟测 |
 | [搜索分类与排序](validation/search-categories.md) | 七类搜索、综合页 UP 主、分类排序、筛选与旧响应隔离 |
 | [共享视频卡片](validation/shared-video-cards.md) | 推荐理由、搜索/视频动态显示差异、16:9 封面与宽屏网格 |
+| [DPI 与文字缩放](validation/dpi-adaptation.md) | 大字体列数、触摸全文与 Windows 工作区约束修复，像素比例／字号矩阵与实机未验项 |
 | [视频卡悬停预览](validation/video-card-hover.md) | 官方客户端式封面放大、悬停视频自动播放、稍后再看与网页接口核对 |
 | [视频卡操作菜单](validation/video-card-menus.md) | 推荐反馈、添加稍后再看、删除稍后再看及悬停入口范围 |
 | [稍后再看队列播放](validation/watch-later-queue.md) | 列表上下文、分 P 与队列推进、侧栏和账号/标签隔离 |
