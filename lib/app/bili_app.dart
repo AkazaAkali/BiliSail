@@ -93,7 +93,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
     super.initState();
     _router = createBiliRouter(
       onActivateBrowser: () => unawaited(widget.dependencies.window.activate()),
-      playbackWindowBuilder: Platform.isWindows || Platform.isMacOS
+      playbackWindowBuilder: DetachedPlaybackWindow.isSupported
           ? (
               context, {
               required child,

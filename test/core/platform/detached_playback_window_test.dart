@@ -8,6 +8,32 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets(
+    'macOS implicit view rejects detached creation before entering native code',
+    (tester) async {
+      expect(tester.binding.platformDispatcher.implicitView, isNotNull);
+      expect(DetachedPlaybackWindow.isSupported, isFalse);
+      expect(
+        () => DetachedPlaybackWindow.create(
+          title: 'Playback',
+          onCloseRequested: () {},
+        ),
+        throwsUnsupportedError,
+      );
+      expect(tester.binding.platformDispatcher.views, hasLength(1));
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
+  testWidgets(
+    'Windows supports detached playback alongside its implicit view',
+    (tester) async {
+      expect(tester.binding.platformDispatcher.implicitView, isNotNull);
+      expect(DetachedPlaybackWindow.isSupported, isTrue);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
   testWidgets('pending playback moves to its view without disposing state', (
     tester,
   ) async {

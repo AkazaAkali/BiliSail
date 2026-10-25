@@ -14,6 +14,59 @@ import '../support/detached_window_fake.dart';
 
 void main() {
   testWidgets(
+    'macOS implicit view keeps dual playback and media history in the main window',
+    (tester) async {
+      final fixture = _WindowedWorkspace(
+        tester,
+        customCaption: false,
+        checkWindowSupport: true,
+      );
+      addTearDown(fixture.dispose);
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('increment-home')));
+      await tester.pump();
+      final browser = tester.element(_page('home'));
+      final browserScope = _scope(browser);
+
+      fixture.router.go('/video/BV1234567890');
+      await tester.pumpAndSettle();
+      final playback = tester.element(_page('tab-1'));
+      final playbackScope = _scope(playback);
+      await tester.tap(find.byKey(const ValueKey('increment-tab-1')));
+      await tester.pump();
+      expect(View.of(playback).viewId, tester.view.viewId);
+      expect(_page('home'), findsNothing);
+      expect(tester.element(_page('home', skipOffstage: false)), same(browser));
+      expect(WorkspaceActivity.isActive(browser), isFalse);
+
+      fixture.router.go('/pgc/42');
+      await tester.pumpAndSettle();
+      expect(tester.element(_page('tab-1')), same(playback));
+      expect(fixture.tab(tester, 'tab-1').location.path, '/pgc/42');
+      await tester.tap(find.byTooltip('返回上一视频'));
+      await tester.pumpAndSettle();
+      expect(fixture.tab(tester, 'tab-1').location.path, '/video/BV1234567890');
+      expect(tester.element(_page('tab-1')), same(playback));
+      expect(_scope(playback), same(playbackScope));
+      expect(playbackScope.read(_counterProvider), 1);
+
+      await tester.tap(find.byTooltip('关闭播放'));
+      await tester.pumpAndSettle();
+      expect(tester.element(_page('home')), same(browser));
+      expect(_scope(browser), same(browserScope));
+      expect(browserScope.read(_counterProvider), 1);
+      expect(fixture.disposedPages, ['tab-1']);
+      expect(fixture.windows.creationCount, 0);
+      expect(fixture.errors, isEmpty);
+      _expectViews(tester, [tester.view.viewId]);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
+  testWidgets(
     'macOS dual profile retains a back entry without a custom caption',
     (tester) async {
       tester.view.devicePixelRatio = 1;
@@ -319,10 +372,14 @@ class _ProbeCounter extends Notifier<int> {
 }
 
 class _WindowedWorkspace {
-  _WindowedWorkspace(WidgetTester tester, {this.customCaption = true})
-    : windows = FakeDetachedWindowFactory(tester.view);
+  _WindowedWorkspace(
+    WidgetTester tester, {
+    this.customCaption = true,
+    this.checkWindowSupport = false,
+  }) : windows = FakeDetachedWindowFactory(tester.view);
 
   final bool customCaption;
+  final bool checkWindowSupport;
   final FakeDetachedWindowFactory windows;
   final mode = ValueNotifier(WorkspaceNavigationMode.dualTabs);
   final disposedPages = <String>[];
@@ -355,50 +412,54 @@ class _WindowedWorkspace {
               ),
             ),
             playbackWindowBuilder:
-                (
-                  context, {
-                  required child,
-                  required playback,
-                  required activationToken,
-                  required onClose,
-                  required onBack,
-                  required onError,
-                }) => DesktopPlaybackWindow(
-                  windowFactory: windows.call,
-                  activationToken: activationToken,
-                  onCloseRequested: onClose,
-                  onError: (error) {
-                    errors.add(error);
-                    onError(error);
-                  },
-                  playback: playback == null
-                      ? null
-                      : MaterialApp(
-                          theme: Theme.of(context),
-                          home: Scaffold(
-                            body: Column(
-                              children: [
-                                Row(
-                                  children: [
-                                    IconButton(
-                                      key: const ValueKey('test-window-back'),
-                                      onPressed: onBack,
-                                      icon: const Icon(Icons.arrow_back),
-                                    ),
-                                    IconButton(
-                                      key: const ValueKey('test-window-close'),
-                                      onPressed: onClose,
-                                      icon: const Icon(Icons.close),
-                                    ),
-                                  ],
-                                ),
-                                Expanded(child: playback),
-                              ],
+                checkWindowSupport && !DetachedPlaybackWindow.isSupported
+                ? null
+                : (
+                    context, {
+                    required child,
+                    required playback,
+                    required activationToken,
+                    required onClose,
+                    required onBack,
+                    required onError,
+                  }) => DesktopPlaybackWindow(
+                    windowFactory: windows.call,
+                    activationToken: activationToken,
+                    onCloseRequested: onClose,
+                    onError: (error) {
+                      errors.add(error);
+                      onError(error);
+                    },
+                    playback: playback == null
+                        ? null
+                        : MaterialApp(
+                            theme: Theme.of(context),
+                            home: Scaffold(
+                              body: Column(
+                                children: [
+                                  Row(
+                                    children: [
+                                      IconButton(
+                                        key: const ValueKey('test-window-back'),
+                                        onPressed: onBack,
+                                        icon: const Icon(Icons.arrow_back),
+                                      ),
+                                      IconButton(
+                                        key: const ValueKey(
+                                          'test-window-close',
+                                        ),
+                                        onPressed: onClose,
+                                        icon: const Icon(Icons.close),
+                                      ),
+                                    ],
+                                  ),
+                                  Expanded(child: playback),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                  child: child,
-                ),
+                    child: child,
+                  ),
             child: child,
           ),
         ),

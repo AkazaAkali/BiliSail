@@ -68,10 +68,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  for (final detached in [false, true]) {
+  for (final (platform, requestDetached) in [
+    (TargetPlatform.windows, false),
+    (TargetPlatform.windows, true),
+    (TargetPlatform.macOS, true),
+  ]) {
     _workspaceTestWidgets(
-      'dual playback reuses its scoped session through resize, back and close detached=$detached',
+      'dual playback reuses its scoped session through resize, back and close platform=$platform detached=$requestDetached',
       (tester) async {
+        final detached = requestDetached && DetachedPlaybackWindow.isSupported;
+        if (platform == TargetPlatform.macOS) expect(detached, isFalse);
         final engines = <CardFakeEngine>[];
         final manager = PlaybackManager(
           createSession: () {
@@ -265,6 +271,7 @@ void main() {
           () => manager.close().timeout(const Duration(seconds: 2)),
         );
       },
+      platform: platform,
     );
   }
   for (final mode in WorkspaceNavigationMode.values) {

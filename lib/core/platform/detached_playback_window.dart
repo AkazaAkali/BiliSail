@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/src/foundation/_features.dart' as flutter_features;
 import 'package:flutter/src/widgets/_window.dart' as flutter_window;
 import 'package:flutter/src/widgets/_window_macos.dart' as flutter_macos;
@@ -21,12 +22,28 @@ typedef DetachedPlaybackWindowFactory = DetachedPlaybackWindow Function({
 abstract class DetachedPlaybackWindow extends ChangeNotifier {
   static bool _windowingReady = false;
 
+  // Flutter 3.47.6's macOS create-window entry point calls enableMultiView,
+  // which NSAsserts if an implicit view controller is already attached. That
+  // Objective-C exception aborts the process across FFI; Dart cannot catch it.
+  // The current macOS runner creates that implicit view in awakeFromNib.
+  static bool get isSupported => switch (defaultTargetPlatform) {
+    TargetPlatform.windows => true,
+    TargetPlatform.macOS =>
+      WidgetsBinding.instance.platformDispatcher.implicitView == null,
+    _ => false,
+  };
+
   static DetachedPlaybackWindow create({
     required String title,
     required VoidCallback onCloseRequested,
   }) {
     if (!Platform.isWindows && !Platform.isMacOS) {
       throw UnsupportedError('Detached playback requires Windows or macOS.');
+    }
+    if (!isSupported) {
+      throw UnsupportedError(
+        'Detached playback is incompatible with the current engine views.',
+      );
     }
     // The pinned stable SDK includes the complete implementation but its tool
     // only exposes the flag on main, and rejects the reserved dart-define.

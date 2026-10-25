@@ -13,12 +13,28 @@ import 'support/native_playback_window.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('implicit main view can add and retire one playback view', (
+  testWidgets('implicit main view uses a compatible playback window path', (
     tester,
   ) async {
     if (!Platform.isWindows && !Platform.isMacOS) return;
     final implicit = PlatformDispatcher.instance.implicitView!;
     final baseline = PlatformDispatcher.instance.views.length;
+    if (!DetachedPlaybackWindow.isSupported) {
+      // The production macOS runner has an implicit view. Verify the adapter
+      // rejects the SDK's fatal multiview transition without calling its FFI.
+      expect(Platform.isMacOS, isTrue);
+      expect(
+        () => DetachedPlaybackWindow.create(
+          title: 'Detached playback probe',
+          onCloseRequested: () {},
+        ),
+        throwsUnsupportedError,
+      );
+      expect(PlatformDispatcher.instance.implicitView, same(implicit));
+      expect(PlatformDispatcher.instance.views.length, baseline);
+      debugPrint('NATIVE_WINDOW: macOS implicit-view guard passed');
+      return;
+    }
     final errors = <Object>[];
     var closeRequests = 0;
     await WindowService().initialize();
