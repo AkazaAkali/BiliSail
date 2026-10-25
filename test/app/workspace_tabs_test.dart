@@ -2,6 +2,102 @@ import 'package:bilisail/app/workspace_tabs.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('inbox Back to playback keeps its browsing slot and media history', () {
+    final workspace = WorkspaceTabs()..setDualMode(true);
+    workspace.acceptRoute(Uri.parse('/search?q=cat'));
+    final search = workspace.activeId;
+    workspace.acceptRoute(Uri.parse('/video/A'));
+    workspace.acceptRoute(Uri.parse('/video/B'));
+    final playback = workspace.activeId;
+    workspace.acceptRoute(Uri.parse('/messages'));
+    expect(workspace.returnFromMessages(), isTrue);
+    expect(workspace.activeId, playback);
+    expect(workspace.active.location.path, '/video/B');
+    expect(workspace.browseId, search);
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.active.location.path, '/video/A');
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.activeId, search);
+  });
+
+  for (final dual in [true, false]) {
+    test('inbox Back restores its root entry and query in dual=$dual', () {
+      final workspace = WorkspaceTabs()..setDualMode(dual);
+      for (final route in [
+        '/?channel=popular&section=每周必看',
+        '/settings?section=shortcuts',
+        '/me',
+      ]) {
+        workspace.acceptRoute(Uri.parse(route));
+        final origin = workspace.active.location;
+        workspace.acceptRoute(Uri.parse('/messages?talker=2'));
+        workspace.acceptRoute(Uri.parse('/messages?tab=home'));
+        expect(workspace.canReturnFromMessages, isTrue);
+        expect(workspace.returnFromMessages(), isTrue);
+        expect(workspace.active.location, origin);
+        expect(workspace.activeId, 'home');
+        expect(workspace.tabs, hasLength(1));
+        expect(workspace.canReturnFromMessages, isFalse);
+        expect(workspace.returnFromMessages(), isFalse);
+        expect(workspace.goBack(), isFalse);
+      }
+    });
+
+    test(
+      'inbox Back restores the entry page and its history in dual=$dual',
+      () {
+        final workspace = WorkspaceTabs()..setDualMode(dual);
+        final root = Uri.parse('/?channel=videoDynamic');
+        workspace.acceptRoute(root);
+        workspace.acceptRoute(Uri.parse('/search?q=cat'));
+        final search = workspace.active;
+        workspace.acceptRoute(Uri.parse('/user/42'));
+        final profile = workspace.active;
+        workspace.acceptRoute(Uri.parse('/messages?talker=42'));
+        workspace.acceptRoute(Uri.parse('/messages'));
+        expect(workspace.returnFromMessages(), isTrue);
+        expect(workspace.activeId, profile.id);
+        expect(workspace.tabs.first.location, root);
+        workspace.acceptRoute(workspace.active.route);
+        expect(workspace.goBack(), isTrue);
+        expect(workspace.activeId, search.id);
+        expect(workspace.goBack(), isTrue);
+        expect(workspace.active.location, root);
+        expect(workspace.canReturnFromMessages, isFalse);
+        expect(workspace.goBack(), isFalse);
+      },
+    );
+
+    test('inbox Back never recreates a closed entry page in dual=$dual', () {
+      final workspace = WorkspaceTabs()..setDualMode(dual);
+      workspace.acceptRoute(Uri.parse('/me'));
+      workspace.acceptRoute(Uri.parse('/search?q=cat'));
+      final search = workspace.activeId;
+      workspace.acceptRoute(Uri.parse('/messages'));
+      expect(workspace.close(search), isTrue);
+      expect(workspace.returnFromMessages(), isTrue);
+      expect(workspace.active.location.path, '/me');
+      expect(workspace.tabs, hasLength(1));
+      expect(workspace.goBack(), isFalse);
+    });
+
+    test(
+      'a profile starting another chat cannot loop into inbox in dual=$dual',
+      () {
+        final workspace = WorkspaceTabs()..setDualMode(dual);
+        workspace.acceptRoute(Uri.parse('/messages'));
+        workspace.acceptRoute(Uri.parse('/user/42'));
+        final profile = workspace.activeId;
+        workspace.acceptRoute(Uri.parse('/messages?talker=42'));
+        expect(workspace.returnFromMessages(), isTrue);
+        expect(workspace.activeId, profile);
+        expect(workspace.goBack(), isTrue);
+        expect(workspace.active.location.path, '/');
+        expect(workspace.goBack(), isFalse);
+      },
+    );
+  }
+
   test('desktop browser back skips playback visits and keeps the player', () {
     final workspace = WorkspaceTabs()..setDualMode(true);
     workspace.acceptRoute(Uri.parse('/search?q=cat'));

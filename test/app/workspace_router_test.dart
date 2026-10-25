@@ -23,6 +23,7 @@ import 'package:bilisail/app/shell.dart';
 import 'package:bilisail/app/platform_defaults.dart';
 import 'package:bilisail/features/messages/application/messages_controller.dart';
 import 'package:bilisail/features/messages/presentation/messages_screen.dart';
+import 'package:bilisail/shared/ui/app_dialog.dart';
 
 import '../features/messages/message_fakes.dart';
 
@@ -68,6 +69,170 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final mode in WorkspaceNavigationMode.values) {
+    for (final platform in [TargetPlatform.android, TargetPlatform.windows]) {
+      _workspaceTestWidgets(
+        'inbox Back clears selection before returning to its root entry in $mode on $platform',
+        (tester) async {
+          tester.view.physicalSize = Size(
+            platform == TargetPlatform.android ? 390 : 1280,
+            850,
+          );
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final auth = AuthFake();
+          final messages = MessageRepositoryFake();
+          final settings = _SettingsRepository()
+            ..settings = const AppSettings.defaults().copyWith(
+              navigationMode: mode,
+            );
+          final router = createBiliRouter(
+            initialLocation: '/?channel=popular&section=每周必看',
+            playerBuilder: (_, _, _) => const SizedBox(),
+          );
+          addTearDown(() async {
+            router.dispose();
+            await auth.stream.close();
+          });
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                authRepositoryProvider.overrideWithValue(auth),
+                settingsRepositoryProvider.overrideWithValue(settings),
+                messageRepositoryProvider.overrideWithValue(messages),
+                feedRepositoryProvider.overrideWithValue(_FeedRepository()),
+                homeRepositoryProvider.overrideWithValue(_HomeRepository()),
+              ],
+              child: InputTestApp.router(routerConfig: router),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final feed = tester.state(find.byType(FeedScreen));
+          router.go('/messages');
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('测试会话'));
+          await tester.pumpAndSettle();
+          final inbox = ProviderScope.containerOf(
+            tester.element(find.byType(MessagesScreen)),
+          );
+          await tester.enterText(find.byType(TextField), '返回保留草稿');
+          final dialog = showAppDialog<void>(
+            context: tester.element(find.byType(MessagesScreen)),
+            builder: (_) => const AlertDialog(content: Text('消息弹窗')),
+          );
+          await tester.pumpAndSettle();
+          await tester.binding.handlePopRoute();
+          await tester.pumpAndSettle();
+          await dialog;
+          expect(inbox.read(messagesControllerProvider).selected, isNotNull);
+          if (mode == WorkspaceNavigationMode.dualTabs) {
+            await tester.tap(find.byKey(const ValueKey('workspace-back')));
+          } else {
+            await tester.binding.handlePopRoute();
+          }
+          await tester.pumpAndSettle();
+          expect(router.routeInformationProvider.value.uri.path, '/messages');
+          expect(inbox.read(messagesControllerProvider).selected, isNull);
+          expect(find.byType(TextField), findsNothing);
+          expect(find.text('另一会话'), findsOneWidget);
+          if (platform == TargetPlatform.android) {
+            await tester.binding.handlePopRoute();
+            await tester.pumpAndSettle();
+            final location = router.routeInformationProvider.value.uri;
+            expect(location.path, '/');
+            expect(location.queryParameters['channel'], 'popular');
+            expect(location.queryParameters['section'], '每周必看');
+            expect(tester.state(find.byType(FeedScreen)), same(feed));
+            expect(find.byType(AlertDialog), findsNothing);
+            router.go('/messages');
+            await tester.pumpAndSettle();
+          }
+          await tester.tap(find.text('测试会话'));
+          await tester.pumpAndSettle();
+          expect(find.text('返回保留草稿'), findsOneWidget);
+          // An inactive conversation must not consume another root's Back.
+          if (platform == TargetPlatform.android) {
+            router.go('/me');
+            await tester.pumpAndSettle();
+            await tester.binding.handlePopRoute();
+            await tester.pumpAndSettle();
+            expect(find.text('退出哔帆？'), findsOneWidget);
+            expect(inbox.read(messagesControllerProvider).selected, isNotNull);
+            await tester.tap(find.text('取消'));
+            await tester.pumpAndSettle();
+          }
+          expect(messages.sends + messages.marks, 0);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox());
+        },
+        platform: platform,
+      );
+    }
+
+    _workspaceTestWidgets(
+      'Android profile chat Back returns to its profile and retained search in $mode',
+      (tester) async {
+        final auth = AuthFake();
+        final search = _SearchRepository();
+        final settings = _SettingsRepository()
+          ..settings = const AppSettings.defaults().copyWith(
+            navigationMode: mode,
+          );
+        final router = createBiliRouter(
+          initialLocation: '/search?q=cat',
+          playerBuilder: (_, _, _) => const SizedBox(),
+        );
+        addTearDown(() async {
+          router.dispose();
+          await auth.stream.close();
+        });
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              authRepositoryProvider.overrideWithValue(auth),
+              settingsRepositoryProvider.overrideWithValue(settings),
+              searchRepositoryProvider.overrideWithValue(search),
+              profileRepositoryProvider.overrideWithValue(_ProfileRepository()),
+              videoAuthorRepositoryProvider.overrideWithValue(
+                FollowRepositoryFake()..accountScope = 'user:1',
+              ),
+              messageRepositoryProvider.overrideWithValue(
+                MessageRepositoryFake(),
+              ),
+              feedRepositoryProvider.overrideWithValue(_FeedRepository()),
+              homeRepositoryProvider.overrideWithValue(_HomeRepository()),
+            ],
+            child: InputTestApp.router(routerConfig: router),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final searchState = tester.state(find.byType(SearchScreen));
+        router.go('/user/2');
+        await tester.pumpAndSettle();
+        final profile = tester.state(find.byType(ProfileScreen));
+        await tester.tap(find.byKey(const ValueKey('profile-message')));
+        await tester.pumpAndSettle();
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+        expect(find.byType(MessagesScreen), findsOneWidget);
+        expect(find.byType(TextField), findsNothing);
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+        expect(router.routeInformationProvider.value.uri.path, '/user/2');
+        expect(tester.state(find.byType(ProfileScreen)), same(profile));
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+        expect(router.routeInformationProvider.value.uri.path, '/search');
+        expect(tester.state(find.byType(SearchScreen)), same(searchState));
+        expect(search.queries, ['cat']);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+      platform: TargetPlatform.android,
+    );
+  }
+
   for (final (platform, requestDetached) in [
     (TargetPlatform.windows, false),
     (TargetPlatform.windows, true),

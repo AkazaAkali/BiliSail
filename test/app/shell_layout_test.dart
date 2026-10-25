@@ -178,10 +178,15 @@ void main() {
             find.byKey(const ValueKey('workspace-bottom-navigation')),
             width < 600 ? findsOneWidget : findsNothing,
           );
-          final utilityPage = location == '/history';
+          final hasBack =
+              location == '/history' ||
+              (location == '/messages' &&
+                  Theme.of(tester.element(find.byType(BiliAppShell)))
+                          .platform ==
+                      TargetPlatform.android);
           expect(
             find.byKey(const ValueKey('workspace-page-back-header')),
-            utilityPage ? findsOneWidget : findsNothing,
+            hasBack ? findsOneWidget : findsNothing,
           );
           expect(
             tester.takeException(),

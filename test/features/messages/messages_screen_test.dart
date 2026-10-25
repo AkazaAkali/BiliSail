@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:bilisail/domain/app_failure.dart';
 import 'package:bilisail/core/presentation/workspace_activity.dart';
+import 'package:bilisail/core/presentation/page_back_scope.dart';
 import 'package:bilisail/features/auth/application/account_overview_controller.dart';
 import 'package:bilisail/features/auth/presentation/account_button.dart';
 import 'package:bilisail/features/auth/application/auth_controller.dart';
@@ -94,6 +95,74 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  for (final width in [390.0, 1280.0]) {
+    testWidgets('system Back clears conversation and keeps draft at $width', (
+      tester,
+    ) async {
+      tester.view.physicalSize = Size(width, 850);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await mount(tester);
+      await tester.tap(find.text('测试会话'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '返回后保留的草稿');
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(MessagesScreen)),
+      );
+      expect(container.read(messagesControllerProvider).selected, isNull);
+      expect(find.byType(TextField), findsNothing);
+      expect(find.text('另一会话'), findsOneWidget);
+      if (width >= 720) {
+        expect(find.text('选择一个会话查看消息'), findsOneWidget);
+      }
+      await tester.tap(find.text('测试会话'));
+      await tester.pumpAndSettle();
+      expect(find.text('返回后保留的草稿'), findsOneWidget);
+      expect(repo.sends + repo.marks, 0);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('page Back cancels pending conversation reads', (tester) async {
+    final back = PageBackController();
+    addTearDown(back.dispose);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(auth),
+          messageRepositoryProvider.overrideWithValue(repo),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: PageBackScope(
+              controller: back,
+              child: const MessagesScreen(),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    repo.threadPending = Completer<MessagePage<PrivateMessage>>();
+    await tester.tap(find.text('测试会话'));
+    await tester.pump();
+    await tester.pump();
+    expect(back.canGoBack, isTrue);
+    expect(back.goBack(), isTrue);
+    expect(repo.threadRead?.isCancelled, isTrue);
+    repo.threadPending!.complete(
+      const MessagePage([privateMessage], hasMore: false),
+    );
+    await tester.pumpAndSettle();
+    expect(back.canGoBack, isFalse);
+    expect(find.text('测试私信正文'), findsNothing);
+    expect(find.byType(TextField), findsNothing);
+    expect(repo.sends + repo.marks, 0);
+  });
 
   Badge accountBadge(WidgetTester tester) => tester.widget<Badge>(
     find.descendant(

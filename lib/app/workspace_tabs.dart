@@ -67,6 +67,33 @@ final class WorkspaceTabs {
   String _browseId = 'home';
   String? _playbackId;
   final List<Uri> _playbackHistory = [];
+  ({String tabId, String browseId, Uri rootLocation, List<String> history})?
+  _messagesReturnPoint;
+
+  bool get canReturnFromMessages =>
+      active.isMessages && _messagesReturnPoint != null;
+
+  /// Android's inbox Back restores its entry page, including the root channel.
+  bool returnFromMessages() {
+    final point = _messagesReturnPoint;
+    if (!active.isMessages || point == null) return false;
+    _messagesReturnPoint = null;
+    updateLocation('home', point.rootLocation);
+    final originExists = _tabs.any((tab) => tab.id == point.tabId);
+    _browseId = _tabs.any((tab) => tab.id == point.browseId && !tab.isPlayback)
+        ? point.browseId
+        : 'home';
+    _activate(originExists ? point.tabId : 'home');
+    _backHistory
+      ..clear()
+      ..addAll(
+        originExists
+            ? point.history.where((id) => _tabs.any((tab) => tab.id == id))
+            : const <String>[],
+      );
+    _trimHistory();
+    return true;
+  }
 
   /// Dual mode projects the retained workspace onto a browsing and a playback
   /// slot. Existing tabs survive mode changes; new media reuse one page/session.
@@ -219,6 +246,19 @@ final class WorkspaceTabs {
     final parameters = {...route.queryParameters}..remove('tab');
     final location = route.replace(queryParameters: parameters);
     final target = WorkspaceTab(id: '', location: location);
+    if (target.isMessages && !active.isMessages) {
+      final root = _tabs.first;
+      _messagesReturnPoint = (
+        tabId: activeId,
+        browseId: _browseId,
+        // A profile opened from the inbox can itself start another chat.
+        // Keep a non-inbox root so returning from that profile cannot loop.
+        rootLocation: root.isMessages
+            ? _messagesReturnPoint?.rootLocation ?? Uri(path: '/')
+            : root.location,
+        history: List.of(_backHistory),
+      );
+    }
     if ((target.isRoot && !target.isBrowse) ||
         (target.isBrowse && (requestedId == null || requestedId == 'home'))) {
       _tabs[0] = WorkspaceTab(id: 'home', location: location, pinned: true);

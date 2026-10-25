@@ -21,6 +21,64 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 void main() {
+  for (final mode in WorkspaceNavigationMode.values) {
+    _workspaceTestWidgets(
+      'Android root Back requires explicit exit and modal dismissal wins in $mode',
+      (tester) async {
+        final platformCalls = <MethodCall>[];
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          (call) async {
+            platformCalls.add(call);
+            return null;
+          },
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            SystemChannels.platform,
+            null,
+          ),
+        );
+        final router = _router(
+          (_, tab) => Text('page ${tab.location.path}'),
+          navigationMode: mode,
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+        await tester.pumpAndSettle();
+        int exits() => platformCalls
+            .where((call) => call.method == 'SystemNavigator.pop')
+            .length;
+        for (final root in ['/', '/me', '/settings', '/downloads']) {
+          router.go(root);
+          await tester.pumpAndSettle();
+          await tester.binding.handlePopRoute();
+          await tester.pumpAndSettle();
+          expect(find.text('退出哔帆？'), findsOneWidget);
+          expect(exits(), 0);
+          expect(router.routeInformationProvider.value.uri.path, root);
+          await tester.binding.handlePopRoute();
+          await tester.pumpAndSettle();
+          expect(find.byType(AlertDialog), findsNothing);
+          expect(exits(), 0);
+          await tester.binding.handlePopRoute();
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('取消'));
+          await tester.pumpAndSettle();
+          expect(find.byType(AlertDialog), findsNothing);
+          expect(exits(), 0);
+        }
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('退出'));
+        await tester.pumpAndSettle();
+        expect(exits(), 1);
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+  }
+
   _workspaceTestWidgets(
     'home strip follows paging before the channel route commits',
     (tester) async {

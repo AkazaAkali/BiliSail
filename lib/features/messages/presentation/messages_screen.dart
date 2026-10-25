@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/external_links.dart';
+import '../../../core/presentation/page_back_scope.dart';
 import '../../../core/presentation/workspace_activity.dart';
 import '../../../domain/user.dart';
 import '../../../shared/ui/network_avatar.dart';
@@ -124,131 +125,141 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
     final unread = unreadState.isLoading || unreadState.hasError
         ? const <InboxSection, int>{}
         : unreadState.value ?? const {};
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '我的消息',
-                  style: Theme.of(context).textTheme.titleLarge,
+    return PageBackHandler(
+      enabled: state.section == InboxSection.private && state.selected != null,
+      onBack: () {
+        controller.closeConversation();
+        return true;
+      },
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '我的消息',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                 ),
-              ),
-              IconButton(
-                tooltip: '刷新消息',
-                onPressed: controller.refresh,
-                icon: const Icon(Icons.refresh),
-              ),
-              IconButton(
-                tooltip: '官方消息页',
-                icon: const Icon(Icons.open_in_new),
-                onPressed: () => ref.read(externalLinkOpenerProvider)(
-                  Uri.https('message.bilibili.com', '/'),
+                IconButton(
+                  tooltip: '刷新消息',
+                  onPressed: controller.refresh,
+                  icon: const Icon(Icons.refresh),
                 ),
-              ),
-            ],
+                IconButton(
+                  tooltip: '官方消息页',
+                  icon: const Icon(Icons.open_in_new),
+                  onPressed: () => ref.read(externalLinkOpenerProvider)(
+                    Uri.https('message.bilibili.com', '/'),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        SizedBox(
-          height: PageTabStyle.barHeight,
-          child: ScrollConfiguration(
-            behavior: const SmoothScrollBehavior(horizontalMouseWheel: true)
-                .copyWith(
-                  dragDevices: {
-                    ...const SmoothScrollBehavior().dragDevices,
-                    PointerDeviceKind.mouse,
-                  },
-                ),
-            child: SingleChildScrollView(
-              key: const ValueKey('message-section-strip'),
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: PagingTabStrip<InboxSection>(
-                tabs: InboxSection.values,
-                value: state.section,
-                onSelected: controller.selectSection,
-                itemKey: (section) =>
-                    ValueKey('message-section-${section.name}'),
-                buttonStyle: PageTabStyle.buttonStyle(context),
-                labelBuilder: (context, section) => PageTabStyle.label(
-                  '${_sectionTabLabel(section)}${(unread[section] ?? 0) > 0 ? ' · ${unread[section]}' : ''}',
-                  icon: _sectionIcon(section),
+          SizedBox(
+            height: PageTabStyle.barHeight,
+            child: ScrollConfiguration(
+              behavior: const SmoothScrollBehavior(horizontalMouseWheel: true)
+                  .copyWith(
+                    dragDevices: {
+                      ...const SmoothScrollBehavior().dragDevices,
+                      PointerDeviceKind.mouse,
+                    },
+                  ),
+              child: SingleChildScrollView(
+                key: const ValueKey('message-section-strip'),
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: PagingTabStrip<InboxSection>(
+                  tabs: InboxSection.values,
+                  value: state.section,
+                  onSelected: controller.selectSection,
+                  itemKey: (section) =>
+                      ValueKey('message-section-${section.name}'),
+                  buttonStyle: PageTabStyle.buttonStyle(context),
+                  labelBuilder: (context, section) => PageTabStyle.label(
+                    '${_sectionTabLabel(section)}${(unread[section] ?? 0) > 0 ? ' · ${unread[section]}' : ''}',
+                    icon: _sectionIcon(section),
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-        const Divider(height: 1),
-        if (state.section == InboxSection.system)
-          if (state.writeMessage case final message?)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: Text(message),
-            ),
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final entry = state.selected;
-              final wide = constraints.maxWidth >= 720;
-              final list = _InboxList(
-                state: state.inbox,
-                selected: entry?.id,
-                isPrivate: state.section == InboxSection.private,
-                section: state.section,
-                onMore: controller.loadInbox,
-                onRefresh: () => controller.loadInbox(refresh: true),
-                onSelect: controller.selectConversation,
-                onOpenUser: widget.onOpenUser,
-                onOpenTarget: widget.onOpenTarget,
-              );
-              if (state.section != InboxSection.private) return list;
-              final thread = entry == null
-                  ? const StateView.empty(
-                      message: '选择一个会话查看消息',
-                      icon: Icons.chat_bubble_outline,
-                    )
-                  : _ConversationView(
-                      key: ValueKey('${auth.mid}:${entry.id}'),
-                      entry: entry,
-                      ownMid: auth.mid,
-                      state: state,
-                      narrow: !wide,
-                      initialDraft: _drafts[entry.id] ?? '',
-                      onDraftChanged: (text) {
-                        _drafts.remove(entry.id);
-                        if (text.isNotEmpty) _drafts[entry.id] = text;
-                        if (_drafts.length > 500) {
-                          _drafts.remove(_drafts.keys.first);
-                        }
-                      },
-                      onBack: controller.closeConversation,
-                      onMore: controller.loadThread,
-                      onRefresh: () => controller.loadThread(refresh: true),
-                      onSend: (text) async {
-                        final sent = await controller.send(text);
-                        if (sent && mounted && _drafts[entry.id] == text) {
+          const Divider(height: 1),
+          if (state.section == InboxSection.system)
+            if (state.writeMessage case final message?)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 8,
+                ),
+                child: Text(message),
+              ),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final entry = state.selected;
+                final wide = constraints.maxWidth >= 720;
+                final list = _InboxList(
+                  state: state.inbox,
+                  selected: entry?.id,
+                  isPrivate: state.section == InboxSection.private,
+                  section: state.section,
+                  onMore: controller.loadInbox,
+                  onRefresh: () => controller.loadInbox(refresh: true),
+                  onSelect: controller.selectConversation,
+                  onOpenUser: widget.onOpenUser,
+                  onOpenTarget: widget.onOpenTarget,
+                );
+                if (state.section != InboxSection.private) return list;
+                final thread = entry == null
+                    ? const StateView.empty(
+                        message: '选择一个会话查看消息',
+                        icon: Icons.chat_bubble_outline,
+                      )
+                    : _ConversationView(
+                        key: ValueKey('${auth.mid}:${entry.id}'),
+                        entry: entry,
+                        ownMid: auth.mid,
+                        state: state,
+                        narrow: !wide,
+                        initialDraft: _drafts[entry.id] ?? '',
+                        onDraftChanged: (text) {
                           _drafts.remove(entry.id);
-                        }
-                        return sent;
-                      },
-                      onMarkRead: controller.markRead,
-                      onOpenUser: widget.onOpenUser,
-                      onOpenTarget: widget.onOpenTarget,
-                    );
-              if (!wide) return entry == null ? list : thread;
-              return Row(
-                children: [
-                  SizedBox(width: 300, child: list),
-                  const VerticalDivider(width: 1),
-                  Expanded(child: thread),
-                ],
-              );
-            },
+                          if (text.isNotEmpty) _drafts[entry.id] = text;
+                          if (_drafts.length > 500) {
+                            _drafts.remove(_drafts.keys.first);
+                          }
+                        },
+                        onBack: controller.closeConversation,
+                        onMore: controller.loadThread,
+                        onRefresh: () => controller.loadThread(refresh: true),
+                        onSend: (text) async {
+                          final sent = await controller.send(text);
+                          if (sent && mounted && _drafts[entry.id] == text) {
+                            _drafts.remove(entry.id);
+                          }
+                          return sent;
+                        },
+                        onMarkRead: controller.markRead,
+                        onOpenUser: widget.onOpenUser,
+                        onOpenTarget: widget.onOpenTarget,
+                      );
+                if (!wide) return entry == null ? list : thread;
+                return Row(
+                  children: [
+                    SizedBox(width: 300, child: list),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: thread),
+                  ],
+                );
+              },
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

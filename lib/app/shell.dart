@@ -1,6 +1,7 @@
 import 'dart:ui' show ViewFocusEvent, ViewFocusState;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/feed/domain/home_channel.dart';
@@ -21,6 +22,7 @@ import '../features/settings/domain/app_settings.dart';
 import '../shared/ui/smooth_scroll_behavior.dart';
 import '../shared/ui/bili_icons.dart';
 import '../shared/ui/app_notice.dart';
+import '../shared/ui/app_dialog.dart';
 import '../shared/ui/paging_tab_strip.dart';
 import '../shared/ui/page_tab_style.dart';
 import '../shared/ui/retained_tab_view.dart';
@@ -154,6 +156,11 @@ final class _BiliAppShellState extends State<BiliAppShell>
   SettingsCategory _lastSettingsCategory = SettingsCategory.appearance;
   bool _windowFailed = false;
   int _windowActivation = 0;
+  bool _exitConfirmationOpen = false;
+
+  bool get _android => Theme.of(context).platform == TargetPlatform.android;
+  bool get _canReturnFromMessages =>
+      _android && _workspace.canReturnFromMessages;
 
   bool get _desktopDual =>
       _dualTabs && widget.playbackWindowBuilder != null && !_windowFailed;
@@ -172,12 +179,14 @@ final class _BiliAppShellState extends State<BiliAppShell>
 
   bool get _canGoBack =>
       (_pageBack[_displayTab.id]?.canGoBack ?? false) ||
+      _canReturnFromMessages ||
       (_desktopDual ? _workspace.canGoBackBrowsing : _workspace.canGoBack);
 
   bool get _showBackButton =>
       _dualTabs &&
       _canGoBack &&
       (!(_displayTab.pinned && _displayTab.isRoot) ||
+          _canReturnFromMessages ||
           (_pageBack[_displayTab.id]?.canGoBack ?? false));
 
   bool _goBackWithinPage() => _pageBack[_displayTab.id]?.goBack() ?? false;
@@ -360,14 +369,52 @@ final class _BiliAppShellState extends State<BiliAppShell>
     if (wasActive) _commitWorkspace();
   }
 
-  void _goBack() {
-    if (_goBackWithinPage()) return;
-    if (!(_desktopDual ? _workspace.goBackBrowsing() : _workspace.goBack())) {
-      return;
+  bool _goBack() {
+    if (_goBackWithinPage()) return true;
+    if (!(_canReturnFromMessages
+        ? _workspace.returnFromMessages()
+        : _desktopDual
+        ? _workspace.goBackBrowsing()
+        : _workspace.goBack())) {
+      return false;
     }
     _prunePages();
     setState(() {});
     _commitWorkspace();
+    return true;
+  }
+
+  Future<void> _confirmAndroidExit() async {
+    if (_exitConfirmationOpen) return;
+    _exitConfirmationOpen = true;
+    final location = widget.location;
+    try {
+      final exit = await showAppDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('退出哔帆？'),
+          content: const Text('确定要退出应用吗？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('退出'),
+            ),
+          ],
+        ),
+      );
+      if (exit == true &&
+          mounted &&
+          widget.location == location &&
+          !_canGoBack) {
+        await SystemNavigator.pop();
+      }
+    } finally {
+      _exitConfirmationOpen = false;
+    }
   }
 
   void _closePlaybackWindow() {
@@ -511,9 +558,9 @@ final class _BiliAppShellState extends State<BiliAppShell>
           command: (stroke) => _workspaceCommand(command, stroke),
       },
       child: PopScope<Object?>(
-        canPop: !_canGoBack,
+        canPop: !_android && !_canGoBack,
         onPopInvokedWithResult: (didPop, _) {
-          if (!didPop) _goBack();
+          if (!didPop && !_goBack() && _android) _confirmAndroidExit();
         },
         child: Focus(
           autofocus: true,
