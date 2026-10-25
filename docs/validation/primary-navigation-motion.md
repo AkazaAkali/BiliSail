@@ -17,6 +17,21 @@
 
 隐藏根分支保持 WorkspaceActivity、焦点隔离和账号作用域，继续接收 Riverpod 更新。没有在整个根分支外禁用 TickerMode，避免 Riverpod 暂停监听而延迟账号清理。Offstage 的隐藏布局语义保持；本轮减少的是无关导航引起的构建和动效期间的重建，没有宣称隐藏页零布局或实际帧率提升。
 
+## 首页与视频动态切换复查
+
+2026-10-25 根据窄屏底栏切换轻微卡顿的反馈，继续检查已访问频道之间的切换，修正两处可避免的工作：
+
+- [RetainedTabView](../../lib/shared/ui/retained_tab_view.dart)之前在频道组每次失活时都会替换 TabController，即使分页已停稳。现在空闲分页器沿用原控制器；拖动、回弹或路由选择动画尚未结束时，仍替换控制器并恢复路由选中的页。失活时继续推进 generation，隔离尚未提交的旧滑动回调。该修改共用于首页频道和其他保留式分页，不改变一级滑入／淡入动效。
+- [HomeContent](../../lib/features/feed/presentation/home_content.dart)的列表缓存之前将登录回调对象作为失效条件。真实路由每次构建会创建新的回调，导致动态／视频动态的数据未变时也替换列表 delegate 和已挂载卡片。现在只按登录入口是否存在判断缓存失效，卡片经 State 上的稳定方法转发到最新回调；登录入口移除、账号状态／查询／数据改变、完整刷新仍按原规则更新或清空缓存。视频动态继续按视口懒构建。
+
+新增回归在修改前均失败：一个证明停稳后隐藏分页器仍被替换，另外两个证明动态和视频动态在回调变化时替换原有卡片。修改后这三个回归及所在文件全部 37 项测试通过，覆盖 390 逻辑像素视口下的隐藏／返回、原有卡片和滚动位置保留、最新登录动作及移除入口、列表不重复读取。日志：`build/primary-switch-baseline.log`、`build/primary-switch-targeted.log`。
+
+本轮根检查的五处格式、静态分析及平台打包边界检查通过。首轮根测试 2695 项通过、1 项同期下载页面用例失败（`queue actions and delete cancellation preserve files choice`）；该用例单独复跑通过，随后 `tool/check.ps1 -SkipPub -Stage RootTests` 全部 2696 项通过。四个包单独运行检查脚本的 PackageTests 阶段，bili_api 456、bili_player 81、bili_danmaku 93、bili_mux 2 项通过；10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。日志：`build/primary-switch-check.log`、`build/primary-switch-download-blocker.log`、`build/primary-switch-root-recheck.log`、`build/primary-switch-packages.log`。文档相对链接及 `git diff --check` 通过。
+
+这是组件工作量的验证，不能换算为帧率或卡顿下降比例。当前没有连接 Android 设备或 Flutter 调试应用，未进行设备 Profile/Release 帧时长对比；整页 FadeTransition 的合成成本、首次打开的页面构建和图片恢复仍需在出现卡顿的设备上区分 UI 与 raster 耗时。本次没有用 debug 测试耗时作为性能结论，也没有为此增加预加载或扩大缓存容量。
+
+按用户要求另构建 Android arm64 Release 测试包：`artifacts/android-arm64-navigation-20261025-232324/BiliSail-1.2.1+0-android-arm64-navigation.apk`，约 58.6 MB，版本 1.2.1+0、versionCode 12100。先运行 `tool/build-download-mux.ps1 -Target android-arm64`，再强校验锁文件并构建 APK；复用本机已有受保护的固定签名，实际 APK 证书与预期指纹一致，仅包含 arm64-v8a ABI 及对应 `libbili_mux.so`。产物旁保留 SHA-256 和 metadata，记录源码 HEAD、工作区非空状态及两处优化源码的哈希；构建前后这两处源码未改变。日志：`build/primary-switch-android-mux.log`、`build/primary-switch-android-release.log`。构建存在既有 CupertinoIcons 字体缺失及第三方 Java 8／弃用 API 提示；未修改相关依赖或资源。尚未在 Android 设备安装、启动、覆盖升级或实测切换流畅度，交由用户安装确认。
+
 ## 验证
 
 - [动效组件测试](../../test/shared/ui/primary_navigation_transition_test.dart)：方向、动画中途重选、状态保留、逐帧不重建内容、详情跳转取消、减少动画和运行中关闭动效。
