@@ -3,6 +3,7 @@
 
 #include <windows.h>
 #include <commctrl.h>
+#include <dwmapi.h>
 
 namespace playback_window {
 
@@ -23,6 +24,20 @@ class PlaybackWindowFrame {
   PlaybackWindowFrame& operator=(const PlaybackWindowFrame&) = delete;
 
   bool ready() const { return attached_; }
+
+  void SetTheme(bool dark, COLORREF caption_color) const {
+    const BOOL enable_dark_mode = dark ? TRUE : FALSE;
+    // SDK-managed secondary HWNDs do not pass through Win32Window::UpdateTheme.
+    // These numeric attributes also compile with the Windows 10 SDK. Caption
+    // color is optional on older Windows; immersive dark mode remains usable.
+    constexpr DWORD kImmersiveDarkMode = 20;
+    constexpr DWORD kCaptionColor = 35;
+    DwmSetWindowAttribute(window_, kImmersiveDarkMode, &enable_dark_mode,
+                          sizeof(enable_dark_mode));
+    DwmSetWindowAttribute(window_, kCaptionColor, &caption_color,
+                          sizeof(caption_color));
+    RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_FRAME);
+  }
 
  private:
   static UINT_PTR SubclassId() {

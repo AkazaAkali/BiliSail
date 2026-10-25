@@ -12,6 +12,72 @@ import '../support/native_window_events.dart';
 import '../support/window_service_fake.dart';
 
 void main() {
+  testWidgets('native frame follows app theme independently of system theme', (
+    tester,
+  ) async {
+    const channel = MethodChannel('bilisail/desktop_window');
+    final themes = <Object?>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      if (call.method == 'setPlaybackTitleBar') themes.add(call.arguments);
+      return null;
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+    tester.binding.platformDispatcher.platformBrightnessTestValue =
+        Brightness.light;
+    addTearDown(
+      tester.binding.platformDispatcher.clearPlatformBrightnessTestValue,
+    );
+    final window = WindowService.forView(
+      viewId: 52,
+      setFullScreen: (_) async {},
+      activate: () async {},
+    );
+    Widget build(ThemeData theme) => WindowServiceScope(
+      service: window,
+      child: WorkspacePlaybackWindow(
+        shortcuts: const ShortcutSettings.defaults(),
+        theme: theme,
+        onBack: () {},
+        onClose: () {},
+        onActivateBrowser: () {},
+        child: const SizedBox.expand(),
+      ),
+    );
+    final dark = ThemeData.dark().copyWith(
+      scaffoldBackgroundColor: const Color(0xff151f29),
+    );
+    await tester.pumpWidget(build(dark));
+    await tester.pumpAndSettle();
+    expect(themes, [
+      {'viewId': 52, 'dark': true, 'backgroundColor': 0x151f29},
+    ]);
+    themes.clear();
+    await tester.pumpWidget(build(dark));
+    await tester.pumpAndSettle();
+    expect(themes, isEmpty);
+    await tester.pumpWidget(
+      build(
+        ThemeData.light().copyWith(
+          scaffoldBackgroundColor: const Color(0xfff5f7fb),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(themes, [
+      {'viewId': 52, 'dark': false, 'backgroundColor': 0xf5f7fb},
+    ]);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  }, skip: !Platform.isWindows);
+
   testWidgets(
     'caption Back respects modal isolation and keeps one content row',
     (tester) async {

@@ -47,6 +47,45 @@ class _WorkspacePlaybackWindowState extends State<WorkspacePlaybackWindow> {
   final _backOwner = Object();
   WindowService? _window;
   Timer? _captionTimer;
+  Timer? _themeTimer;
+
+  void _scheduleWindowTheme() {
+    _themeTimer?.cancel();
+    final window = _window;
+    if (window == null || !window.hasCustomPlaybackTitleBar) return;
+    // DWM may pump native messages; update outside the Flutter frame stack.
+    _themeTimer = Timer(Duration.zero, () {
+      _themeTimer = null;
+      if (!mounted || !identical(_window, window)) return;
+      unawaited(
+        window
+            .configurePlaybackTitleBar(
+              brightness: widget.theme.brightness,
+              backgroundColor: widget.theme.scaffoldBackgroundColor,
+            )
+            .catchError((Object error, StackTrace stack) {
+              if (!mounted) return;
+              FlutterError.reportError(
+                FlutterErrorDetails(
+                  exception: error,
+                  stack: stack,
+                  library: 'BiliSail playback window theme',
+                ),
+              );
+            }),
+      );
+    });
+  }
+
+  @override
+  void didUpdateWidget(WorkspacePlaybackWindow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.theme.brightness != widget.theme.brightness ||
+        oldWidget.theme.scaffoldBackgroundColor !=
+            widget.theme.scaffoldBackgroundColor) {
+      _scheduleWindowTheme();
+    }
+  }
 
   void _nativeBack() {
     // Native caption input sits outside Navigator's modal barrier. Keep the
@@ -87,6 +126,7 @@ class _WorkspacePlaybackWindowState extends State<WorkspacePlaybackWindow> {
     _captionTimer?.cancel();
     final previous = _window;
     _window = window;
+    _scheduleWindowTheme();
     if (previous != null) _unbindBack(previous);
     if (window == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -120,6 +160,7 @@ class _WorkspacePlaybackWindowState extends State<WorkspacePlaybackWindow> {
   @override
   void dispose() {
     _captionTimer?.cancel();
+    _themeTimer?.cancel();
     final window = _window;
     if (window != null) _unbindBack(window);
     _input.dispose();

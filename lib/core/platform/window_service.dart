@@ -50,8 +50,17 @@ class WindowService {
 
   bool get hasCustomPlaybackTitleBar => Platform.isWindows && viewId != null;
 
-  Future<void> configurePlaybackTitleBar() =>
-      _playbackCaptionCall('setPlaybackTitleBar');
+  Future<void> configurePlaybackTitleBar({
+    Brightness? brightness,
+    Color? backgroundColor,
+  }) => _playbackCaptionCall('setPlaybackTitleBar', {
+    'dark':
+        (brightness ??
+            WidgetsBinding.instance.platformDispatcher.platformBrightness) ==
+        Brightness.dark,
+    if (backgroundColor != null)
+      'backgroundColor': backgroundColor.toARGB32() & 0x00ffffff,
+  });
 
   Future<void> startDraggingPlaybackWindow() =>
       _playbackCaptionCall('startDragging');
@@ -61,11 +70,14 @@ class WindowService {
 
   Future<void> minimizePlaybackWindow() => _playbackCaptionCall('minimize');
 
-  Future<void> _playbackCaptionCall(String method) async {
+  Future<void> _playbackCaptionCall(
+    String method, [
+    Map<String, Object> arguments = const {},
+  ]) async {
     if (!hasCustomPlaybackTitleBar || _isViewAvailable?.call() == false) return;
     try {
       await _desktopChannel
-          .invokeMethod<void>(method, {'viewId': viewId})
+          .invokeMethod<void>(method, {'viewId': viewId, ...arguments})
           .timeout(_geometryTimeout);
     } on PlatformException catch (error) {
       if (error.code == 'window_unavailable' &&

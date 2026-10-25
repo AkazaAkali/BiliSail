@@ -1,4 +1,5 @@
 import 'package:bilisail/core/platform/window_service.dart';
+import 'package:flutter/widgets.dart';
 
 // Native message routing is exercised with mocked platform channels on every
 // test host, including Linux where production title bars are not installed.
@@ -15,4 +16,11 @@ class FakePlaybackWindowService extends WindowService {
 
   @override
   bool get hasNativePlaybackTitleBar => nativeTitleBar;
+
+  // Fake views have no HWND. Native theme forwarding has its own channel test.
+  @override
+  Future<void> configurePlaybackTitleBar({
+    Brightness? brightness,
+    Color? backgroundColor,
+  }) async {}
 }

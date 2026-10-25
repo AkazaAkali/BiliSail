@@ -78,6 +78,23 @@ void RunFrameTests() {
   {
     const playback_window::PlaybackWindowFrame caption(window);
     Require(caption.ready(), "Cannot install playback frame.");
+    const LONG_PTR original_style = GetWindowLongPtr(window, GWL_STYLE);
+    for (const bool dark : {true, false}) {
+      const COLORREF expected_color = dark ? RGB(21, 31, 41) : RGB(245, 247, 251);
+      caption.SetTheme(dark, expected_color);
+      // Keep dark-mode opt-in when the playback window loses focus.
+      SendMessage(window, WM_NCACTIVATE, FALSE, 0);
+      BOOL actual_dark = FALSE;
+      Require(SUCCEEDED(DwmGetWindowAttribute(window, 20, &actual_dark,
+                                               sizeof(actual_dark))) &&
+                  (actual_dark != FALSE) == dark,
+              "Native frame did not follow app brightness.");
+      // DWMWA_CAPTION_COLOR is documented for DwmSetWindowAttribute only;
+      // reading it is not a supported way to verify the caption color.
+      Require(GetWindowLongPtr(window, GWL_STYLE) == original_style,
+              "Applying the frame theme changed native resize styles.");
+      RequireBounds(window, playback_window::RectBounds(frame));
+    }
     RECT client{};
     Require(GetClientRect(window, &client) != FALSE, "Cannot read custom client.");
     Require(client.bottom - original.bottom ==
@@ -233,7 +250,7 @@ int main() {
     RunTests();
     RunFrameTests();
     UnregisterClassW(window_class.lpszClassName, window_class.hInstance);
-    std::cout << "PASS native first show and caption: SDK restore reproduction, maximized reopen, user Restore, normal bounds, minimize, pending close, stale owner, fullscreen, custom client frame and detach\n";
+    std::cout << "PASS native first show and caption: SDK restore reproduction, maximized reopen, user Restore, normal bounds, minimize, pending close, stale owner, fullscreen, custom client frame, app brightness and detach\n";
     return 0;
   } catch (const std::exception& error) {
     std::cerr << "FAIL native first show: " << error.what() << '\n';

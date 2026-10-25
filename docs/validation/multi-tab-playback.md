@@ -2,6 +2,14 @@
 
 日期：2026-10-06；默认值更新于 2026-10-24。当前“允许多个标签页同时播放”默认关闭，已保存的有效选择继续保留；以下 2026-10-06 记录中的默认开启为历史行为。
 
+## Windows 播放窗深色顶部边框（2026-10-26）
+
+- 双标签播放窗由 Flutter SDK 创建，未经过主窗口 `Win32Window::UpdateTheme`。此前仅 Flutter 内容和 44 逻辑像素自绘标题栏切换深色，保留用于窗口缩放的原生顶部边框仍按浅色绘制，形成白条。
+- `WindowService.configurePlaybackTitleBar` 现在按 view 传递亮度与标题栏背景色，播放窗挂载和主题变化时同步。原生适配使用 `DWMWA_USE_IMMERSIVE_DARK_MODE` 和 `DWMWA_CAPTION_COLOR` 更新窗口装饰，保留窗口样式、缩放、最大化及全屏几何；旧版 Windows 不支持自定义标题颜色时仍尝试深色模式属性。属性定义见 [Microsoft DWM 文档](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute)。
+- 定向回归 53 项通过，覆盖应用深色与系统浅色不一致、深浅主题切换、重复重建、view 关闭后的调用保护，以及侧键和评论详情返回；日志 `build/playback-frame-targeted-final.log`。`tool/test-window-geometry.ps1` 在隔离桌面通过真实 HWND 的亮度属性、失焦、窗口样式、普通／最大化／全屏几何与释放回归。标题栏颜色属性仅支持设置，原生测试未使用不支持的颜色读回断言。
+- `tool/check.ps1 -SkipPub` 通过：根应用 2792、bili_api 460、bili_player 81、bili_danmaku 93、bili_mux 5，共 3431 项通过；格式、静态分析和打包边界检查通过，10 项 mux 原生测试因未设置 `BILI_MUX_LIBRARY` 跳过，日志 `build/playback-frame-check-final.log`。Windows mux 资产和 Windows Release 重建成功，入口为 `build/windows/x64/runner/Release/bilisail.exe`，日志 `build/playback-frame-mux-build.log`、`build/playback-frame-windows-release.log`；已核对分发 AOT、mux 资产和固定 libmpv 哈希。
+- 本轮未操作用户运行中的客户端，未执行实际视频播放、跨屏 DPI、Windows 10、Android 或 macOS 实机验收；没有可连接的 Dart 调试进程，不能热重载原生改动，需使用重新构建的程序。
+
 ## 单标签恢复与 Android 默认值（2026-10-25）
 
 用户后续要求恢复单标签，并将其设为 Android 缺省模式，取代下文“各平台默认双标签”的默认值决定。其他平台仍默认双标签；已保存的单／双／多标签配置全部保留。单标签按实际访问顺序返回播放及普通页面，出栈释放不再被历史引用的会话；双标签的独立播放槽和多标签并发策略保持。行为与本轮验证见[单标签记录](single-page-navigation.md#恢复单标签2026-10-25)。

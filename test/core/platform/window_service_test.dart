@@ -196,6 +196,11 @@ void main() {
         activate: () async {},
         isAvailable: () => available,
       );
+      tester.binding.platformDispatcher.platformBrightnessTestValue =
+          Brightness.dark;
+      addTearDown(
+        tester.binding.platformDispatcher.clearPlatformBrightnessTestValue,
+      );
       await window.configurePlaybackTitleBar();
       await window.startDraggingPlaybackWindow();
       await window.togglePlaybackWindowMaximized();
@@ -212,7 +217,21 @@ void main() {
             : isEmpty,
       );
       for (final call in calls) {
-        expect(call.arguments, {'viewId': 71});
+        expect(call.arguments, {
+          'viewId': 71,
+          if (call.method == 'setPlaybackTitleBar') 'dark': true,
+        });
+      }
+      await window.configurePlaybackTitleBar(
+        brightness: Brightness.light,
+        backgroundColor: const Color(0xfff5f7fb),
+      );
+      if (Platform.isWindows) {
+        expect(calls.last.arguments, {
+          'viewId': 71,
+          'dark': false,
+          'backgroundColor': 0xf5f7fb,
+        });
       }
       calls.clear();
       available = false;

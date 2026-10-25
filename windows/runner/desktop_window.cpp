@@ -265,6 +265,18 @@ DesktopWindowChannel::DesktopWindowChannel(flutter::BinaryMessenger* messenger,
           return;
         }
         if (call.method_name() == "setPlaybackTitleBar") {
+          const auto dark_entry = arguments->find(flutter::EncodableValue("dark"));
+          const auto* dark = dark_entry != arguments->end()
+                                 ? std::get_if<bool>(&dark_entry->second)
+                                 : nullptr;
+          const auto color_entry = arguments->find(
+              flutter::EncodableValue("backgroundColor"));
+          const int64_t rgb = ReadInteger(*arguments, "backgroundColor");
+          if (!dark || (color_entry != arguments->end() &&
+                        (rgb < 0 || rgb > 0x00ffffff))) {
+            result->Error("invalid_argument", "Expected playback theme colors.");
+            return;
+          }
           if (frame_view_ != id) {
             auto frame = std::make_unique<playback_window::PlaybackWindowFrame>(window);
             if (!frame->ready()) {
@@ -274,6 +286,11 @@ DesktopWindowChannel::DesktopWindowChannel(flutter::BinaryMessenger* messenger,
             playback_frame_ = std::move(frame);
             frame_view_ = id;
           }
+          constexpr COLORREF kSystemCaptionColor = 0xffffffff;
+          const COLORREF caption_color = color_entry == arguments->end()
+              ? kSystemCaptionColor
+              : RGB((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
+          playback_frame_->SetTheme(*dark, caption_color);
           result->Success();
         } else if (call.method_name() == "startDragging") {
           POINT cursor{};
