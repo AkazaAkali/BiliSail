@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/ui/app_dialog.dart';
 import '../../../core/presentation/workspace_activity.dart';
 import '../../../shared/ui/app_network_image.dart';
 import '../../../shared/ui/app_notice.dart';
@@ -69,7 +70,7 @@ final class _LiveDanmakuComposerState
     }
     final container = ProviderScope.containerOf(context);
     unawaited(ref.read(provider.notifier).loadEmoticons());
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       builder: (_) => UncontrolledProviderScope(
         container: container,

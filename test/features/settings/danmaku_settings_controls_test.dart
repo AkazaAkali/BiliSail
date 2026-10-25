@@ -8,11 +8,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../support/desktop_windowing.dart';
+
 void main() {
   for (final inPlayer in [false, true]) {
     testWidgets(
       'style, filtering, offset and density save through both entrances (player: $inPlayer)',
       (tester) async {
+        if (inPlayer) enableDesktopWindowing(tester);
         tester.view.physicalSize = const Size(400, 850);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.resetPhysicalSize);

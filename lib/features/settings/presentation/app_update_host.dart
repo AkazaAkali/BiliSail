@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/ui/app_dialog.dart';
 import '../../../shared/ui/app_notice.dart';
 import '../application/app_update_controller.dart';
 
@@ -53,7 +54,7 @@ final class _AppUpdateHostState extends ConsumerState<AppUpdateHost> {
     if (release == null) return;
     _showing = true;
     try {
-      final openRelease = await showDialog<bool>(
+      final openRelease = await showAppDialog<bool>(
         context: dialogContext,
         builder: (context) => AlertDialog(
           title: Text('发现新版本 ${release.version.label}'),

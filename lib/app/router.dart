@@ -4,6 +4,7 @@ import 'package:flutter/material.dart' hide SearchController;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../shared/ui/app_dialog.dart';
 import '../domain/video.dart';
 import '../features/downloads/domain/download_models.dart';
 import '../features/downloads/application/download_controller.dart';
@@ -273,7 +274,7 @@ final class _WorkspacePage extends ConsumerWidget {
           ),
           isSignedIn: signedIn,
           onLogin: observeAccount
-              ? () => showDialog<void>(
+              ? () => showAppDialog<void>(
                   context: context,
                   builder: (_) => const AccountDialog(),
                 )
@@ -285,7 +286,7 @@ final class _WorkspacePage extends ConsumerWidget {
       section: WorkspaceRootSection.account,
       location: Uri(path: '/me'),
       builder: (context) {
-        void login() => showDialog<void>(
+        void login() => showAppDialog<void>(
           context: context,
           builder: (_) => const AccountDialog(),
         );
@@ -330,7 +331,7 @@ final class _WorkspacePage extends ConsumerWidget {
         context.go('/messages?tab=${tab.id}');
       }
     },
-    onLogin: () => showDialog<void>(
+    onLogin: () => showAppDialog<void>(
       context: context,
       builder: (_) => const AccountDialog(),
     ),
@@ -666,7 +667,7 @@ final class _WorkspacePage extends ConsumerWidget {
                                 context.go('/video/${video.id.value}'),
                             onOpenLiveRoom: (room) =>
                                 context.go('/live/${room.value}'),
-                            onLogin: () => showDialog<void>(
+                            onLogin: () => showAppDialog<void>(
                               context: context,
                               builder: (_) => const AccountDialog(),
                             ),
@@ -716,7 +717,7 @@ final class _WorkspacePage extends ConsumerWidget {
                             onOpenUser: (user) =>
                                 context.go('/user/${user.value}'),
                             onLogin: observeAccount
-                                ? () => showDialog<void>(
+                                ? () => showAppDialog<void>(
                                     context: context,
                                     builder: (_) => const AccountDialog(),
                                   )

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/ui/app_dialog.dart';
 import '../../../core/platform/external_links.dart';
 import '../../../domain/app_failure.dart';
 import '../../../domain/video.dart';
@@ -75,7 +76,7 @@ class _VideoActionsBarState extends ConsumerState<VideoActionsBar> {
       _notice('已为这个视频投币');
       return;
     }
-    final count = await showDialog<int>(
+    final count = await showAppDialog<int>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('为视频投币'),
@@ -118,7 +119,7 @@ class _VideoActionsBarState extends ConsumerState<VideoActionsBar> {
           ref.read(videoActionsRepositoryProvider).accountScope != scope) {
         return;
       }
-      final selected = await showDialog<Set<String>>(
+      final selected = await showAppDialog<Set<String>>(
         context: context,
         builder: (_) => _FavoriteDialog(folders: folders),
       );

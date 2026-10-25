@@ -12,6 +12,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../support/desktop_windowing.dart';
+
 const testPart = VideoPart(
   cid: '22',
   page: 1,
@@ -90,6 +92,7 @@ void main() {
   testWidgets(
     'coin requires dialog choice and suppresses duplicate while busy',
     (tester) async {
+      enableDesktopWindowing(tester);
       final repo = FakeActions()..pending = Completer<void>();
       await pumpActions(tester, repo, signedIn: true);
       await tester.tap(find.byTooltip('投币 0'));
@@ -129,6 +132,7 @@ void main() {
   testWidgets('favorite loads folders and only saves explicit selection', (
     tester,
   ) async {
+    enableDesktopWindowing(tester);
     final repo = FakeActions();
     await pumpActions(tester, repo, signedIn: true);
     await tester.tap(find.byTooltip('收藏 0'));

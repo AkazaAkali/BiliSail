@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'app_dialog.dart';
 import '../../domain/user.dart';
 import '../../features/video/application/video_author_controller.dart';
 import '../../features/video/domain/video_author_repository.dart';
@@ -46,7 +47,7 @@ final class UserFollowButton extends ConsumerWidget {
         if (action == 'groups') {
           unawaited(controller.loadGroups());
           unawaited(
-            showDialog<void>(
+            showAppDialog<void>(
               context: context,
               builder: (_) => _FollowGroupsDialog(id: VideoAuthorId(mid)),
             ),

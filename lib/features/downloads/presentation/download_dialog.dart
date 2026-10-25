@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/ui/app_dialog.dart';
 import '../../../domain/app_failure.dart';
 import '../../../domain/request_cancellation.dart';
 import '../../../domain/video_codec.dart';
@@ -13,7 +14,7 @@ Future<void> showDownloadDialog(
   required List<DownloadItem> items,
   String? initialKey,
   DownloadSelection? initialSelection,
-}) => showDialog<void>(
+}) => showAppDialog<void>(
   context: context,
   builder: (_) => DownloadDialog(
     items: items,

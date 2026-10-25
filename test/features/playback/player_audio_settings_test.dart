@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../support/desktop_windowing.dart';
+
 final class _Settings implements SettingsRepository {
   AppSettings value = AppSettings();
   @override
@@ -20,6 +22,7 @@ void main() {
   testWidgets(
     'player settings expose all modes and save without resetting volume',
     (tester) async {
+      enableDesktopWindowing(tester);
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(400, 800);
       addTearDown(tester.view.resetPhysicalSize);

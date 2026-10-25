@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../shared/ui/app_dialog.dart';
 import '../../../core/input/input_stroke.dart';
 import '../../../core/input/shortcut_dispatcher.dart';
 import '../../../core/presentation/input_scope.dart';
@@ -29,7 +30,7 @@ class ShortcutSettingsSection extends StatelessWidget {
   }
 
   Future<void> _edit(BuildContext context, ShortcutAction action) async {
-    await showDialog<ShortcutSettings>(
+    await showAppDialog<ShortcutSettings>(
       context: context,
       builder: (_) =>
           _ShortcutEditor(settings: settings, action: action, save: save),
@@ -206,7 +207,7 @@ class _ShortcutEditorState extends State<_ShortcutEditor> {
   }
 
   Future<void> _record() async {
-    final key = await showDialog<String>(
+    final key = await showAppDialog<String>(
       context: context,
       barrierDismissible: false,
       builder: (_) => const _ShortcutRecorder(),

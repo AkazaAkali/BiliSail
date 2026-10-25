@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../shared/ui/app_dialog.dart';
 import '../../../core/platform/external_links.dart';
 import '../../../core/network/api_requests.dart';
 import '../../../domain/app_failure.dart';
@@ -517,7 +518,7 @@ final class _HomeContentState extends ConsumerState<HomeContent> {
         widget.active &&
         widget.isSignedIn &&
         ref.read(homeRepositoryProvider).accountScope == scope;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         scrollable: true,
@@ -557,7 +558,7 @@ final class _HomeContentState extends ConsumerState<HomeContent> {
   }
 
   Future<void> _editFolder(HomeEntry entry, String scope) async {
-    final saved = await showDialog<bool>(
+    final saved = await showAppDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) =>

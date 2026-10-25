@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/ui/app_dialog.dart';
 import '../../../domain/app_failure.dart';
 import '../../../domain/video_codec.dart';
 import '../../../shared/ui/app_cover_image.dart';
@@ -79,7 +80,7 @@ final class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
   Future<void> _remove(DownloadTask task) async {
-    final deleteFiles = await showDialog<bool>(
+    final deleteFiles = await showAppDialog<bool>(
       context: context,
       builder: (_) => _DeleteTaskDialog(task: task),
     );
@@ -166,7 +167,7 @@ final class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
             ),
             IconButton.outlined(
               tooltip: '下载设置',
-              onPressed: () => showDialog<void>(
+              onPressed: () => showAppDialog<void>(
                 context: context,
                 builder: (_) => _DownloadSettingsDialog(
                   preferences: state.preferences,

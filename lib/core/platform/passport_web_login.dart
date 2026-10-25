@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../shared/ui/app_dialog.dart';
 import 'passport_webview_environment.dart';
 
 final class BrowserLoginCookie {
@@ -60,7 +61,7 @@ final class BrowserLoginCookie {
 Future<List<BrowserLoginCookie>?> showPassportWebLogin(BuildContext context) {
   // WebView event logging can include authenticated URLs and Cookie values.
   PlatformInAppWebViewController.debugLoggingSettings.enabled = false;
-  return showDialog<List<BrowserLoginCookie>>(
+  return showAppDialog<List<BrowserLoginCookie>>(
     context: context,
     barrierDismissible: false,
     builder: (_) => const _PassportDialog(),

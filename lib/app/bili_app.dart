@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path/path.dart' as path;
 
+import '../shared/ui/app_dialog.dart';
 import '../core/platform/desktop_window_chrome.dart';
 import '../core/platform/detached_playback_window.dart';
 import '../core/platform/window_service.dart';
@@ -196,7 +197,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
             settings: settings,
             danmakuComposerBuilder: (context) => PgcDanmakuComposer(
               episode: episode,
-              onLogin: () => showDialog<void>(
+              onLogin: () => showAppDialog<void>(
                 context: context,
                 builder: (_) => const AccountDialog(),
               ),
@@ -213,7 +214,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
       pgcCommentsBuilder: (context, season, episode) => VideoCommentsPanel(
         detail: _episodeDetail(season, episode),
         onOpenUser: (user) => context.go('/user/${user.value}'),
-        onLogin: () => showDialog<void>(
+        onLogin: () => showAppDialog<void>(
           context: context,
           builder: (_) => const AccountDialog(),
         ),
@@ -234,7 +235,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
               danmakuComposerBuilder: (context) => LiveDanmakuComposer(
                 roomId: requestedId,
                 playerStyle: true,
-                onLogin: () => showDialog<void>(
+                onLogin: () => showAppDialog<void>(
                   context: context,
                   builder: (_) => const AccountDialog(),
                 ),
@@ -253,7 +254,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
       ),
       liveComposerBuilder: (context, roomId) => LiveDanmakuComposer(
         roomId: roomId,
-        onLogin: () => showDialog<void>(
+        onLogin: () => showAppDialog<void>(
           context: context,
           builder: (_) => const AccountDialog(),
         ),
@@ -265,7 +266,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
       actionsBuilder: (context, detail, part) => VideoActionsBar(
         detail: detail,
         onDownload: () => _downloadVideo(context, detail, part),
-        onLogin: () => showDialog<void>(
+        onLogin: () => showAppDialog<void>(
           context: context,
           builder: (_) => const AccountDialog(),
         ),
@@ -274,7 +275,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
         detail: detail,
         onDownload: () => _downloadVideo(context, detail, part),
         menuOnly: true,
-        onLogin: () => showDialog<void>(
+        onLogin: () => showAppDialog<void>(
           context: context,
           builder: (_) => const AccountDialog(),
         ),
@@ -310,7 +311,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
             danmakuComposerBuilder: (context) => VideoDanmakuComposer(
               detail: detail,
               part: part,
-              onLogin: () => showDialog<void>(
+              onLogin: () => showAppDialog<void>(
                 context: context,
                 builder: (_) => const AccountDialog(),
               ),

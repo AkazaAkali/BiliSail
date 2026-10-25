@@ -3,6 +3,7 @@ import '../../../domain/user.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/ui/app_dialog.dart';
 import '../../../shared/ui/network_avatar.dart';
 import '../application/auth_controller.dart';
 import '../application/account_overview_controller.dart';
@@ -64,7 +65,7 @@ class AccountButton extends ConsumerWidget {
           );
           return;
         }
-        showDialog<void>(
+        showAppDialog<void>(
           context: context,
           builder: (_) => AccountDialog(onOpenUser: onOpenUser),
         );

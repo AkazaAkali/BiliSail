@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'app_dialog.dart';
 import '../../domain/dynamic_post.dart';
 import '../../domain/user.dart';
 import '../../domain/video.dart';
@@ -62,7 +63,7 @@ class InteractiveDynamicPostCard extends ConsumerWidget {
         return;
       }
       final container = ProviderScope.containerOf(context);
-      await showDialog<void>(
+      await showAppDialog<void>(
         context: context,
         builder: (context) => UncontrolledProviderScope(
           container: container,
@@ -113,7 +114,7 @@ class InteractiveDynamicPostCard extends ConsumerWidget {
           onShare: () {
             final container = ProviderScope.containerOf(context);
             unawaited(
-              showDialog<void>(
+              showAppDialog<void>(
                 context: context,
                 barrierDismissible: false,
                 builder: (_) => UncontrolledProviderScope(

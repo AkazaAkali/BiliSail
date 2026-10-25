@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'app_dialog.dart';
 import '../../features/settings/application/system_fonts_controller.dart';
 
 final class SystemFontPicker extends ConsumerWidget {
@@ -23,7 +24,7 @@ final class SystemFontPicker extends ConsumerWidget {
       subtitle: const Text('从已安装字体中搜索并预览'),
       trailing: const Icon(Icons.font_download_outlined),
       onTap: () async {
-        final selected = await showDialog<String>(
+        final selected = await showAppDialog<String>(
           context: context,
           builder: (_) => _SystemFontDialog(selected: family),
         );

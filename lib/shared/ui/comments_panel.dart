@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'app_dialog.dart';
 import '../../core/platform/external_links.dart';
 import '../../core/presentation/workspace_activity.dart';
 import '../../core/presentation/page_back_scope.dart';
@@ -155,7 +156,7 @@ class _CommentsPanelState extends ConsumerState<CommentsPanel> {
     _emotePickerOpen.value = true;
     CommentEmote? emote;
     try {
-      emote = await showDialog<CommentEmote>(
+      emote = await showAppDialog<CommentEmote>(
         context: context,
         builder: (_) => UncontrolledProviderScope(
           container: container,

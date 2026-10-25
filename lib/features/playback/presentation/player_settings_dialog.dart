@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/ui/app_dialog.dart';
 import '../../../domain/playback_rates.dart';
 import '../../../shared/ui/danmaku_settings_controls.dart';
 import '../../../shared/ui/player_controls_mode_setting.dart';
@@ -10,7 +11,7 @@ import '../../settings/application/settings_controller.dart';
 import '../../settings/domain/app_settings.dart';
 
 Future<void> showPlayerSettings(BuildContext context, {int tab = 0}) =>
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (_) => _PlayerSettingsDialog(tab: tab),
     );
