@@ -155,14 +155,59 @@ void main() {
         section,
       );
       expect((accountBadge(tester).label as Text).data, '3');
-      expect(repo.unreadReads, 2);
+      final expectedReads = section == InboxSection.likes ? 1 : 2;
+      expect(repo.unreadReads, expectedReads);
       await tester.tap(find.byKey(const ValueKey('message-section-private')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(ValueKey('message-section-${section.name}')));
       await tester.pumpAndSettle();
-      expect(repo.unreadReads, 2);
+      expect(repo.unreadReads, expectedReads);
     });
   }
+
+  testWidgets('an empty likes list clears the tab and avatar unread count', (
+    tester,
+  ) async {
+    repo.counts = {InboxSection.private: 3, InboxSection.likes: 2};
+    await mountWithAccount(tester);
+    repo.entries = [];
+    await tester.tap(find.byKey(const ValueKey('message-section-likes')));
+    await tester.pumpAndSettle();
+    expect(find.text('收到的赞 · 2'), findsNothing);
+    expect((accountBadge(tester).label as Text).data, '3');
+    expect(repo.unreadReads, 1);
+    expect(repo.counts[InboxSection.likes], 2);
+    expect(repo.sends + repo.marks + repo.systemMarks, 0);
+  });
+
+  testWidgets(
+    'failed likes loading preserves the tab and avatar unread count',
+    (tester) async {
+      repo.counts = {InboxSection.private: 3, InboxSection.likes: 2};
+      await mountWithAccount(tester);
+      repo.inboxFailure = const AppFailure(AppFailureKind.network, 'offline');
+      await tester.tap(find.byKey(const ValueKey('message-section-likes')));
+      await tester.pumpAndSettle();
+      expect(find.text('收到的赞 · 2'), findsOneWidget);
+      expect((accountBadge(tester).label as Text).data, '5');
+      expect(repo.unreadReads, 1);
+    },
+  );
+
+  testWidgets('refreshing shared unread counts also updates the avatar', (
+    tester,
+  ) async {
+    repo.counts = {InboxSection.private: 3, InboxSection.likes: 2};
+    await mountWithAccount(tester);
+    await tester.tap(find.byKey(const ValueKey('message-section-likes')));
+    await tester.pumpAndSettle();
+    expect((accountBadge(tester).label as Text).data, '3');
+    repo.counts = {InboxSection.private: 1, InboxSection.likes: 0};
+    await tester.tap(find.byTooltip('刷新消息'));
+    await tester.pumpAndSettle();
+    expect((accountBadge(tester).label as Text).data, '1');
+    expect(repo.unreadReads, 2);
+  });
 
   testWidgets('switching read categories never refreshes the avatar count', (
     tester,

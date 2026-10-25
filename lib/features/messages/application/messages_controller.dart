@@ -12,17 +12,34 @@ final messageRepositoryProvider = Provider<MessageRepository>(
   (ref) => throw UnimplementedError('MessageRepository'),
 );
 final unreadMessagesProvider =
-    FutureProvider.autoDispose<Map<InboxSection, int>>((ref) async {
-      final account = ref.watch(
-        authControllerProvider.select((s) => (s.isSignedIn, s.mid)),
-      );
-      if (!account.$1) return const {};
-      final cancellation = RequestCancellation();
-      ref.onDispose(cancellation.cancel);
-      return ref
-          .watch(messageRepositoryProvider)
-          .unread(cancellation: cancellation);
-    });
+    AsyncNotifierProvider.autoDispose<
+      UnreadMessagesController,
+      Map<InboxSection, int>
+    >(UnreadMessagesController.new);
+
+class UnreadMessagesController extends AsyncNotifier<Map<InboxSection, int>> {
+  @override
+  Future<Map<InboxSection, int>> build() async {
+    final account = ref.watch(
+      authControllerProvider.select((s) => (s.isSignedIn, s.mid)),
+    );
+    if (!account.$1) return const {};
+    final cancellation = RequestCancellation();
+    ref.onDispose(cancellation.cancel);
+    return ref
+        .watch(messageRepositoryProvider)
+        .unread(cancellation: cancellation);
+  }
+
+  void markLikesRead() {
+    final counts = state.value;
+    if (counts == null || (counts[InboxSection.likes] ?? 0) == 0) return;
+    // Like-list reads acknowledge the category. The Web client also clears
+    // its local count instead of waiting for another unread response.
+    state = AsyncData(Map.unmodifiable({...counts, InboxSection.likes: 0}));
+  }
+}
+
 final messagesControllerProvider =
     NotifierProvider.autoDispose<MessagesController, MessagesState>(
       MessagesController.new,
@@ -152,7 +169,11 @@ class MessagesController extends Notifier<MessagesState> {
     // Rapid tab switches can finish against the same unread snapshot.
     // Each category needs only one reconciliation for that snapshot.
     _readUnreadSnapshots[section] = counts;
-    ref.invalidate(unreadMessagesProvider);
+    if (section == InboxSection.likes) {
+      ref.read(unreadMessagesProvider.notifier).markLikesRead();
+    } else {
+      ref.invalidate(unreadMessagesProvider);
+    }
   }
 
   String? _error(Object error, {bool write = false}) => error is AppFailure
@@ -244,7 +265,8 @@ class MessagesController extends Notifier<MessagesState> {
       );
       // These reads acknowledge notifications, but revisiting a read category
       // must not refresh the account badge.
-      if (unreadBefore != null && page.items.isNotEmpty) {
+      if (unreadBefore != null &&
+          (page.items.isNotEmpty || section == InboxSection.likes)) {
         await _refreshUnreadAfterRead(
           section,
           unreadBefore,

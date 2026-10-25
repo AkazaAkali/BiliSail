@@ -101,7 +101,7 @@ class MessageRepositoryFake implements MessageRepository {
     reads++;
     inboxRead = cancellation;
     if (inboxFailure case final error?) throw error;
-    if (section != InboxSection.private && section != InboxSection.system) {
+    if (section == InboxSection.replies || section == InboxSection.mentions) {
       counts[section] = 0;
     }
     return inboxPending == null

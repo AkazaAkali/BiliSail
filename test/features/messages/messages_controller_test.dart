@@ -263,6 +263,108 @@ void main() {
     },
   );
   test(
+    'likes clear shared unread state without changing other categories',
+    () async {
+      repo.counts = {InboxSection.private: 3, InboxSection.likes: 2};
+      container.listen(unreadMessagesProvider, (_, _) {});
+      await container.read(unreadMessagesProvider.future);
+      final page = ProviderContainer(
+        parent: container,
+        overrides: [
+          messagesControllerProvider.overrideWith(MessagesController.new),
+        ],
+      );
+      addTearDown(page.dispose);
+      page.listen(messagesControllerProvider, (_, _) {});
+      await flush();
+      page
+          .read(messagesControllerProvider.notifier)
+          .selectSection(InboxSection.likes);
+      await flush();
+      expect(await container.read(unreadMessagesProvider.future), {
+        InboxSection.private: 3,
+        InboxSection.likes: 0,
+      });
+      expect(repo.counts[InboxSection.likes], 2);
+      expect(repo.unreadReads, 1);
+    },
+  );
+  test(
+    'likes reconcile an initial unread request that finishes after the list',
+    () async {
+      final pending = repo.unreadPending = Completer<Map<InboxSection, int>>();
+      container.listen(unreadMessagesProvider, (_, _) {});
+      controller.selectSection(InboxSection.likes);
+      await flush();
+      expect(state().inbox.loading, isFalse);
+      pending.complete(const {InboxSection.private: 3, InboxSection.likes: 2});
+      await flush();
+      expect(await container.read(unreadMessagesProvider.future), {
+        InboxSection.private: 3,
+        InboxSection.likes: 0,
+      });
+      expect(repo.unreadReads, 1);
+    },
+  );
+  test(
+    'new likes after a shared unread refresh can be marked read again',
+    () async {
+      repo.counts = {InboxSection.likes: 2};
+      container.listen(unreadMessagesProvider, (_, _) {});
+      await container.read(unreadMessagesProvider.future);
+      controller.selectSection(InboxSection.likes);
+      await flush();
+      expect(
+        (await container.read(
+          unreadMessagesProvider.future,
+        ))[InboxSection.likes],
+        0,
+      );
+      controller.selectSection(InboxSection.private);
+      await flush();
+      repo.counts[InboxSection.likes] = 1;
+      container.invalidate(unreadMessagesProvider);
+      expect(
+        (await container.read(
+          unreadMessagesProvider.future,
+        ))[InboxSection.likes],
+        1,
+      );
+      controller.selectSection(InboxSection.likes);
+      await flush();
+      expect(
+        (await container.read(
+          unreadMessagesProvider.future,
+        ))[InboxSection.likes],
+        0,
+      );
+      expect(repo.unreadReads, 2);
+    },
+  );
+  test(
+    'an old account unread response cannot mark current likes read',
+    () async {
+      final pending = repo.unreadPending = Completer<Map<InboxSection, int>>();
+      container.listen(unreadMessagesProvider, (_, _) {});
+      controller.selectSection(InboxSection.likes);
+      await flush();
+      repo.unreadPending = null;
+      repo.accountScope = 'user:9';
+      repo.sessionEpoch++;
+      repo.counts = {InboxSection.likes: 4};
+      auth.emit(const AuthState(status: AuthStatus.signedIn, mid: '9'));
+      await flush();
+      pending.complete(const {InboxSection.likes: 2});
+      await flush();
+      expect(
+        (await container.read(
+          unreadMessagesProvider.future,
+        ))[InboxSection.likes],
+        4,
+      );
+    },
+  );
+  test(
     'a pending unread snapshot is reconciled after notifications are read',
     () async {
       final pending = repo.unreadPending = Completer<Map<InboxSection, int>>();
