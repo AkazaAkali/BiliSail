@@ -5,6 +5,9 @@ import '../../../shared/ui/app_dialog.dart';
 import '../../../domain/app_failure.dart';
 import '../../../domain/video_codec.dart';
 import '../../../shared/ui/app_cover_image.dart';
+import '../../../shared/ui/page_tab_style.dart';
+import '../../../shared/ui/paging_tab_strip.dart';
+import '../../../shared/ui/smooth_scroll_behavior.dart';
 import '../../../shared/ui/state_view.dart';
 import '../application/download_controller.dart';
 import '../domain/download_models.dart';
@@ -63,8 +66,15 @@ final class DownloadsScreen extends ConsumerStatefulWidget {
 }
 
 final class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
+  final _searchController = TextEditingController();
   bool _completed = false;
   String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   Future<void> _run(Future<void> Function() action) async {
     try {
@@ -119,113 +129,185 @@ final class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
       (sum, task) => sum + task.downloadedBytes,
     );
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 72),
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (widget.showHeading) ...[
-          Text('下载', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 6),
-        ],
-        Text(
-          '队列 ${queue.length} 项 · 已完成 ${completed.length} 项 · 已传输 ${downloadByteText(transferred)}',
-          style: Theme.of(context).textTheme.bodySmall,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: widget.showHeading
+                    ? Text('下载', style: theme.textTheme.titleLarge)
+                    : const SizedBox.shrink(),
+              ),
+              IconButton(
+                tooltip: '刷新下载',
+                onPressed: () => _run(controller.refresh),
+                icon: const Icon(Icons.refresh_rounded),
+              ),
+              IconButton(
+                tooltip: '下载设置',
+                onPressed: () => showAppDialog<void>(
+                  context: context,
+                  builder: (_) => _DownloadSettingsDialog(
+                    preferences: state.preferences,
+                    allowCustomDirectory: widget.allowCustomDirectory,
+                  ),
+                ),
+                icon: const Icon(Icons.settings_outlined),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            SegmentedButton<bool>(
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: false, label: Text('队列')),
-                ButtonSegment(value: true, label: Text('已完成')),
-              ],
-              selected: {_completed},
-              onSelectionChanged: (value) =>
-                  setState(() => _completed = value.first),
-            ),
-            OutlinedButton.icon(
-              onPressed: activeCount == 0
-                  ? null
-                  : () => _run(controller.pauseAll),
-              icon: const Icon(Icons.pause_rounded),
-              label: const Text('全部暂停'),
-            ),
-            OutlinedButton.icon(
-              onPressed: resumableCount == 0
-                  ? null
-                  : () => _run(controller.resumeAll),
-              icon: const Icon(Icons.play_arrow_rounded),
-              label: const Text('全部继续'),
-            ),
-            IconButton.outlined(
-              tooltip: '刷新下载',
-              onPressed: () => _run(controller.refresh),
-              icon: const Icon(Icons.refresh_rounded),
-            ),
-            IconButton.outlined(
-              tooltip: '下载设置',
-              onPressed: () => showAppDialog<void>(
-                context: context,
-                builder: (_) => _DownloadSettingsDialog(
-                  preferences: state.preferences,
-                  allowCustomDirectory: widget.allowCustomDirectory,
+        SizedBox(
+          height: PageTabStyle.barHeight,
+          child: ScrollConfiguration(
+            behavior: const SmoothScrollBehavior(horizontalMouseWheel: true),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: PagingTabStrip<bool>(
+                tabs: const [false, true],
+                value: _completed,
+                onSelected: (value) => setState(() => _completed = value),
+                buttonStyle: PageTabStyle.buttonStyle(context),
+                labelBuilder: (context, completedTab) => Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    PageTabStyle.label(
+                      completedTab ? '已完成' : '队列',
+                      icon: completedTab
+                          ? Icons.download_done_rounded
+                          : Icons.downloading_rounded,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${completedTab ? completed.length : queue.length}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ],
                 ),
               ),
-              icon: const Icon(Icons.settings_outlined),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: TextField(
-            onChanged: (text) => setState(() => _query = text),
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search_rounded),
-              hintText: '搜索标题或分集',
             ),
           ),
         ),
-        const SizedBox(height: 16),
-        if (!state.initialized)
-          const SizedBox(height: 260, child: StateView.loading())
-        else if (state.failure case final failure?)
-          SizedBox(
-            height: 180,
-            child: StateView.error(
-              message: failure.message,
-              onAction: () => _run(controller.refresh),
-            ),
+        const Divider(height: 1),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 72),
+            children: [
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final search = ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 360),
+                    child: TextField(
+                      controller: _searchController,
+                      onChanged: (text) => setState(() => _query = text),
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search_rounded, size: 20),
+                        hintText: '搜索标题或分集',
+                      ),
+                    ),
+                  );
+                  final actions = Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: activeCount == 0
+                            ? null
+                            : () => _run(controller.pauseAll),
+                        icon: const Icon(Icons.pause_rounded, size: 18),
+                        label: const Text('全部暂停'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: resumableCount == 0
+                            ? null
+                            : () => _run(controller.resumeAll),
+                        icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                        label: const Text('全部继续'),
+                      ),
+                    ],
+                  );
+                  final textScale =
+                      MediaQuery.textScalerOf(context).scale(14) / 14;
+                  if (constraints.maxWidth >= 720 * textScale) {
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: search,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        actions,
+                      ],
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Align(alignment: Alignment.centerLeft, child: search),
+                      const SizedBox(height: 8),
+                      actions,
+                    ],
+                  );
+                },
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 16),
+                child: Text(
+                  '已传输 ${downloadByteText(transferred)}',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+              if (!state.initialized)
+                const SizedBox(height: 260, child: StateView.loading())
+              else if (state.failure case final failure?)
+                SizedBox(
+                  height: 180,
+                  child: StateView.error(
+                    message: failure.message,
+                    onAction: () => _run(controller.refresh),
+                  ),
+                ),
+              if (state.initialized && shown.isEmpty)
+                SizedBox(
+                  height: 240,
+                  child: StateView.empty(
+                    message: _query.isNotEmpty
+                        ? '没有匹配的下载任务'
+                        : _completed
+                        ? '还没有已完成的下载'
+                        : '还没有下载任务',
+                    icon: Icons.download_outlined,
+                  ),
+                ),
+              for (final task in shown) ...[
+                _DownloadTaskCard(
+                  key: ValueKey(task.id),
+                  task: task,
+                  onPause: () => _run(() => controller.pause(task.id)),
+                  onResume: () => _run(() => controller.resume(task.id)),
+                  onRemove: () => _remove(task),
+                  onPlay: widget.onPlay == null
+                      ? null
+                      : () => widget.onPlay!(task),
+                  onOpenDirectory: widget.onOpenDirectory == null
+                      ? null
+                      : () =>
+                            _run(() => widget.onOpenDirectory!(task.directory)),
+                  coverProvider: widget.coverProvider,
+                ),
+                const SizedBox(height: 12),
+              ],
+            ],
           ),
-        if (state.initialized && shown.isEmpty)
-          SizedBox(
-            height: 240,
-            child: StateView.empty(
-              message: _query.isNotEmpty
-                  ? '没有匹配的下载任务'
-                  : _completed
-                  ? '还没有已完成的下载'
-                  : '还没有下载任务',
-              icon: Icons.download_outlined,
-            ),
-          ),
-        for (final task in shown) ...[
-          _DownloadTaskCard(
-            task: task,
-            onPause: () => _run(() => controller.pause(task.id)),
-            onResume: () => _run(() => controller.resume(task.id)),
-            onRemove: () => _remove(task),
-            onPlay: widget.onPlay == null ? null : () => widget.onPlay!(task),
-            onOpenDirectory: widget.onOpenDirectory == null
-                ? null
-                : () => _run(() => widget.onOpenDirectory!(task.directory)),
-            coverProvider: widget.coverProvider,
-          ),
-          const SizedBox(height: 10),
-        ],
+        ),
       ],
     );
   }
@@ -233,6 +315,7 @@ final class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
 
 final class _DownloadTaskCard extends StatelessWidget {
   const _DownloadTaskCard({
+    super.key,
     required this.task,
     required this.onPause,
     required this.onResume,
@@ -248,7 +331,8 @@ final class _DownloadTaskCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final completed = task.status == DownloadStatus.completed;
     final status = switch (task.status) {
       DownloadStatus.queued => '等待下载',
@@ -260,6 +344,27 @@ final class _DownloadTaskCard extends StatelessWidget {
       DownloadStatus.failed => '下载失败',
       DownloadStatus.completed => '已完成',
     };
+    final statusIcon = switch (task.status) {
+      DownloadStatus.queued => Icons.schedule_rounded,
+      DownloadStatus.resolving => Icons.link_rounded,
+      DownloadStatus.downloading => Icons.downloading_rounded,
+      DownloadStatus.verifying => Icons.fact_check_outlined,
+      DownloadStatus.muxing => Icons.merge_rounded,
+      DownloadStatus.paused => Icons.pause_rounded,
+      DownloadStatus.failed => Icons.error_outline_rounded,
+      DownloadStatus.completed => Icons.check_circle_outline_rounded,
+    };
+    final statusColor = switch (task.status) {
+      DownloadStatus.failed => scheme.error,
+      DownloadStatus.paused || DownloadStatus.queued => scheme.onSurfaceVariant,
+      _ => scheme.primary,
+    };
+    final statusBackground = switch (task.status) {
+      DownloadStatus.failed => scheme.errorContainer,
+      DownloadStatus.paused ||
+      DownloadStatus.queued => scheme.surfaceContainerHigh,
+      _ => scheme.primaryContainer,
+    };
     final total = task.totalBytes;
     final bytes = total == null
         ? downloadByteText(task.downloadedBytes)
@@ -267,16 +372,16 @@ final class _DownloadTaskCard extends StatelessWidget {
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(14),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final narrow = constraints.maxWidth < 430;
+            final narrow = constraints.maxWidth < 480;
             final localCover = completed ? coverProvider?.call(task) : null;
             final cover = ClipRRect(
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(8),
               child: SizedBox(
-                width: narrow ? 96 : 144,
-                height: narrow ? 60 : 81,
+                width: narrow ? 96 : 160,
+                height: narrow ? 54 : 90,
                 child: localCover != null
                     ? Image(
                         image: localCover,
@@ -306,70 +411,152 @@ final class _DownloadTaskCard extends StatelessWidget {
                       ),
               ),
             );
-            final details = Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+            final inlineActions = constraints.maxWidth >= 640 * textScale;
+            final transferDetails = Wrap(
+              spacing: 12,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Text(
-                  task.item.video.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  task.item.part.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 4,
-                  children: [
-                    Text(
-                      status,
-                      style: TextStyle(
-                        color: task.status == DownloadStatus.failed
-                            ? scheme.error
-                            : scheme.primary,
-                      ),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: statusBackground,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
                     ),
-                    Text(downloadQualityText(task.selection.quality)),
-                    Text(downloadCodecText(task.selection.codec)),
-                    Text(task.selection.output.label),
-                    Text(bytes),
-                    if (task.status == DownloadStatus.downloading &&
-                        task.bytesPerSecond > 0)
-                      Text('${downloadByteText(task.bytesPerSecond)}/s'),
-                  ],
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(statusIcon, size: 14, color: statusColor),
+                        const SizedBox(width: 5),
+                        Text(
+                          status,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: statusColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Text(bytes, style: theme.textTheme.bodySmall),
+                if (task.status == DownloadStatus.downloading &&
+                    task.bytesPerSecond > 0)
+                  Text(
+                    '${downloadByteText(task.bytesPerSecond)}/s',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.primary,
+                    ),
+                  ),
+              ],
+            );
+            final actions = Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              alignment: WrapAlignment.end,
+              children: [
+                if (completed && onPlay != null)
+                  TextButton.icon(
+                    onPressed: onPlay,
+                    icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                    label: const Text('播放'),
+                  ),
+                if (task.active)
+                  TextButton.icon(
+                    onPressed: onPause,
+                    icon: const Icon(Icons.pause_rounded, size: 18),
+                    label: const Text('暂停'),
+                  ),
+                if (task.status == DownloadStatus.paused ||
+                    task.status == DownloadStatus.failed)
+                  TextButton.icon(
+                    onPressed: onResume,
+                    icon: Icon(
+                      task.status == DownloadStatus.failed
+                          ? Icons.refresh_rounded
+                          : Icons.play_arrow_rounded,
+                      size: 18,
+                    ),
+                    label: Text(
+                      task.status == DownloadStatus.failed ? '重试' : '继续',
+                    ),
+                  ),
+                if (completed && onOpenDirectory != null)
+                  TextButton.icon(
+                    onPressed: onOpenDirectory,
+                    icon: const Icon(Icons.folder_open_outlined, size: 18),
+                    label: const Text('打开目录'),
+                  ),
+                TextButton.icon(
+                  onPressed: onRemove,
+                  style: TextButton.styleFrom(
+                    foregroundColor: scheme.onSurfaceVariant,
+                  ),
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: const Text('删除任务'),
                 ),
               ],
             );
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    cover,
+                    SizedBox(width: narrow ? 12 : 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            task.item.video.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            task.item.part.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                          if (!narrow) ...[
+                            const SizedBox(height: 10),
+                            _DownloadFormatLabels(task: task),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
                 if (narrow) ...[
+                  const SizedBox(height: 12),
+                  _DownloadFormatLabels(task: task),
+                ],
+                const SizedBox(height: 12),
+                if (inlineActions)
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      cover,
-                      const SizedBox(width: 10),
-                      Expanded(child: details),
+                      Expanded(child: transferDetails),
+                      const SizedBox(width: 12),
+                      actions,
                     ],
-                  ),
-                ] else
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      cover,
-                      const SizedBox(width: 14),
-                      Expanded(child: details),
-                    ],
-                  ),
+                  )
+                else
+                  transferDetails,
                 if (!completed) ...[
                   const SizedBox(height: 10),
                   LinearProgressIndicator(
+                    minHeight: 4,
+                    borderRadius: BorderRadius.circular(4),
+                    color: statusColor,
+                    backgroundColor: scheme.surfaceContainerHighest,
                     value:
                         (task.status == DownloadStatus.muxing
                             ? task.muxProgress
@@ -384,56 +571,28 @@ final class _DownloadTaskCard extends StatelessWidget {
                   ),
                 ],
                 if (task.failure case final failure?) ...[
-                  const SizedBox(height: 7),
-                  Text(failure.message, style: TextStyle(color: scheme.error)),
+                  const SizedBox(height: 10),
+                  Text(
+                    failure.message,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.error,
+                    ),
+                  ),
                 ],
                 for (final warning in task.warnings)
                   Padding(
-                    padding: const EdgeInsets.only(top: 5),
+                    padding: const EdgeInsets.only(top: 6),
                     child: Text(
                       '提示：$warning',
-                      style: Theme.of(context).textTheme.bodySmall,
+                      style: theme.textTheme.bodySmall,
                     ),
                   ),
-                const SizedBox(height: 7),
-                Wrap(
-                  spacing: 4,
-                  runSpacing: 2,
-                  children: [
-                    if (completed && onPlay != null)
-                      TextButton.icon(
-                        onPressed: onPlay,
-                        icon: const Icon(Icons.play_arrow_rounded),
-                        label: const Text('播放'),
-                      ),
-                    if (task.active)
-                      TextButton.icon(
-                        onPressed: onPause,
-                        icon: const Icon(Icons.pause_rounded),
-                        label: const Text('暂停'),
-                      ),
-                    if (task.status == DownloadStatus.paused ||
-                        task.status == DownloadStatus.failed)
-                      TextButton.icon(
-                        onPressed: onResume,
-                        icon: const Icon(Icons.refresh_rounded),
-                        label: Text(
-                          task.status == DownloadStatus.failed ? '重试' : '继续',
-                        ),
-                      ),
-                    if (completed && onOpenDirectory != null)
-                      TextButton.icon(
-                        onPressed: onOpenDirectory,
-                        icon: const Icon(Icons.folder_open_outlined),
-                        label: const Text('打开目录'),
-                      ),
-                    TextButton.icon(
-                      onPressed: onRemove,
-                      icon: const Icon(Icons.delete_outline_rounded),
-                      label: const Text('删除任务'),
-                    ),
-                  ],
-                ),
+                if (!inlineActions) ...[
+                  const SizedBox(height: 12),
+                  const Divider(height: 1),
+                  const SizedBox(height: 6),
+                  Align(alignment: Alignment.centerRight, child: actions),
+                ],
               ],
             );
           },
@@ -441,6 +600,18 @@ final class _DownloadTaskCard extends StatelessWidget {
       ),
     );
   }
+}
+
+final class _DownloadFormatLabels extends StatelessWidget {
+  const _DownloadFormatLabels({required this.task});
+
+  final DownloadTask task;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    '${downloadQualityText(task.selection.quality)} · ${downloadCodecText(task.selection.codec)} · ${task.selection.output.label}',
+    style: Theme.of(context).textTheme.bodySmall,
+  );
 }
 
 final class _DeleteTaskDialog extends StatefulWidget {
