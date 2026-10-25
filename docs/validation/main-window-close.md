@@ -12,7 +12,19 @@
 
 本轮不改变关闭单独播放窗、媒体返回历史和隐藏播放页的规则，不增加持久化设置。系统强制杀进程、断电和 Android 任务管理器强制停止没有可等待的退出握手，不能由此保证异步清理完成。
 
+## Release 退出延迟修正（同日）
+
+用户随后报告仅打开、关闭 Windows Release 也要等待很久。实测启动后 3 秒／12 秒发送主窗 `WM_CLOSE`，进程退出分别耗时 6895／9026 毫秒；临时逐阶段计时显示 Dart 的下载、预览、播放、账号、数据库和图片清理总共只用 2／1 毫秒。计时代码在定位后移除。
+
+`System.exitApplication` 通过 `WM_QUIT` 结束消息循环，不一定先收到 `WM_DESTROY`。原先 `FlutterWindow` 的空析构函数让成员直接开始析构，没有先运行已有的 `OnDestroy`，窗口消息还可能在成员销毁期间重入。现在只在派生窗口析构时调用现有 `Destroy()`，先按 `OnDestroy` 的顺序清理通道和 Flutter controller，再释放窗口。正常窗口关闭已经清理过的成员仍可安全重复经过该入口；播放会话／下载／数据库的等待顺序保持。
+
+[Release 退出耗时回归](../../tool/test-windows-exit-latency.ps1)启动独立的 Release 进程，按 PID 定位其主 HWND，发送原生关闭并等待进程正常结束，检查退出码为 0、耗时不超过 2 秒。该门槛只用于测试。修正后的首轮两次实测为 104／77 毫秒，日志 `build/validation/exit-latency/destroy-results.json`。移除临时计时代码后重新构建 Release（`build/exit-latency-release-final.log`），启动后 3 秒关闭的三次耗时为 71／71／70 毫秒（`build/validation/exit-latency/final-results.json`），启动后 1 秒关闭的三次为 101／99／125 毫秒（`build/validation/exit-latency/immediate-results.json`），六次退出码均为 0。产物仍为 `build/windows/x64/runner/Release/bilisail.exe`，需保留整个 Release 目录；这些数据针对本机仅启动后退出场景。
+
+本轮 `tool/check.ps1 -SkipPub` 通过：根应用 2599、bili_api 456、bili_player 81、bili_danmaku 93、bili_mux 2，共 3231 项测试通过；10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。日志 `build/exit-latency-check.log`。原生主窗关闭回归两项通过（`build/exit-latency-main-close.log`），视频资源释放回归 9 项通过（`build/exit-latency-native-dispose.log`）。
+
 ## 回归与验证边界
+
+以下为 `99f63c0` 初次修复时的验证快照；退出延迟修正后的验证见上节。
 
 - [窗口通道测试](../../test/core/platform/window_service_test.dart)：主窗口关闭拦截、播放 view 隔离、等待退出回调、重复关闭、取消重试及清理后的拦截解除。
 - [Android 返回测试](../../test/app/predictive_back_test.dart)：双／多标签确认前取消、清理未完成时不得调用 `SystemNavigator.pop`、重复返回合并、清理后结束一次，以及既有页内／模态／媒体返回优先级。
