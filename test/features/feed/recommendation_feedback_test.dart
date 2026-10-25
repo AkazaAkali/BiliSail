@@ -245,21 +245,23 @@ void main() {
       await tester.tap(_undo);
       expect(undos, 1);
       expect(tester.takeException(), isNull);
-      await tester.pumpAndSettle();
-      await tester.runAsync(() async {
-        final render = boundary.currentContext?.findRenderObject();
-        if (render is! RenderRepaintBoundary) {
-          throw StateError('Missing preview');
-        }
-        final image = await render.toImage();
-        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        image.dispose();
-        if (bytes == null) throw StateError('Missing preview bytes');
-        final dir = Directory('build/recommendation-feedback-preview');
-        await dir.create(recursive: true);
-        await File('${dir.path}/card-$width-$scale.png')
-            .writeAsBytes(bytes.buffer.asUint8List());
-      });
+      if (const bool.fromEnvironment('WRITE_UI_PREVIEW')) {
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async {
+          final render = boundary.currentContext?.findRenderObject();
+          if (render is! RenderRepaintBoundary) {
+            throw StateError('Missing preview');
+          }
+          final image = await render.toImage();
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          image.dispose();
+          if (bytes == null) throw StateError('Missing preview bytes');
+          final dir = Directory('build/recommendation-feedback-preview');
+          await dir.create(recursive: true);
+          await File('${dir.path}/card-$width-$scale.png')
+              .writeAsBytes(bytes.buffer.asUint8List());
+        });
+      }
     });
   }
 }

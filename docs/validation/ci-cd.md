@@ -1,17 +1,17 @@
 # GitHub Actions CI/CD 与安装包
 
-更新日期：2026-10-08。配置覆盖 Android arm64、Windows x64、macOS arm64；本地验证结果与远端、设备未测项分别记录。此流程交付预览构建，不表示 M0 三端验收或 M5 正式发行完成。
+更新日期：2026-10-25。配置覆盖 Android arm64、Windows x64、macOS arm64；本地验证结果与远端、设备未测项分别记录。此流程交付预览构建，不表示 M0 三端验收或 M5 正式发行完成。
 
 ## 入口与分工
 
 - [CI](../../.github/workflows/ci.yml)：替换原来的 `windows.yml`；分支 push、PR、手动运行时执行检查及构建，也供 Release 复用。
 - [Release preview](../../.github/workflows/release.yml)：在 Actions 页面手动运行；可选择三个平台，全部所选构建通过后创建 **draft + prerelease** 并上传包、签名公钥证书、校验文件与第三方说明。不会自动公开发布。
-- [检查脚本](../../tool/check.ps1)：CI 在 Ubuntu 使用 PowerShell 7 执行，先安装根应用和三个独立包的依赖，再分别运行格式、分析和离线测试。根分析会扫描子包，故子包开发依赖也须先安装。`-EnforceLockfile` 要求 pub 使用提交的锁文件及内容哈希。
+- [检查脚本](../../tool/check.ps1)：本地默认检查根应用和四个独立包；CI 在 Ubuntu 使用 PowerShell 7，分别执行 `Lint`、两份 `RootTests` 分片和 `PackageTests`。格式检查覆盖根应用与各包，根分析统一扫描子包，故分析前仍安装所有包的开发依赖。`-EnforceLockfile` 要求 pub 使用提交的锁文件及内容哈希。
 - [构建打包脚本](../../tool/build-release.ps1)：各平台使用对应主机生成预览包，缺文件、原生命令失败、签名失败立即停止。已有同目标输出目录时拒绝覆盖，重新本地构建前先将其移走。
 
 | 任务 | Runner | 产物与边界 |
 | --- | --- | --- |
-| 版本解析、根与三个包检查 | `ubuntu-24.04` | 无需真实账号，不自动运行在线或原生播放集成测试 |
+| 版本解析、静态检查、根测试分片与包测试 | `ubuntu-24.04` | 无需真实账号；独立 mux 任务覆盖封装原生测试，不自动运行在线或原生播放集成测试 |
 | Android | `ubuntu-24.04`，Temurin JDK 17 | 仅 arm64 的 release APK；正常构建复用固定 keystore，PR 使用临时预览签名 |
 | Windows | `windows-2022`，Visual Studio C++ / Windows SDK / .NET 8 / WiX 6.0.2 | 同时提供 x64 MSIX、MSI 和 EXE 安装包；全部包含完整原生 DLL/data 及 VC++ runtime |
 | macOS | `macos-15`，Apple Silicon / Xcode | arm64 DMG；先验证签名／最终权限、同一 Release 应用首帧和跨进程 Keychain 读写删除，再由 `hdiutil` 打包校验；仅 ad-hoc 签名，未 notarize |
@@ -320,3 +320,47 @@ Flutter 3.47.6 会将 Android 的 `--build-number 0` 归一化为 `1`（[固定 
 修复仅调整测试：共享假窗口显式提供原生返回能力，在各测试主机通过模拟平台通道验证实际的消息注册、按 view 路由及模态隔离；生产平台判断保持原值。消息辅助函数改用 `TestDefaultBinaryMessenger.handlePlatformMessage`，缺少处理器时立即报出对应 view 的错误，并解码回复以保留平台异常。新增回归覆盖不支持原生返回时的快速失败、无残留排队消息及错误回复；原有两项原生返回服务测试也可在 Ubuntu 执行。
 
 Windows x64 / Flutter 3.47.6 的 61 项定向测试通过；`tool/check.ps1 -SkipPub` 的格式、静态分析、打包边界检查及 2867 项测试通过（根应用 2245、API 446、播放器 81、弹幕 93、封装包 2），10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。按用户要求停止本地 Ubuntu 环境准备，修复推送后的 Ubuntu 检查及三端构建以对应 GitHub CI 为准；本轮没有安装、实机或性能验证，未发现可连接的调试应用，热重载未完成。
+
+## 2026-10-25：检查并行化与根测试审查
+
+[优化前的检查任务](https://github.com/CKopoer/BiliSail/actions/runs/40189663272/job/121157790929) 约耗时 8 分 20 秒，其中根应用 2316 项测试约占 5 分 56 秒，根分析约 40 秒，四个包的格式、分析和测试合计约 60 秒。SDK 和 Pub 缓存均已命中，没有长时间卡住或超时的测试。
+
+CI 现在并行运行以下任务，全部完成后由原名 `Analyze and test` 汇总；失败、取消或跳过任一检查任务均不能让汇总通过。三个平台的构建仍依赖该汇总与独立原生 mux 回归。
+
+| 阶段 | 范围 |
+| --- | --- |
+| `Lint` | 打包边界脚本、根应用与四个包的格式、一次覆盖全仓的静态分析 |
+| `RootTests` × 2 | Flutter 内置分片，索引 0/1，总分片数 2；保留全部根测试 |
+| `PackageTests -SkipMuxTests` | API、播放器和弹幕包的测试；mux 的全部测试由独立原生任务执行 |
+
+删除逐包重复分析，以及普通检查中被独立原生任务完整覆盖的 mux 测试运行。每个任务仍先进行严格锁文件解析；后续 Flutter 分析和测试使用 `--no-pub` 避免再次解析。该参数仅用于检查命令，构建继续保留默认 Pub 阶段，避免跳过原生插件注册文件生成。
+
+本地完整检查默认仍包含四个包的测试，不需要传入阶段参数。分片参数只接受 `RootTests`；`SkipMuxTests` 只接受 `PackageTests`，用于已有独立原生回归兜底的 CI。
+
+```powershell
+.\tool\check.ps1 -EnforceLockfile
+.\tool\check.ps1 -Stage Lint -EnforceLockfile
+.\tool\check.ps1 -Stage RootTests -TotalShards 2 -ShardIndex 0 -EnforceLockfile
+.\tool\check.ps1 -Stage RootTests -TotalShards 2 -ShardIndex 1 -EnforceLockfile
+.\tool\check.ps1 -Stage PackageTests -SkipMuxTests -EnforceLockfile
+```
+
+根测试审查覆盖当前 `test/` 下 200 个测试文件，检查重复测试体、缺少直接断言的测试、退役导航配置、平台跳过、预览导出和显式等待，并复核工作区路由、播放控件、首页滑动及布局相关用例。未找到可直接删除且不损失独立行为覆盖的整项测试：
+
+- `singlePage` 用例验证旧设置迁移，继续保留；Windows 专用跳过项仍验证平台能力。
+- 下载页面纯截图用例已由 `DOWNLOAD_PREVIEW_DIR` 显式启用，不在默认 CI 注册。
+- 首页封面滑动矩阵覆盖不同数据路径、缓存开关及宽窄布局，保留全部组合；播放、会话隔离、导航、存储和协议测试继续执行。
+- 悬停视频和推荐反馈测试原本默认编码、写出 PNG，没有 golden 比对或 CI 产物消费。改为仅在 `--dart-define=WRITE_UI_PREVIEW=true` 时导出，默认仍执行布局、视频 surface 和交互断言。
+- 悬停视频布局用例按主题场景分别创建 fake 播放服务，以虚拟时间推进淡入，去掉固定 20 次真实等待；每个场景结束卸载组件，避免前一个会话释放影响后一个场景。
+
+并行分片增加同时运行的 runner 数量，实际远端耗时与分片均衡程度须在新 CI 运行后确认；不能把预计提速作为已测结果。
+
+本轮 Windows x64 / Flutter 3.47.6 验证：
+
+- 两份根测试分片分别通过 1349、1250 项，合计 2599 项；四个包通过 632 项测试（API 456、播放器 81、弹幕 93、封装 2），10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。
+- 修改的两份测试默认运行通过 18 项，且六张既有预览 PNG 的修改时间均未改变；显式开启导出后连同登录 WebView 定向复测共通过 29 项，六张 PNG 均正常生成。
+- 在四个包的 `lib/test` 分别临时加入一个未定义符号，根分析确认报告全部八个错误，随后清理探针；验证合并分析仍覆盖各包。阶段路由、非法参数拒绝、命令失败传播和目录恢复检查通过，汇总检查的 17 种成功／失败／取消／跳过／缺失结果组合通过。两份工作流通过 actionlint 1.7.12。
+- 首次 `tool/check.ps1 -EnforceLockfile` 的依赖强校验、格式和分析通过，根测试有一项登录 WebView 用例未在其轮询窗口内出现控件；该文件随后定向复测及上述分片均通过。第二次 `tool/check.ps1 -SkipPub` 复跑期间，工作区出现同期 Android 导航修改，`playback_panel_test.dart` 的 `workspace scopes players and enforces dualTabs playback (concurrent: false)` 仍点击已隐藏返回栏的“返回上一视频”，在第 900 行失败，之后停止该次运行；这两次运行均不计为完整检查通过。
+- 同期导航工作随后将相关播放测试改为系统返回操作，对应四项定向测试通过。最后一次 `tool/check.ps1 -SkipPub` 完整通过格式、统一分析、打包边界检查和 3232 项测试（根应用 2600、API 456、播放器 81、弹幕 93、封装 2）；10 项 mux 原生用例按配置跳过。没有为 CI 提速删除上述回归或改动同期导航实现，五份锁文件保持原值。
+
+上述分片数量对应同期导航修改前的测试快照；工作区原有及同期修改均保留。此轮未提交或推送，未运行新工作流、客户端构建、安装、在线或实机验证；远端检查耗时仍待新 CI 实测。

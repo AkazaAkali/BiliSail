@@ -391,16 +391,16 @@ void main() {
     },
   );
 
-  testWidgets('offline visual preview fits narrow cards and double text', (
+  testWidgets('hover preview fits narrow cards and double text', (
     tester,
   ) async {
-    final services = _Interactions();
     final key = GlobalKey();
     final mouse = await _mouse(tester);
     for (final (dark, scale, width) in [
       (false, 1.0, 320.0),
       (true, 2.0, 140.0),
     ]) {
+      final services = _Interactions();
       await tester.pumpWidget(
         _app(services, dark: dark, scale: scale, width: width, boundary: key),
       );
@@ -410,32 +410,34 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 310));
       await tester.pump();
-      for (var i = 0; i < 20; i++) {
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 10)),
-        );
-        await tester.pump();
-      }
-      // Capture the settled preview after its first-frame fade-in.
+      // The fake engine opens in microtasks; only its fade-in needs fake time.
       await tester.pump(const Duration(milliseconds: 200));
+      expect(
+        find.byKey(const ValueKey('fake-card-video-surface')),
+        findsOneWidget,
+        reason: 'dark=$dark scale=$scale reads=${services.reads}',
+      );
       expect(tester.takeException(), isNull);
-      final boundary = key.currentContext?.findRenderObject();
-      if (boundary is! RenderRepaintBoundary) {
-        throw StateError('Missing boundary');
+      if (const bool.fromEnvironment('WRITE_UI_PREVIEW')) {
+        final boundary = key.currentContext?.findRenderObject();
+        if (boundary is! RenderRepaintBoundary) {
+          throw StateError('Missing boundary');
+        }
+        await tester.runAsync(() async {
+          final image = await boundary.toImage();
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          image.dispose();
+          if (bytes == null) throw StateError('Missing preview');
+          final dir = Directory('build/video-card-hover-preview');
+          await dir.create(recursive: true);
+          await File(
+            '${dir.path}/${dark ? 'dark-large-text' : 'light-hover'}.png',
+          ).writeAsBytes(bytes.buffer.asUint8List());
+        });
       }
-      await tester.runAsync(() async {
-        final image = await boundary.toImage();
-        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        image.dispose();
-        if (bytes == null) throw StateError('Missing preview');
-        final dir = Directory('build/video-card-hover-preview');
-        await dir.create(recursive: true);
-        await File(
-          '${dir.path}/${dark ? 'dark-large-text' : 'light-hover'}.png',
-        ).writeAsBytes(bytes.buffer.asUint8List());
-      });
       await mouse.moveTo(const Offset(650, 550));
       await tester.pump();
+      await tester.pumpWidget(const SizedBox.shrink());
     }
   });
 }
