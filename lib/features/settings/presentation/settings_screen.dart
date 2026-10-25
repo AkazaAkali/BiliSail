@@ -43,9 +43,8 @@ final class SettingsScreen extends StatefulWidget {
 
 final class _SettingsScreenState extends State<SettingsScreen> {
   late SettingsCategory _category = widget.category;
-  late final _localProgress = TabPagingProgress(
-    widget.category.index.toDouble(),
-  );
+  // The retained settings page must not own the home channel strip's progress.
+  late final _progress = TabPagingProgress(widget.category.index.toDouble());
 
   @override
   void didUpdateWidget(SettingsScreen oldWidget) {
@@ -55,7 +54,7 @@ final class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
-    _localProgress.dispose();
+    _progress.dispose();
     super.dispose();
   }
 
@@ -70,7 +69,6 @@ final class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final progress = TabPagingScope.maybeOf(context) ?? _localProgress;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -93,7 +91,7 @@ final class _SettingsScreenState extends State<SettingsScreen> {
               child: PagingTabStrip<SettingsCategory>(
                 tabs: SettingsCategory.values,
                 value: _category,
-                progress: progress,
+                progress: _progress,
                 itemKey: (category) =>
                     ValueKey('settings-category-${category.name}'),
                 buttonStyle: PageTabStyle.buttonStyle(context),
@@ -110,7 +108,7 @@ final class _SettingsScreenState extends State<SettingsScreen> {
             tabs: SettingsCategory.values,
             value: _category,
             viewKey: const ValueKey('settings-category-swipe'),
-            progress: progress,
+            progress: _progress,
             onChanged: _selectCategory,
             pageBuilder: (context, category, active) =>
                 _SettingsCategoryPage(category: category),

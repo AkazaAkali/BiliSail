@@ -587,6 +587,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
                                                     context,
                                                     compact: compact,
                                                   ),
+                                                  compact: compact,
                                                 ),
                                           ),
                                         Expanded(child: pages),
@@ -1016,8 +1017,8 @@ final class _BiliAppShellState extends State<BiliAppShell>
         for (final item in sections)
           NavigationDestination(
             key: ValueKey('workspace-bottom-${item.name}'),
-            icon: Icon(_sectionIcon(item), size: 22),
-            selectedIcon: Icon(_sectionIcon(item, selected: true), size: 22),
+            icon: Icon(_sectionIcon(item), size: 18),
+            selectedIcon: Icon(_sectionIcon(item, selected: true), size: 18),
             label: item.label,
           ),
       ],
@@ -1060,7 +1061,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
                               children: [
                                 Icon(
                                   _sectionIcon(section),
-                                  size: 22,
+                                  size: 18,
                                   color: colors.onSurfaceVariant,
                                 ),
                                 const SizedBox(height: 4),
@@ -1267,24 +1268,35 @@ final class _BiliAppShellState extends State<BiliAppShell>
               )
               .firstOrNull
         : null;
+    final section = sectionForLocation(active.location, compact: compact);
+    final tabs = channelsForSection(section, compact: compact);
+    final equalWidthTabs = compact && section == WorkspaceSection.dynamic;
     return SizedBox(
       height: PageTabStyle.barHeight,
-      child: _horizontalTabs(
-        key: const ValueKey('home-channel-strip'),
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        child: PagingTabStrip<HomeChannel>(
-          tabs: channelsForSection(
-            sectionForLocation(active.location, compact: compact),
-            compact: compact,
+      child: LayoutBuilder(
+        builder: (context, constraints) => _horizontalTabs(
+          key: const ValueKey('home-channel-strip'),
+          padding: equalWidthTabs
+              ? EdgeInsets.zero
+              : const EdgeInsets.symmetric(horizontal: 10),
+          child: PagingTabStrip<HomeChannel>(
+            tabs: tabs,
+            progressTabs: HomeChannel.primaryValues,
+            value: selected,
+            progress: _pagingFor(active),
+            onSelected: _selectChannel,
+            itemKey: (channel) => ValueKey('channel-${channel.name}'),
+            spacing: equalWidthTabs ? 0 : 3,
+            buttonStyle: PageTabStyle.buttonStyle(context).copyWith(
+              fixedSize: equalWidthTabs
+                  ? WidgetStatePropertyAll(
+                      Size.fromWidth(constraints.maxWidth / tabs.length),
+                    )
+                  : null,
+            ),
+            labelBuilder: (context, channel) =>
+                PageTabStyle.label(channel.label, icon: _channelIcon(channel)),
           ),
-          progressTabs: HomeChannel.primaryValues,
-          value: selected,
-          progress: _pagingFor(active),
-          onSelected: _selectChannel,
-          itemKey: (channel) => ValueKey('channel-${channel.name}'),
-          buttonStyle: PageTabStyle.buttonStyle(context),
-          labelBuilder: (context, channel) =>
-              PageTabStyle.label(channel.label, icon: _channelIcon(channel)),
         ),
       ),
     );
@@ -1327,8 +1339,9 @@ final class _BiliAppShellState extends State<BiliAppShell>
     ),
   );
 
-  bool get _navigationToolsVisible =>
+  bool _navigationToolsVisible({required bool compact}) =>
       switch (sectionForLocation(_displayTab.location, compact: false)) {
+        WorkspaceSection.dynamic => !compact,
         WorkspaceSection.mine ||
         WorkspaceSection.messages ||
         WorkspaceSection.downloads ||
@@ -1341,8 +1354,9 @@ final class _BiliAppShellState extends State<BiliAppShell>
     BoxConstraints constraints,
     Widget? navigation, {
     bool? showTools,
+    bool compact = false,
   }) {
-    if (!(showTools ?? _navigationToolsVisible)) {
+    if (!(showTools ?? _navigationToolsVisible(compact: compact))) {
       if (navigation == null &&
           _dualTabs &&
           widget.windowControlsBuilder == null &&

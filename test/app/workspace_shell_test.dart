@@ -285,11 +285,8 @@ void main() {
                 .queryParameters['channel'],
             'dynamic',
           );
-          expect(find.byIcon(Icons.account_circle), findsOneWidget);
-          expect(
-            find.byKey(const ValueKey('workspace-search')),
-            findsOneWidget,
-          );
+          expect(find.byIcon(Icons.account_circle), findsNothing);
+          expect(find.byKey(const ValueKey('workspace-search')), findsNothing);
           expect(tester.element(find.byType(_CounterPage)), same(root));
           expect(find.text('count 1'), findsOneWidget);
           expect(

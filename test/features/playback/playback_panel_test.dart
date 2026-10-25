@@ -1,6 +1,9 @@
 import '../../support/fake_video_output.dart';
 import '../../support/input_test_app.dart';
+import '../../support/detached_window_fake.dart';
 
+import 'package:bilisail/app/workspace_playback_window.dart';
+import 'package:bilisail/core/platform/detached_playback_window.dart';
 import 'package:bilisail/core/presentation/workspace_activity.dart';
 import 'package:bilisail/core/presentation/input_scope.dart';
 import 'package:bilisail/core/input/input_stroke.dart';
@@ -40,6 +43,96 @@ import 'package:flutter_test/flutter_test.dart';
 final _composerScopeProvider = Provider<String>((ref) => 'root');
 
 void main() {
+  testWidgets('detached fullscreen stays on its playback view and fills it', (
+    tester,
+  ) async {
+    for (final name in ['bilisail/desktop_window', 'bilisail/text_input']) {
+      final channel = MethodChannel(name);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (_) async => null,
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+    }
+    final engine = _FakeEngine();
+    final session = _session(engine);
+    addTearDown(session.close);
+    final mainWindow = _FakeWindowService();
+    const playbackSize = Size(1600, 900);
+    final windows = FakeDetachedWindowFactory(tester.view, size: playbackSize);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [playbackSessionProvider.overrideWithValue(session)],
+        child: InputTestApp(
+          home: DesktopPlaybackWindow(
+            windowFactory: windows.call,
+            onCloseRequested: () {},
+            onError: (error) => fail('$error'),
+            playback: WorkspacePlaybackWindow(
+              theme: BiliTheme.light(),
+              shortcuts: const ShortcutSettings.defaults(),
+              onBack: () {},
+              onClose: () {},
+              onActivateBrowser: () {},
+              child: Builder(
+                builder: (context) => Center(
+                  child: SizedBox(
+                    width: 640,
+                    height: 360,
+                    child: PlaybackPanel(
+                      detail: _detail,
+                      part: _part,
+                      settings: const AppSettings.defaults(),
+                      onToggleComments: () {},
+                      window: WindowServiceScope.maybeOf(context) ?? mainWindow,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            child: const Scaffold(body: Text('browser window')),
+          ),
+        ),
+      ),
+    );
+    await _pumpFrames(tester);
+    final panel = tester.element(find.byType(PlaybackPanel));
+    final playbackNavigator = Navigator.of(panel);
+    final browserNavigator = Navigator.of(
+      tester.element(find.text('browser window')),
+    );
+    final opens = engine.opens;
+    for (var round = 0; round < 2; round++) {
+      await tester.tap(find.byTooltip('全屏（F）'));
+      await _pumpFrames(tester);
+      final fullscreen = tester.element(find.byType(Dialog));
+      expect(View.of(fullscreen).viewId, windows.lastWindow!.viewId);
+      expect(Navigator.of(fullscreen), same(playbackNavigator));
+      expect(browserNavigator.canPop(), isFalse);
+      expect(playbackNavigator.canPop(), isTrue);
+      expect(
+        tester.getRect(find.byKey(const ValueKey('player-surface-tap-target'))),
+        Offset.zero & playbackSize,
+      );
+      expect(engine.opens, opens);
+      expect(engine.activeSurfaces, 1);
+      expect(engine.maxSurfaces, 1);
+      await tester.tap(find.byTooltip('退出全屏（Esc）'));
+      await _pumpFrames(tester);
+      expect(playbackNavigator.canPop(), isFalse);
+      expect(tester.element(find.byType(PlaybackPanel)), same(panel));
+    }
+    expect(windows.creationCount, 1);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await _pumpFrames(tester);
+  });
+
   for (final (controlsVisible, fullScreen) in [
     for (final controls in [true, false])
       for (final fullscreen in [false, true]) (controls, fullscreen),

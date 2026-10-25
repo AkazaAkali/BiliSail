@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'dart:ffi';
+import 'dart:ffi' hide Size;
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:bilisail/core/platform/detached_playback_window.dart';
@@ -42,6 +42,12 @@ void main() {
     );
 
     await tester.pumpWidget(build(open: true));
+    for (var attempt = 0; playbackService == null && attempt < 100; attempt++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+    }
     await tester.pumpAndSettle();
     expect(errors, isEmpty);
     expect(PlatformDispatcher.instance.implicitView, same(implicit));
@@ -98,6 +104,40 @@ void main() {
     await playbackService!.setTextInputActive(true);
     await playbackService!.setFullScreen(true);
     await tester.pumpAndSettle();
+    if (Platform.isWindows) {
+      final view = PlatformDispatcher.instance.views.singleWhere(
+        (view) => view.viewId == playbackService!.viewId,
+      );
+      final handle = _windowHandle(
+        PlatformDispatcher.instance.engineId!,
+        view.viewId,
+      );
+      final heap = _getProcessHeap();
+      final frame = _heapAlloc(heap, 8, sizeOf<_Rect>()).cast<_Rect>();
+      final client = _heapAlloc(heap, 8, sizeOf<_Rect>()).cast<_Rect>();
+      try {
+        expect(_getWindowRect(handle, frame), isNot(0));
+        expect(_getClientRect(handle, client), isNot(0));
+        final outerSize = Size(
+          (frame.ref.right - frame.ref.left).toDouble(),
+          (frame.ref.bottom - frame.ref.top).toDouble(),
+        );
+        final clientSize = Size(
+          (client.ref.right - client.ref.left).toDouble(),
+          (client.ref.bottom - client.ref.top).toDouble(),
+        );
+        debugPrint(
+          'FULLSCREEN_BOUNDS: outer=$outerSize client=$clientSize '
+          'view=${view.physicalSize} display=${view.display.size}',
+        );
+        expect(outerSize, view.display.size);
+        expect(clientSize, outerSize);
+        expect(view.physicalSize, clientSize);
+      } finally {
+        _heapFree(heap, 0, frame.cast());
+        _heapFree(heap, 0, client.cast());
+      }
+    }
     await playbackService!.setFullScreen(false);
     await tester.pumpAndSettle();
     await playbackService!.unbindTitleBarBack(backOwner);

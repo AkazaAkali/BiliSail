@@ -2,6 +2,15 @@
 
 日期：2026-10-06；默认值更新于 2026-10-24。当前“允许多个标签页同时播放”默认关闭，已保存的有效选择继续保留；以下 2026-10-06 记录中的默认开启为历史行为。
 
+## 双标签独立播放窗全屏留白（2026-10-25）
+
+- `RegularWindow` 的播放 view 仍挂在浏览窗口的 Widget 树下。原 `PlaybackPanel` 使用 `Navigator.of(context, rootNavigator: true)`，越过播放窗的独立 Navigator，将全屏路由推到浏览窗口；内容随浏览窗口的客户区布局，不能覆盖已进入全屏的播放窗口。
+- [共享播放面板](../../lib/features/playback/presentation/playback_panel.dart) 改为使用当前窗口最近的 Navigator；视频、影视、直播和离线播放沿用同一实现。全屏继续使用原会话和单个视频 surface，退出时恢复原页面。
+- 新增双 view 回归：浏览窗口和播放窗口尺寸不同，连续两次进出全屏，检查路由所属 view、播放器覆盖完整视口、浏览路由不被 push，以及源和 surface 数量不变。旧代码会将路由挂到主 view 0，修复后保留在播放 view 100。
+- `tool/check.ps1 -SkipPub` 通过：根应用 2210、API 446、播放器 81、弹幕 93、封装包 2，共 2832 项测试；格式、静态分析及打包边界检查通过。mux 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。日志为 `build/fullscreen-check.log`。
+- Windows Debug 构建与本地分轨工作区原生回归通过，覆盖普通／最大化播放窗进出全屏、完整视口、源 generation 保留、单个 surface、还原尺寸及最终关闭回收；日志为 `build/fullscreen-native-playback.log`。独立窗口 smoke 测得屏幕、窗口外框、客户区和 Flutter view 均为 1920×1080，日志为 `build/fullscreen-window-probe.log`。两处旧测试的等待条件同步覆盖新 view 内容挂载及关闭后异步回收。
+- 本轮未重建或替换正在运行的 Release，未测试 Android/macOS、跨显示器或性能；未连接到可热重载的调试应用，热重载请求未执行成功。
+
 ## 行为与实现
 
 - 原因是所有播放页共用一个 `PlaybackSession` 和 native engine，打开新视频会调用 stop 并替换旧媒体源，因此旧流中止而非保持暂停。

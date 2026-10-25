@@ -62,3 +62,14 @@
 本轮根应用 1120、bili_api 298、bili_player 22、bili_danmaku 52 项测试分别通过，共 1492 项；三个包的格式与静态分析、本次根应用文件的静态分析均通过。`flutter build windows --release --no-pub` 成功，产物 `build/windows/x64/runner/Release/bilisail.exe`。执行 `tool/check.ps1 -SkipPub` 时，最后一次运行的根格式检查通过，整体静态分析仍被并行改动 `test/features/feed/dynamic_scroll_layout_test.dart` 的 `curly_braces_in_flow_control_structures` 提示阻塞，本轮未修改该文件。真实客户端冷启动、慢网和 Android/macOS 实机验收仍待验证。
 
 
+## 2026-10-25：保留页面后的首页频道高亮
+
+问题路径：打开设置并选择“缓存”，返回首页后依次切换热门、番剧等频道，内容已经切换，但顶部图标、文字和指示线仍可能停在旧频道。根因是设置页读取了外层 `TabPagingScope`，与首页分页争用同一个 `TabPagingProgress`；设置页保留在后台后仍能接管进度发布者，使首页的动画更新被忽略。双标签和多标签模式均可复现。
+
+[设置页](../../lib/features/settings/presentation/settings_screen.dart)现在独立持有并释放分页进度，由设置分类条和分类内容分页共享；首页仍通过工作区进度驱动频道图标、文字和指示线。保留页面、分类选择和滚动状态的行为不变。
+
+[工作区路由回归](../../test/app/workspace_router_test.dart)新增 4 项，覆盖双/多标签、390/1280 逻辑像素、访问设置后切换推荐/热门/番剧的图标与文字颜色，以及返回设置后分类高亮和分页实例保留。修复前 4 项均复现失败，修复后连同工作区、频道滑动和分页条定向测试共 83 项通过，日志 `build/home-channel-highlight-before.log`、`build/home-channel-highlight-tests.log`。
+
+`tool/check.ps1 -SkipPub` 通过：根应用 2195、bili_api 446、bili_player 81、bili_danmaku 93、bili_mux 2，共 2817 项测试，五处格式、静态分析和打包边界检查通过，日志 `build/home-channel-highlight-check.log`。mux 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过，不计为原生集成通过。
+
+本轮未构建、启动客户端或执行实机验证；DTD 未发现运行中的调试应用，热重载因无活动连接未执行。

@@ -198,7 +198,7 @@ void main() {
   );
 
   testWidgets(
-    'dynamic keeps account and search with a recognizable icon',
+    'dynamic shows tools only on wide layouts and keeps a recognizable icon',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -218,10 +218,13 @@ void main() {
         for (final width in [320.0, 390.0, 600.0, 1280.0]) {
           tester.view.physicalSize = Size(width, 844);
           await tester.pumpAndSettle();
-          expect(find.byIcon(Icons.account_circle), findsOneWidget);
+          expect(
+            find.byIcon(Icons.account_circle),
+            width < 600 ? findsNothing : findsOneWidget,
+          );
           expect(
             find.byKey(const ValueKey('workspace-search')),
-            findsOneWidget,
+            width < 600 ? findsNothing : findsOneWidget,
           );
           expect(find.byKey(const ValueKey('channel-dynamic')), findsOneWidget);
           expect(
@@ -276,6 +279,76 @@ void main() {
       TargetPlatform.android,
       TargetPlatform.windows,
     }),
+  );
+
+  testWidgets(
+    'compact dynamic tabs split the top safe area width with centered labels',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      for (final channel in ['dynamic', 'videoDynamic']) {
+        for (final (width, scale) in [
+          (320.0, 1.0),
+          (390.0, 1.0),
+          (599.0, 1.0),
+          (320.0, 2.0),
+        ]) {
+          tester.view.physicalSize = Size(width, 844);
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: BiliTheme.light(),
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  padding: const EdgeInsets.only(top: 24),
+                  textScaler: TextScaler.linear(scale),
+                ),
+                child: child ?? const SizedBox.shrink(),
+              ),
+              home: BiliAppShell(
+                key: ValueKey(channel),
+                location: '/?channel=$channel',
+                navigationMode: WorkspaceNavigationMode.dualTabs,
+                accountBuilder: (_) => const Icon(Icons.account_circle),
+                child: const SizedBox.expand(),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const ValueKey('workspace-common-tools')),
+            findsNothing,
+          );
+          expect(
+            tester
+                .getRect(find.byKey(const ValueKey('home-channel-strip')))
+                .top,
+            24,
+          );
+          for (final (index, name) in ['dynamic', 'videoDynamic'].indexed) {
+            final tab = find.byKey(ValueKey('channel-$name'));
+            final rect = tester.getRect(tab);
+            expect(rect.width, closeTo(width / 2, .01));
+            expect(rect.left, closeTo(index * width / 2, .01));
+            final label = find.descendant(of: tab, matching: find.byType(Row));
+            expect(tester.getCenter(label).dx, closeTo(rect.center.dx, .01));
+            expect(
+              find.descendant(of: label, matching: find.byType(Icon)),
+              findsOneWidget,
+            );
+            expect(
+              find.descendant(
+                of: label,
+                matching: find.text(index == 0 ? '动态' : '视频动态'),
+              ),
+              findsOneWidget,
+            );
+            expect(tab.hitTestable(), findsOneWidget);
+          }
+          expect(tester.takeException(), isNull);
+        }
+      }
+    },
   );
 
   testWidgets(

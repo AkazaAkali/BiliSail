@@ -19,3 +19,11 @@
 `tool/check.ps1 -SkipPub` 完整通过：当前工作区根应用 525、`bili_api` 172、`bili_player` 16、`bili_danmaku` 10 项，合计 723 项；四处格式检查与静态分析均通过。日志保存在本机忽略目录 `artifacts/comment-images-decorations-check.log`。检查覆盖工作区已有修改，计数不是本轮新增测试数量。
 
 本次不使用真实账号执行点赞、发送或其他写入。在线装扮样本与 Windows／Android／macOS 实机显示尚未在本轮验证；组件与脱敏协议测试不等于三端实机验收。
+
+## 2026-10-25 双标签独立播放窗的图片预览
+
+双标签播放窗口启用固定 Flutter 3.47.6 的实验多窗口机制后，SDK 的 `showDialog` 会经 `showRawDialog` 创建独立原生对话窗口。共享入口现改为直接向当前 Navigator 推入 `DialogRoute`，继续使用同一 `ImageViewer`，在所属窗口内覆盖显示；保留主题、焦点循环、切图、缩放、背景点击和 Esc 关闭行为。评论、首页／空间动态仍共用同一入口。
+
+[双窗口回归](../../test/app/workspace_image_viewer_test.dart) 启用 SDK 多窗口开关，用 fake 次级 view 和原图仓储点击评论第二张图片，核对查看器仍属于播放 view／Navigator、浏览窗不增加路由、不注册原生对话窗口；切图和缩放正常，原生标题栏返回被模态隔离，Esc 仅关闭图片且保留原页面与播放窗口。旧实现已复现原生对话框创建路径及查看器落到主 view 的失败。此测试使用真实 Flutter 组件和模拟窗口，不代表 Windows／macOS 原生窗口实测。
+
+本轮 `tool/check.ps1 -SkipPub` 完整通过：根应用 2,209、`bili_api` 446、`bili_player` 81、`bili_danmaku` 93、`bili_mux` 2 项，共 2,831 项；五处格式、静态分析和打包边界检查通过。mux 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。日志为本机忽略目录 `build/validation/image-viewer-window-check.log`。未构建或执行三端实机验收；DTD 未发现运行中的调试应用，热重载因无连接未能执行。

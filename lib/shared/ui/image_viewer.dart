@@ -19,9 +19,20 @@ Future<void> showImageViewer(
   int index,
 ) {
   if (images.isEmpty) return Future.value();
-  return showDialog<void>(
-    context: context,
-    builder: (_) => ImageViewer(request: ImageViewerRequest(images, index)),
+  final navigator = Navigator.of(context);
+  // showDialog creates a native window when desktop windowing is enabled in
+  // the pinned SDK. Keep the shared viewer on its owning window's Navigator.
+  return navigator.push<void>(
+    DialogRoute<void>(
+      context: context,
+      builder: (_) => ImageViewer(request: ImageViewerRequest(images, index)),
+      themes: InheritedTheme.capture(from: context, to: navigator.context),
+      barrierColor:
+          DialogTheme.of(context).barrierColor ??
+          Theme.of(context).dialogTheme.barrierColor ??
+          Colors.black54,
+      traversalEdgeBehavior: TraversalEdgeBehavior.closedLoop,
+    ),
   );
 }
 

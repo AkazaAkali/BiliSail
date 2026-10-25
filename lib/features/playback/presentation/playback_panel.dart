@@ -354,7 +354,9 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
       if (!mounted || !_active || !identical(_fullScreenRequest, request)) {
         return;
       }
-      final navigator = Navigator.of(context, rootNavigator: true);
+      // The detached view remains below the browser's Navigator in the widget
+      // tree. Use this window's Navigator so its route fills the playback view.
+      final navigator = Navigator.of(context);
       final route = RawDialogRoute<void>(
         requestFocus: false,
         barrierDismissible: false,

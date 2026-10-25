@@ -1009,6 +1009,123 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+  for (final mode in WorkspaceNavigationMode.values) {
+    for (final width in [390.0, 1280.0]) {
+      _workspaceTestWidgets(
+        'home channel highlights survive retained settings at $width in $mode',
+        (tester) async {
+          tester.view.physicalSize = Size(width, 850);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final settings = _SettingsRepository()
+            ..settings = const AppSettings.defaults().copyWith(
+              navigationMode: mode,
+            );
+          final router = createBiliRouter(
+            playerBuilder: (_, _, _) => const SizedBox(),
+          );
+          addTearDown(router.dispose);
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                settingsRepositoryProvider.overrideWithValue(settings),
+                feedRepositoryProvider.overrideWithValue(_FeedRepository()),
+                homeRepositoryProvider.overrideWithValue(_HomeRepository()),
+              ],
+              child: InputTestApp.router(routerConfig: router),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final feed = tester.state(find.byType(FeedScreen));
+          final colors = Theme.of(tester.element(find.byType(FeedScreen)))
+              .colorScheme;
+          void expectHighlight(HomeChannel selected) {
+            expect(
+              tester.widget<FeedScreen>(find.byType(FeedScreen)).channel,
+              selected,
+            );
+            for (final channel in [
+              HomeChannel.recommended,
+              HomeChannel.popular,
+              HomeChannel.bangumi,
+            ]) {
+              final button = find.byKey(ValueKey('channel-${channel.name}'));
+              final color = channel == selected
+                  ? colors.primary
+                  : colors.onSurface;
+              expect(
+                IconTheme.of(
+                  tester.element(
+                    find.descendant(of: button, matching: find.byType(Icon)),
+                  ),
+                ).color,
+                color,
+                reason: '${channel.name} icon with ${selected.name} selected',
+              );
+              expect(
+                DefaultTextStyle.of(
+                  tester.element(
+                    find.descendant(of: button, matching: find.byType(Text)),
+                  ),
+                ).style.color,
+                color,
+              );
+            }
+          }
+
+          expectHighlight(HomeChannel.recommended);
+          final prefix = width < 600 ? 'workspace-bottom' : 'workspace-nav';
+          await tester.tap(find.byKey(ValueKey('$prefix-settings')));
+          await tester.pumpAndSettle();
+          final settingsPager = tester.element(
+            find.byKey(const ValueKey('settings-category-swipe')),
+          );
+          await tester.tap(
+            find.byKey(const ValueKey('settings-category-cache')),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(ValueKey('$prefix-home')));
+          await tester.pumpAndSettle();
+          for (final channel in [
+            HomeChannel.popular,
+            HomeChannel.bangumi,
+            HomeChannel.recommended,
+          ]) {
+            final button = find.byKey(ValueKey('channel-${channel.name}'));
+            await tester.ensureVisible(button);
+            await tester.tap(button);
+            await tester.pumpAndSettle();
+            expectHighlight(channel);
+            expect(tester.state(find.byType(FeedScreen)), same(feed));
+          }
+          await tester.tap(find.byKey(ValueKey('$prefix-settings')));
+          await tester.pumpAndSettle();
+          expect(
+            tester.element(
+              find.byKey(const ValueKey('settings-category-swipe')),
+            ),
+            same(settingsPager),
+          );
+          for (final category in ['cache', 'appearance']) {
+            final button = find.byKey(ValueKey('settings-category-$category'));
+            await tester.tap(button);
+            await tester.pumpAndSettle();
+            expect(
+              tester
+                  .widget<TextButton>(button)
+                  .style
+                  ?.foregroundColor
+                  ?.resolve({}),
+              colors.primary,
+            );
+          }
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
   _workspaceTestWidgets(
     'settings swipe updates the same workspace route and animated strip',
     (tester) async {

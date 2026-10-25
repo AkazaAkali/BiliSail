@@ -1406,6 +1406,37 @@ void main() {
         final userSize = nativeWindow.outerSize;
         expect(userSize, const Size(1000, 700));
         expect(playbackView.viewId, isNot(primaryView?.viewId));
+        final playbackWindow = WindowServiceScope.maybeOf(
+          tester.element(find.byType(PlaybackPanel)),
+        );
+        expect(playbackWindow, isNotNull);
+        Future<void> verifyDetachedFullscreen({required bool maximized}) async {
+          final generation = engine.currentSnapshot.generation;
+          await tester.tap(find.byTooltip('全屏（F）'));
+          await _until(
+            tester,
+            () =>
+                playbackWindow!.isFullScreen &&
+                find.byType(Dialog).evaluate().length == 1,
+          );
+          final fullscreen = tester.element(find.byType(Dialog));
+          expect(View.of(fullscreen).viewId, playbackView.viewId);
+          expect(
+            tester.getRect(
+              find.byKey(const ValueKey('player-surface-tap-target')),
+            ),
+            Offset.zero &
+                (playbackView.physicalSize / playbackView.devicePixelRatio),
+          );
+          expect(nativeWindow.outerSize, playbackView.display.size);
+          expect(engine.currentSnapshot.generation, generation);
+          expect(find.byType(VideoSurface), findsOneWidget);
+          await tester.tap(find.byTooltip('退出全屏（Esc）'));
+          await _until(tester, () => !playbackWindow!.isFullScreen);
+          expect(nativeWindow.isMaximized, maximized);
+        }
+
+        await verifyDetachedFullscreen(maximized: false);
         router.go('/video/BV1abc654321');
         await _until(
           tester,
@@ -1418,6 +1449,10 @@ void main() {
         nativeWindow.maximize();
         await tester.pump(const Duration(milliseconds: 200));
         expect(nativeWindow.isMaximized, isTrue);
+        await verifyDetachedFullscreen(maximized: true);
+        debugPrint(
+          'NATIVE_DETACHED_FULLSCREEN: own view and complete viewport passed',
+        );
         expect(find.byType(VideoSurface, skipOffstage: false), findsOneWidget);
         await session.seek(const Duration(milliseconds: 4000));
         expect(
@@ -1459,7 +1494,13 @@ void main() {
         nativeWindow.close();
         await _until(
           tester,
-          () => engine.currentSnapshot.phase == PlaybackPhase.idle,
+          () =>
+              engine.currentSnapshot.phase == PlaybackPhase.idle &&
+              find
+                  .byType(PlaybackPanel, skipOffstage: false)
+                  .evaluate()
+                  .isEmpty &&
+              PlatformDispatcher.instance.views.length == viewCount,
         );
         expect(find.text('本地工作区首页'), findsOneWidget);
         expect(find.byType(PlaybackPanel, skipOffstage: false), findsNothing);
