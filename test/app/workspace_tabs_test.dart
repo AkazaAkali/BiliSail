@@ -2,6 +2,47 @@ import 'package:bilisail/app/workspace_tabs.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final dual in [true, false]) {
+    test(
+      'Back previews match commits without consuming history in dual=$dual',
+      () {
+        final workspace = WorkspaceTabs()..setDualMode(dual);
+        for (final location in [
+          '/history',
+          '/user/42',
+          '/video/A',
+          '/video/B',
+        ]) {
+          workspace.acceptRoute(Uri.parse(location));
+        }
+        while (workspace.canGoBack) {
+          final current = workspace.active;
+          final tabs = workspace.tabs;
+          final preview = workspace.backDestination();
+          expect(preview, isNotNull);
+          expect(workspace.active, same(current));
+          expect(workspace.tabs, tabs);
+          expect(workspace.backDestination()?.location, preview?.location);
+          expect(workspace.goBack(), isTrue);
+          expect(workspace.active.id, preview?.id);
+          expect(workspace.active.location, preview?.location);
+        }
+        expect(workspace.backDestination(), isNull);
+      },
+    );
+
+    test('inbox preview restores root identity in dual=$dual', () {
+      final workspace = WorkspaceTabs()..setDualMode(dual);
+      workspace.acceptRoute(Uri.parse('/settings?section=shortcuts'));
+      workspace.acceptRoute(Uri.parse('/messages'));
+      final preview = workspace.backDestination(fromMessages: true);
+      expect(workspace.active.isMessages, isTrue);
+      expect(preview?.location.toString(), '/settings?section=shortcuts');
+      expect(workspace.returnFromMessages(), isTrue);
+      expect(workspace.active.location, preview?.location);
+    });
+  }
+
   test('inbox Back to playback keeps its browsing slot and media history', () {
     final workspace = WorkspaceTabs()..setDualMode(true);
     workspace.acceptRoute(Uri.parse('/search?q=cat'));

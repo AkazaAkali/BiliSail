@@ -8,6 +8,7 @@ import '../features/feed/domain/home_channel.dart';
 import '../features/search/presentation/search_category_bar.dart';
 import '../core/presentation/workspace_activity.dart';
 import '../core/presentation/page_back_scope.dart';
+import '../core/presentation/predictive_back_region.dart';
 import 'workspace_tabs.dart';
 import 'workspace_navigation.dart';
 import 'platform_defaults.dart';
@@ -768,16 +769,64 @@ final class _BiliAppShellState extends State<BiliAppShell>
         child: widget.child,
       );
     }
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // go_router needs its shell Navigator mounted to dispatch system back
-        // and dismiss dialogs. Its feature routes only build placeholders.
-        Offstage(child: widget.child),
-        for (final tab in _workspace.tabs)
-          if (!_desktopDual || tab.id != _workspace.playbackId)
-            _page(context, tab, active: tab.id == _displayTab.id),
-      ],
+    final destination = _workspace.backDestination(
+      fromMessages: _canReturnFromMessages,
+    );
+    return PredictiveBackRegion(
+      enabled:
+          _android &&
+          !_desktopDual &&
+          destination != null &&
+          !(_pageBack[_displayTab.id]?.canGoBack ?? false),
+      identity: (
+        widget.location,
+        widget.navigationMode,
+        widget.accountIdentity,
+        _displayTab.id,
+        destination?.id,
+        destination?.location,
+      ),
+      onBack: _goBack,
+      builder: (context, progress, edge, previewing) => Stack(
+        fit: StackFit.expand,
+        children: [
+          // go_router needs its shell Navigator mounted to dispatch system back
+          // and dismiss dialogs. Its feature routes only build placeholders.
+          Offstage(child: widget.child),
+          if (previewing && destination != null)
+            // Replaced media/root locations have no second live page. Preview
+            // their identity without loading another source or starting audio.
+            ColoredBox(
+              color: Theme.of(context).colorScheme.surfaceContainerLow,
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text('返回 ${destination.title}'),
+                ),
+              ),
+            ),
+          for (final tab in [
+            ..._workspace.tabs.where((tab) => tab.id != _displayTab.id),
+            _displayTab,
+          ])
+            if (!_desktopDual || tab.id != _workspace.playbackId)
+              _page(
+                context,
+                tab,
+                active: tab.id == _displayTab.id,
+                preview:
+                    previewing &&
+                    tab.id != _displayTab.id &&
+                    tab.id == destination?.id &&
+                    tab.location == destination?.location,
+                backProgress: previewing && tab.id == _displayTab.id
+                    ? progress
+                    : kAlwaysDismissedAnimation,
+                backEdge: edge,
+              ),
+        ],
+      ),
     );
   }
 
@@ -785,30 +834,48 @@ final class _BiliAppShellState extends State<BiliAppShell>
     BuildContext context,
     WorkspaceTab tab, {
     required bool active,
+    bool preview = false,
+    Animation<double> backProgress = kAlwaysDismissedAnimation,
+    SwipeEdge backEdge = SwipeEdge.left,
   }) => Offstage(
     key: _pageKeys.putIfAbsent(tab.id, GlobalKey.new),
-    offstage: !active,
-    // Keep account listeners active for cached pages. Riverpod pauses
-    // listeners below a disabled TickerMode, delaying logout cleanup.
-    child: FocusScope(
-      canRequestFocus: active,
-      skipTraversal: !active,
-      child: WorkspaceActivity(
-        active: active,
-        child: WorkspacePlaybackSelection(
-          tabId: _desktopDual ? _workspace.playbackId : null,
-          child: PageStorage(
-            bucket: _pageStorage.putIfAbsent(tab.id, PageStorageBucket.new),
-            child: WorkspacePageHeader(
-              builder: _searchHeader,
-              child: WorkspacePageNavigation(
-                navigate: (location) => _updatePageLocation(tab, location),
-                child: TabPagingScope(
-                  progress: _pagingFor(tab),
-                  child: PageBackScope(
-                    controller: _backFor(tab.id),
-                    child:
-                        widget.pageBuilder?.call(context, tab) ?? widget.child,
+    offstage: !active && !preview,
+    child: PredictiveBackPageTransition(
+      progress: backProgress,
+      edge: backEdge,
+      child: IgnorePointer(
+        ignoring: preview,
+        child: ExcludeSemantics(
+          excluding: preview,
+          // Keep account listeners active for cached pages. Riverpod pauses
+          // listeners below a disabled TickerMode, delaying logout cleanup.
+          child: FocusScope(
+            canRequestFocus: active,
+            skipTraversal: !active,
+            child: WorkspaceActivity(
+              active: active,
+              child: WorkspacePlaybackSelection(
+                tabId: _desktopDual ? _workspace.playbackId : null,
+                child: PageStorage(
+                  bucket: _pageStorage.putIfAbsent(
+                    tab.id,
+                    PageStorageBucket.new,
+                  ),
+                  child: WorkspacePageHeader(
+                    builder: _searchHeader,
+                    child: WorkspacePageNavigation(
+                      navigate: (location) =>
+                          _updatePageLocation(tab, location),
+                      child: TabPagingScope(
+                        progress: _pagingFor(tab),
+                        child: PageBackScope(
+                          controller: _backFor(tab.id),
+                          child:
+                              widget.pageBuilder?.call(context, tab) ??
+                              widget.child,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),

@@ -4,6 +4,7 @@
     <application
         android:label="BiliSail"
         android:name="${applicationName}"
+        android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher" android:allowBackup="false">
         <activity
             android:name=".MainActivity"

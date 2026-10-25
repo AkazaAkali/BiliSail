@@ -159,6 +159,34 @@ final class WorkspaceTabs {
       ? canGoBackBrowsing
       : _backHistory.any((id) => id != activeId);
 
+  /// Resolves a preview without selecting a page or consuming its history.
+  WorkspaceTab? backDestination({bool fromMessages = false}) {
+    WorkspaceTab rootAt(Uri location) =>
+        WorkspaceTab(id: 'home', location: location, pinned: true);
+    if (fromMessages && canReturnFromMessages) {
+      final point = _messagesReturnPoint;
+      if (point == null) return null;
+      final origin = _tabs.where((tab) => tab.id == point.tabId).firstOrNull;
+      return origin == null || origin.id == 'home'
+          ? rootAt(point.rootLocation)
+          : origin;
+    }
+    if (!canGoBack) return null;
+    if (_dualMode && active.isPlayback) {
+      if (_playbackHistory.isNotEmpty) {
+        return WorkspaceTab(id: activeId, location: _playbackHistory.last);
+      }
+      return _tabs.firstWhere((tab) => tab.id == _browseId);
+    }
+    for (final id in _backHistory.reversed) {
+      final destination = _tabs.where((tab) => tab.id == id).firstOrNull;
+      if (destination == null || id == activeId) continue;
+      if (_dualMode && destination.isPlayback) continue;
+      return destination;
+    }
+    return _dualMode ? _tabs.first : null;
+  }
+
   void _activate(String id) {
     if (id != _activeId) {
       _backHistory.add(_activeId);
