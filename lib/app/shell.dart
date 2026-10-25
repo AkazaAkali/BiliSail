@@ -163,10 +163,11 @@ final class _BiliAppShellState extends State<BiliAppShell>
   bool _exitConfirmationOpen = false;
 
   bool get _android => Theme.of(context).platform == TargetPlatform.android;
-  bool get _compactChannels => compactChannelNavigationForPlatform(
-    Theme.of(context).platform,
-    compact: MediaQuery.sizeOf(context).width < 600,
-  );
+  bool get _compactChannels => MediaQuery.sizeOf(context).width < 600;
+  bool get _animatePrimaryNavigation =>
+      _compactChannels &&
+      (Theme.of(context).platform == TargetPlatform.android ||
+          Theme.of(context).platform == TargetPlatform.iOS);
 
   bool get _canReturnFromMessages =>
       _android && _workspace.canReturnFromMessages;
@@ -633,7 +634,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
                                       key: const ValueKey(
                                         'workspace-primary-transition',
                                       ),
-                                      enabled: _compactChannels,
+                                      enabled: _animatePrimaryNavigation,
                                       index: _displayTab.isRoot
                                           ? sectionForLocation(
                                               _displayTab.location,

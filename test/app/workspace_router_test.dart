@@ -510,9 +510,13 @@ void main() {
             tester.element(find.byType(FeedScreen)),
           );
           final surface = find.byKey(const ValueKey('home-channel-swipe'));
-          final compact = compactChannelNavigationForPlatform(
-            platform,
-            compact: width < 600,
+          final compact = width < 600;
+          final animatePrimary = compact && platform == TargetPlatform.android;
+          expect(
+            tester
+                .widget<FeedScreen>(find.byType(FeedScreen))
+                .showLiveSectionTabs,
+            compact,
           );
           final home = channelsForSection(
             WorkspaceSection.home,
@@ -615,11 +619,11 @@ void main() {
               .first;
           expect(
             tester.widget<PrimaryNavigationTransition>(primary).enabled,
-            compact,
+            animatePrimary,
           );
           expect(
             tester.widget<FadeTransition>(fade).opacity.value,
-            compact ? lessThan(1) : equals(1),
+            animatePrimary ? lessThan(1) : equals(1),
           );
           await tester.pumpAndSettle();
           expectChannel(HomeChannel.dynamic);

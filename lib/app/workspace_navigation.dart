@@ -1,14 +1,4 @@
-import 'package:flutter/foundation.dart';
-
 import '../features/feed/domain/home_channel.dart';
-
-/// Desktop live stays a root destination even in a narrow window.
-bool compactChannelNavigationForPlatform(
-  TargetPlatform platform, {
-  required bool compact,
-}) =>
-    compact &&
-    (platform == TargetPlatform.android || platform == TargetPlatform.iOS);
 
 /// Product navigation groups are independent of the retained feed pages.
 enum WorkspaceSection {

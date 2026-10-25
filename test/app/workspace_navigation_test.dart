@@ -1,43 +1,28 @@
 import 'package:bilisail/app/workspace_navigation.dart';
 import 'package:bilisail/features/feed/domain/home_channel.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter/foundation.dart';
 
 void main() {
-  test(
-    'desktop live is separate at every width and groups match the strip order',
-    () {
-      for (final platform in [
-        TargetPlatform.windows,
-        TargetPlatform.macOS,
-        TargetPlatform.android,
-      ]) {
-        for (final narrow in [false, true]) {
-          final compact = compactChannelNavigationForPlatform(
-            platform,
-            compact: narrow,
-          );
-          expect(compact, platform == TargetPlatform.android && narrow);
-          final groups = channelGroupsForNavigation(compact: compact);
-          expect(groups.first, [
-            HomeChannel.recommended,
-            HomeChannel.popular,
-            if (compact) HomeChannel.live,
-            HomeChannel.bangumi,
-            HomeChannel.guochuang,
-            HomeChannel.cinema,
-            HomeChannel.categories,
-          ]);
-          expect(groups[1], [HomeChannel.dynamic, HomeChannel.videoDynamic]);
-          if (!compact) expect(groups[2], [HomeChannel.live]);
-          expect(groups.last, [HomeChannel.watchLater, HomeChannel.favorites]);
-          expect({
-            for (final group in groups) ...group,
-          }, HomeChannel.primaryValues.toSet());
-        }
-      }
-    },
-  );
+  test('live belongs to home only in compact navigation and groups match the strip order', () {
+    for (final compact in [false, true]) {
+      final groups = channelGroupsForNavigation(compact: compact);
+      expect(groups.first, [
+        HomeChannel.recommended,
+        HomeChannel.popular,
+        if (compact) HomeChannel.live,
+        HomeChannel.bangumi,
+        HomeChannel.guochuang,
+        HomeChannel.cinema,
+        HomeChannel.categories,
+      ]);
+      expect(groups[1], [HomeChannel.dynamic, HomeChannel.videoDynamic]);
+      if (!compact) expect(groups[2], [HomeChannel.live]);
+      expect(groups.last, [HomeChannel.watchLater, HomeChannel.favorites]);
+      expect({
+        for (final group in groups) ...group,
+      }, HomeChannel.primaryValues.toSet());
+    }
+  });
   test('primary channel destinations jump while inner tabs animate', () {
     for (final compact in [false, true]) {
       for (final from in [HomeChannel.recommended, HomeChannel.popular]) {

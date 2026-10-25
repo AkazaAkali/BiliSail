@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets(
-    'mobile narrow navigation has four destinations and wide keeps live separate',
+    'narrow navigation has four destinations and wide keeps live separate',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -41,26 +41,37 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('workspace-bottom-home')));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      for (final width in [600.0, 960.0, 1440.0]) {
+      for (final width in [599.0, 600.0, 960.0, 1440.0, 599.0]) {
         tester.view.physicalSize = Size(width, 844);
         await tester.pumpAndSettle();
         expect(
           tester.element(find.byKey(const ValueKey('retained-content'))),
           same(content),
         );
-        expect(find.byType(NavigationBar), findsNothing);
-        expect(
-          find.byKey(const ValueKey('workspace-nav-live')),
-          findsOneWidget,
-        );
-        expect(find.byKey(const ValueKey('channel-live')), findsNothing);
+        if (width < 600) {
+          final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+          expect(
+            bar.destinations.whereType<NavigationDestination>().map(
+              (item) => item.label,
+            ),
+            ['首页', '动态', '我的', '设置'],
+          );
+          expect(find.byKey(const ValueKey('channel-live')), findsOneWidget);
+        } else {
+          expect(find.byType(NavigationBar), findsNothing);
+          expect(
+            find.byKey(const ValueKey('workspace-nav-live')),
+            findsOneWidget,
+          );
+          expect(find.byKey(const ValueKey('channel-live')), findsNothing);
+        }
         expect(find.byKey(const ValueKey('channel-bangumi')), findsOneWidget);
         expect(find.byKey(const ValueKey('channel-cinema')), findsOneWidget);
         expect(find.text('媒体库'), findsNothing);
         expect(tester.takeException(), isNull);
       }
     },
-    variant: TargetPlatformVariant.only(TargetPlatform.android),
+    variant: TargetPlatformVariant(TargetPlatform.values.toSet()),
   );
   testWidgets(
     'desktop utilities stay at the bottom while main navigation scrolls',
@@ -419,7 +430,7 @@ void main() {
     },
   );
 
-  testWidgets('desktop live shows business sections with account and search', (
+  testWidgets('live moves between home and its root while keeping content', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -437,7 +448,7 @@ void main() {
       ),
     );
     Element? content;
-    for (final width in [600.0, 960.0, 1440.0, 390.0, 1280.0]) {
+    for (final width in [600.0, 960.0, 1440.0, 599.0, 390.0, 600.0, 1280.0]) {
       tester.view.physicalSize = Size(width, 844);
       await tester.pumpAndSettle();
       content ??= tester.element(find.byKey(const ValueKey('live-content')));
@@ -450,12 +461,18 @@ void main() {
       expect(find.text('全部分区'), findsNothing);
       expect(find.byKey(const ValueKey('channel-ranking')), findsNothing);
       expect(find.byKey(const ValueKey('workspace-back')), findsNothing);
-      expect(find.byKey(const ValueKey('home-channel-strip')), findsNothing);
-      expect(find.byKey(const ValueKey('channel-live')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('home-channel-strip')),
+        width < 600 ? findsOneWidget : findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('channel-live')),
+        width < 600 ? findsOneWidget : findsNothing,
+      );
       for (final section in ['推荐直播', '我的关注', '观看记录']) {
         expect(
           find.byKey(ValueKey('workspace-live-section-$section')),
-          findsOneWidget,
+          width < 600 ? findsNothing : findsOneWidget,
         );
       }
       if (width < 600) {
@@ -464,12 +481,13 @@ void main() {
           bar.destinations.whereType<NavigationDestination>().map(
             (item) => item.label,
           ),
-          ['首页', '动态', '直播', '我的', '设置'],
+          ['首页', '动态', '我的', '设置'],
         );
+        expect(bar.selectedIndex, 0);
       }
       expect(tester.takeException(), isNull, reason: '$width');
     }
-  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+  }, variant: TargetPlatformVariant(TargetPlatform.values.toSet()));
 
   for (final mode in WorkspaceNavigationMode.values) {
     for (final location in ['/', '/search?q=cat']) {
@@ -719,10 +737,7 @@ void main() {
           await tester.pumpAndSettle();
           for (final channel in channelsForSection(
             WorkspaceSection.home,
-            compact: compactChannelNavigationForPlatform(
-              theme.platform,
-              compact: width < 600,
-            ),
+            compact: width < 600,
           )) {
             final tab = find.byKey(ValueKey('channel-${channel.name}'));
             final label = find.descendant(
