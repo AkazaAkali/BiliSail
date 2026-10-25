@@ -196,16 +196,16 @@ void main() {
           expect(next.top, greaterThan(first.bottom));
         }
 
-        expectColumns(2, 700);
-        tester.view.physicalSize = const Size(1000, 600);
+        expectColumns(3, 700);
+        tester.view.physicalSize = const Size(1400, 600);
         await tester.pumpAndSettle();
-        expectColumns(3, 1000);
+        expectColumns(4, 1400);
         scale.value = 2;
         await tester.pumpAndSettle();
-        expectColumns(2, 1000);
+        expectColumns(3, 1400);
         scale.value = 1;
         await tester.pumpAndSettle();
-        expectColumns(3, 1000);
+        expectColumns(4, 1400);
         expect(tester.takeException(), isNull);
       },
     );

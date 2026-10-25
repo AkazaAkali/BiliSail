@@ -82,7 +82,10 @@ void main() {
       expect(second.top, first.top);
       expect(second.left - first.right, closeTo(gap, .01));
       if (width < 600) {
-        expect(second.right, closeTo(width - inset, .01));
+        final lastInRow = tester.getRect(
+          find.byType(VideoCard).at(width == 599 ? 2 : 1),
+        );
+        expect(lastInRow.right, closeTo(width - inset, .01));
       }
       if (width == 390) expect(first.width, 188);
       expect(tester.takeException(), isNull, reason: 'allocated width=$width');
@@ -96,13 +99,19 @@ void main() {
     for (final (width, scale, columns) in [
       (299.0, 1.0, 1),
       (300.0, 1.0, 2),
-      (619.0, 1.0, 2),
-      (620.0, 1.0, 2),
-      (939.0, 1.0, 2),
+      (491.0, 1.0, 2),
+      (492.0, 1.0, 3),
+      (599.0, 1.0, 3),
+      (600.0, 1.0, 3),
+      (939.0, 1.0, 3),
       (940.0, 1.0, 3),
+      (1259.0, 1.0, 3),
+      (1260.0, 1.0, 4),
       (439.0, 2.0, 1),
       (440.0, 2.0, 2),
       (720.0, 2.0, 2),
+      (759.0, 2.0, 2),
+      (760.0, 2.0, 3),
     ]) {
       await tester.pumpWidget(_gridApp(width: width, scale: scale));
       await tester.pumpAndSettle();

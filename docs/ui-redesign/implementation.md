@@ -13,7 +13,7 @@
 
 ## 实现
 
-- [shell](../../lib/app/shell.dart) 使用 LayoutBuilder：小于 600 为底部导航，600–1179 为 76 宽导航轨，1180 起为 164 宽侧栏；内容面板统一圆角与留白。布局树和页面身份保持稳定，宽度变化不会更换 ProviderScope 或媒体 owner。
+- [shell](../../lib/app/shell.dart) 使用 LayoutBuilder：小于 600 为底部导航，600–1599 为 76 宽导航轨，1600 起为 164 宽侧栏（2026-10-25 平板适配将展开阈值从 1180 延后）；内容面板统一圆角与留白。布局树和页面身份保持稳定，宽度变化不会更换 ProviderScope 或媒体 owner。推荐等共享网格在默认字号下支持更小的三列卡片；较宽平板可以显示四列，见[共享视频卡片](../validation/shared-video-cards.md)。
 - [导航分组](../../lib/app/workspace_navigation.dart) 覆盖全部 12 个既有 HomeChannel。频道页继续保留现有横向分页、各自状态和筛选；跨分组滑动时一级入口同步选中。[频道条](../../lib/shared/ui/paging_tab_strip.dart) 将完整分页进度映射到当前分组，不把不同组的索引当作同一组。
 - [我的页面](../../lib/features/auth/presentation/account_screen.dart) 使用独立账号卡、观看入口与账号服务布局，复用账号、等级、关注／粉丝、消息未读及登录控制器；首页头像仍打开原 [AccountMenu 抽屉](../../lib/features/auth/presentation/account_menu.dart)。页面导航和账号变化不关闭“我的”页。
 - [工作区模型](../../lib/app/workspace_tabs.dart) 将已保留页面投影为一个浏览槽和一个播放槽；新的媒体导航复用播放页 ID，UGC／PGC／直播／离线播放统一处理。原有页面缓存 16、访问历史 64 不变，双标签内部媒体返回历史最多 16 条。

@@ -10,10 +10,15 @@ const _desktopSpacing = 20.0;
   final spacing = compact ? 6.0 : _desktopSpacing;
   final textScaler = MediaQuery.textScalerOf(context);
   final minimum = textScaler.scale(300).clamp(300, 450);
-  // Phone-sized grids can fit two compact cards; wider rows keep desktop sizes.
+  // Two cards remain readable on phones; tablet rows can use three smaller
+  // cards before the regular desktop minimum permits additional columns.
   final compactMinimum = textScaler.scale(140).clamp(140, 210);
-  // Keep the existing column thresholds; narrower gutters enlarge the cards.
-  final minimumColumns = extent >= compactMinimum * 2 + _desktopSpacing ? 2 : 1;
+  final threeCardMinimum = textScaler.scale(160).clamp(160, 240);
+  final minimumColumns = extent >= threeCardMinimum * 3 + spacing * 2
+      ? 3
+      : extent >= compactMinimum * 2 + _desktopSpacing
+      ? 2
+      : 1;
   final columns = ((extent + _desktopSpacing) / (minimum + _desktopSpacing))
       .floor()
       .clamp(minimumColumns, 12);

@@ -597,7 +597,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final compact = constraints.maxWidth < 600;
-                  final wide = constraints.maxWidth >= 1180;
+                  final wide = constraints.maxWidth >= 1600;
                   final colors = Theme.of(context).colorScheme;
                   return Column(
                     children: [
