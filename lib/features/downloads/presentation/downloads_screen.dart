@@ -134,15 +134,10 @@ final class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
-          child: Row(
-            children: [
-              Expanded(
-                child: widget.showHeading
-                    ? Text('下载', style: theme.textTheme.titleLarge)
-                    : const SizedBox.shrink(),
-              ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 600;
+            final actions = [
               IconButton(
                 tooltip: '刷新下载',
                 onPressed: () => _run(controller.refresh),
@@ -159,40 +154,69 @@ final class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
                 ),
                 icon: const Icon(Icons.settings_outlined),
               ),
-            ],
-          ),
-        ),
-        SizedBox(
-          height: PageTabStyle.barHeight,
-          child: ScrollConfiguration(
-            behavior: const SmoothScrollBehavior(horizontalMouseWheel: true),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: PagingTabStrip<bool>(
-                tabs: const [false, true],
-                value: _completed,
-                onSelected: (value) => setState(() => _completed = value),
-                buttonStyle: PageTabStyle.buttonStyle(context),
-                labelBuilder: (context, completedTab) => Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    PageTabStyle.label(
-                      completedTab ? '已完成' : '队列',
-                      icon: completedTab
-                          ? Icons.download_done_rounded
-                          : Icons.downloading_rounded,
+            ];
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (widget.showHeading || !compact)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: widget.showHeading
+                              ? Text('下载', style: theme.textTheme.titleLarge)
+                              : const SizedBox.shrink(),
+                        ),
+                        if (!compact) ...actions,
+                      ],
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '${completedTab ? completed.length : queue.length}',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ],
+                  ),
+                SizedBox(
+                  height: PageTabStyle.barHeight,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: ScrollConfiguration(
+                          behavior: const SmoothScrollBehavior(
+                            horizontalMouseWheel: true,
+                          ),
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            child: PagingTabStrip<bool>(
+                              tabs: const [false, true],
+                              value: _completed,
+                              onSelected: (value) =>
+                                  setState(() => _completed = value),
+                              buttonStyle: PageTabStyle.buttonStyle(context),
+                              labelBuilder: (context, completedTab) => Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  PageTabStyle.label(
+                                    completedTab ? '已完成' : '队列',
+                                    icon: completedTab
+                                        ? Icons.download_done_rounded
+                                        : Icons.downloading_rounded,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${completedTab ? completed.length : queue.length}',
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (compact) ...[...actions, const SizedBox(width: 12)],
+                    ],
+                  ),
                 ),
-              ),
-            ),
-          ),
+              ],
+            );
+          },
         ),
         const Divider(height: 1),
         Expanded(
