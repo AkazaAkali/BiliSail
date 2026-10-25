@@ -9,6 +9,7 @@ import 'app/bili_app.dart';
 import 'app/dependencies.dart';
 import 'app/release_smoke.dart';
 import 'core/presentation/bili_widgets_binding.dart';
+import 'core/platform/macos_application_window.dart';
 import 'core/storage/app_database.dart';
 import 'core/storage/credential_store.dart';
 
@@ -38,7 +39,19 @@ Future<void> main(List<String> arguments) async {
       'HarmonyOS Sans',
     ], license.replaceAll('\u0000', ''));
   });
+  MacOSApplicationWindow? applicationWindow;
+  void present(Widget app) {
+    final window = applicationWindow;
+    if (window == null) {
+      runApp(app);
+    } else {
+      window.present(app);
+    }
+  }
+
   try {
+    applicationWindow = await MacOSApplicationWindow.create();
+    await applicationWindow?.prepare();
     if (smoke != null && smoke.phase == 'cleanup') {
       await smoke.probeCredentials();
       stdout.writeln(smoke.successMarker);
@@ -53,15 +66,22 @@ Future<void> main(List<String> arguments) async {
       databaseOverride: smoke == null
           ? null
           : AppDatabase(NativeDatabase.memory()),
+      windowOverride: applicationWindow?.service,
     );
-    runApp(dependencies.scope(BiliApp(dependencies: dependencies)));
+    final app = dependencies.scope(BiliApp(dependencies: dependencies));
+    present(app);
     if (smoke != null) {
       await WidgetsBinding.instance.waitUntilFirstFrameRasterized;
       if (smoke.phase == 'startup') {
         await Future<void>.delayed(const Duration(seconds: 3));
+        final mainWindow = applicationWindow;
+        if (mainWindow == null) {
+          throw StateError('macOS startup requires an explicit main window');
+        }
+        await verifyMacOSPlaybackWindows(mainWindow, app);
       }
       await smoke.probeCredentials();
-      runApp(const SizedBox.shrink());
+      present(const SizedBox.shrink());
       await WidgetsBinding.instance.endOfFrame;
       await dependencies.close();
       if (smokeHadError) throw StateError('Release application failed');
@@ -74,7 +94,13 @@ Future<void> main(List<String> arguments) async {
       stderr.writeln('BILISAIL_RELEASE_SMOKE_FAILED:${smoke.phase}');
       exit(1);
     }
-    runApp(
+    if (Platform.isMacOS && applicationWindow == null) {
+      // There is no native Flutter window to display the error in. Do not
+      // attach runApp to the engine's unbacked compatibility view 0.
+      stderr.writeln('BILISAIL_MAIN_WINDOW_FAILED');
+      exit(1);
+    }
+    present(
       const MaterialApp(
         home: Scaffold(
           body: Center(

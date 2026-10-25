@@ -13,6 +13,40 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
+    'managed main window never initializes the legacy window plugin',
+    (tester) async {
+      final pluginCalls = <MethodCall>[];
+      const channel = MethodChannel('window_manager');
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) async {
+        pluginCalls.add(call);
+        throw StateError('window_manager must not own a managed window');
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      var activations = 0;
+      final fullscreen = <bool>[];
+      final main = WindowService.forView(
+        viewId: 41,
+        setFullScreen: (value) async => fullscreen.add(value),
+        activate: () async => activations++,
+      );
+      await main.initialize();
+      await main.activate();
+      await main.setFullScreen(true);
+      await main.setFullScreen(false);
+      expect(pluginCalls, isEmpty);
+      expect(activations, 1);
+      expect(fullscreen, [true, false]);
+    },
+  );
+
+  testWidgets(
     'playback caption calls target one view and stop after retirement',
     (tester) async {
       const channel = MethodChannel('bilisail/desktop_window');

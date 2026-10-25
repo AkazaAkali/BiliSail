@@ -11,17 +11,21 @@
 
 ## 修复与行为
 
-- [窗口适配](../../lib/core/platform/detached_playback_window.dart) 集中判断能力：macOS 已有 implicit view 时不支持独立窗口；`create` 同样在启用窗口 owner 和调用原生 FFI 之前拒绝，保护未来直接调用者。
-- [组合根](../../lib/app/bili_app.dart) 按能力注入窗口构建器。当前 macOS 双标签使用已有应用内浏览／播放槽：打开媒体显示播放页，保留隐藏浏览状态，媒体返回恢复上一内容，关闭释放播放会话并回浏览页。视频、影视、直播与离线共用此规则；导航偏好仍是双标签，不改数据库或保存设置。
-- Windows 保持独立播放窗。设置说明与 README 同步区分当前平台行为。
-- macOS 独立播放窗仍是后续迁移目标：需从原生启动开始使用无 implicit view 的 engine，并一起验证主窗口创建、插件 registrar、输入、全屏、退出和 Release smoke；本轮不通过移除断言或修改 SDK 绕过该约束。
+- 第一次提交 `472883d` 加入能力防护，并临时使用应用内双标签。用户随后明确要求保留与 Windows 一致的双窗口，当前实现改为修正 macOS 的原生初始化顺序。
+- [AppDelegate](../../macos/Runner/AppDelegate.swift) 持有唯一 headless engine；[MainMenu.xib](../../macos/Runner/Base.lproj/MainMenu.xib) 仅保留菜单，不提前创建原生主窗口／FlutterViewController。[原生宿主](../../macos/Runner/MainFlutterWindow.swift) 注册现有插件与通道，`prepareWindowing` 通过公开的 `engine.viewController` 确认无 implicit 原生控制器。
+- [平台适配](../../lib/core/platform/macos_application_window.dart) 在创建任何窗口前完成原生预检；第一个 `RegularWindowController` 进入 multiview 并创建明确的主浏览 view，以 `runWidget` 挂载。Dart 侧仍可能存在没有原生控制器的占位 view 0，因此不能靠 `PlatformDispatcher.implicitView == null` 判断原生条件。
+- [组合根](../../lib/app/dependencies.dart) 注入该主窗口的 `WindowService`；SDK 管理的窗口跳过 `window_manager.ensureInitialized`，避免其强取不存在的 implicit 原生 view 并覆盖 SDK 的 NSWindow delegate。核对固定依赖：其他已注册插件不依赖 registrar.view；media_kit 输出使用 engine 的纹理注册器，其旧原生全屏工具不用作应用全屏路径。
+- [独立播放适配](../../lib/core/platform/detached_playback_window.dart) 继续复用同一 engine、isolate 和现有工作区。双标签保留主浏览窗与唯一播放窗，覆盖视频、影视、直播和离线，媒体返回、关闭与页面／会话保留规则不变。Windows 和 Android 继续各自的现有启动方式。
+- 主窗口关闭通过 `ServicesBinding.exitApplication` 发起退出，沿用 `AppLifecycleListener` 等待资源释放；重复关闭合并。热重启期间 SDK 关闭所有窗口时，AppDelegate 不因暂时无窗口而终止进程。正常启动失败页面与 Release smoke 卸载同样挂到明确的主 view。
+- 保留原生预检和 FFI 前的防护：未取得原生确认的替代入口不能创建窗口。没有修改 Flutter SDK、Pub 缓存、插件依赖、账号数据或设置快照。
 
 ## 验证
 
-- 窗口适配回归：macOS implicit view 条件下直接创建返回 `UnsupportedError`，不启用实验窗口 owner、不新增 view；Windows 保留支持。
-- 工作区回归：macOS 能力检查下不创建原生播放窗，浏览／播放页面及 ProviderScope 保留，媒体历史返回和关闭行为正确。
-- 真实 router 与 fake player 回归：macOS 双标签连续打开两个视频、缩放、返回、关闭，复用唯一会话和 engine，关闭后仅释放一次。
-- [原生窗口 smoke](../../integration_test/detached_playback_window_smoke_test.dart) 加入 macOS implicit-view 防护分支，供 Mac 运行；Windows 原有窗口覆盖保留。
-- `tool/check.ps1 -SkipPub` 通过：根应用 2249、bili_api 446、bili_player 81、bili_danmaku 93、bili_mux 2，共 2871 项测试；五处格式、静态分析及打包边界脚本通过。mux 的 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过，不能计为原生通过。日志为 `build/macos-dual-playback-check.log`。
-- 238 条相关 Markdown 本地链接与 `git diff --check` 通过，依赖和锁文件未变。
-- 当前主机无 macOS/Xcode，未执行 macOS 构建、原生 smoke 或真实音视频复测；本轮也未构建 Android/Windows 或进行性能测量。DTD 未发现可连接的调试应用，热重载请求返回无活动连接，未执行成功。
+- 原生预检通过、拒绝和错误时的能力撤销；未准备的引擎在 FFI 前拒绝直接创建。主窗口握手传递自身 view／handle，失败不被吞掉。
+- 明确的主 view 与播放 view 同时挂载、反复移除播放 view 后浏览子树与窗口服务保持；主窗口初始化、激活和全屏不调用 window_manager。
+- Mac 平台变体使用已获原生确认的独立窗口路径：四类媒体复用一个播放窗，浏览状态与 ProviderScope 保留，聚焦、返回、关闭行为正确。真实 router 与 fake player 覆盖连续打开两个视频、缩放、返回、关闭，复用唯一会话和 engine，关闭只释放一次。
+- [原生窗口 smoke](../../integration_test/detached_playback_window_smoke_test.dart) 使用生产初始化并创建、关闭两轮播放窗；[Release startup](../../lib/app/release_smoke.dart) 在同一待打包 bundle 执行该流程，验证 view 数量、非空视口、标题栏返回通道、窗口激活和回收，能力回退不算通过。
+- 本轮 `tool/check.ps1 -SkipPub` 通过：根应用 2332、bili_api 456、bili_player 81、bili_danmaku 93、bili_mux 2，共 2964 项测试；格式、静态分析及打包边界检查通过。10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。日志为 `build/macos-dual-window-check.log`，计数包含检查时工作区的同期修改；提交仅包含本任务文件。
+- 44 项窗口／启动定向回归与 64 项工作区回归通过，日志为 `build/macos-window-bootstrap-targeted.log`、`build/macos-window-bootstrap-workspace.log`。128 条相关 Markdown 本地链接、MainMenu XML 解析与 `git diff --check` 通过。
+- 当前主机无 macOS/Xcode，尚未执行 macOS 构建、原生 smoke、真实音视频或输入／全屏／安装复测；新增发布门槛须在 Mac 运行才算通过。
+- 固定 SDK 的旧截图和原生语义桥仍存在只查 implicit 控制器的实现；VoiceOver／语义与截图能力需在 Mac 单独验收，本轮不据窗口 Widget 回归宣称通过。未发现可连接的调试应用，热重载请求未成功；未进行性能测量。

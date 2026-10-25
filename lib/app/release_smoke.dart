@@ -1,6 +1,81 @@
+import 'dart:async';
+
+import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../core/platform/detached_playback_window.dart';
+import '../core/platform/macos_application_window.dart';
 import '../core/storage/credential_store.dart';
+
+// Run only in the explicit startup smoke of the exact bundle being packaged.
+// This must exercise the real FFI twice; a capability check alone would let
+// an in-window fallback hide a broken macOS multi-window initialization.
+Future<void> verifyMacOSPlaybackWindows(
+  MacOSApplicationWindow mainWindow,
+  Widget app,
+) async {
+  final binding = WidgetsBinding.instance;
+  final dispatcher = binding.platformDispatcher;
+  if (!DetachedPlaybackWindow.isSupported ||
+      mainWindow.window.viewId == dispatcher.implicitView?.viewId) {
+    throw StateError('macOS requires an explicit main window');
+  }
+  final baseline = dispatcher.views.length;
+  final explicitViews = dispatcher.views.where(
+    (view) => view.viewId != dispatcher.implicitView?.viewId,
+  );
+  if (explicitViews.length != 1) throw StateError('Expected one main window');
+  for (var attempt = 0; attempt < 2; attempt++) {
+    final playback = DetachedPlaybackWindow.create(
+      title: 'BiliSail window validation',
+      onCloseRequested: () {},
+    );
+    final owner = Object();
+    try {
+      await playback.prepare();
+      mainWindow.present(
+        app,
+        additionalView: playback.buildView(
+          const Directionality(
+            textDirection: TextDirection.ltr,
+            child: Center(child: Text('BiliSail window validation')),
+          ),
+        ),
+      );
+      await binding.endOfFrame.timeout(const Duration(seconds: 5));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      final view = dispatcher.views.singleWhere(
+        (view) => view.viewId == playback.viewId,
+      );
+      if (dispatcher.views.length != baseline + 1 ||
+          view.physicalSize.isEmpty) {
+        throw StateError('Playback view did not attach');
+      }
+      await playback.windowService.bindTitleBarBack(
+        owner: owner,
+        onBack: () {},
+      );
+      await playback.windowService.activate();
+    } finally {
+      try {
+        await playback.windowService.unbindTitleBarBack(owner);
+        await playback.saveGeometry();
+      } finally {
+        mainWindow.present(app);
+        try {
+          await binding.endOfFrame.timeout(const Duration(seconds: 5));
+        } finally {
+          // Native removal can pump frames. Leave the frame stack first.
+          await Future<void>.delayed(Duration.zero);
+          playback.dispose();
+        }
+      }
+    }
+    if (dispatcher.views.length != baseline) {
+      throw StateError('Playback view did not retire');
+    }
+  }
+}
 
 /// An explicit macOS packaging probe in the shipped application, never enabled
 /// by normal launches. Only synthetic values under a fresh random prefix change.

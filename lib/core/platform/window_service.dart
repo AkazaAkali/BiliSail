@@ -237,6 +237,10 @@ class WindowService {
   bool get isFullScreen => _fullScreen;
 
   Future<void> initialize() async {
+    // SDK-managed windows already have their title and constraints. In
+    // particular, window_manager's macOS initialization would look up a
+    // nonexistent implicit view and replace the SDK's NSWindow delegate.
+    if (viewId != null) return;
     if (!hasDesktopWindow) return;
     await windowManager.ensureInitialized();
     await windowManager.setTitle('BiliSail');

@@ -1,22 +1,58 @@
 import Cocoa
 import FlutterMacOS
 
-class MainFlutterWindow: NSWindow {
+// There must be no native FlutterViewController before Dart creates its first
+// regular window: Flutter 3.47.6 enables multiview at that first FFI call.
+final class MacOSApplication {
+  private let engine: FlutterEngine
+  private let applicationWindowChannel: FlutterMethodChannel
   private var systemFontsChannel: FlutterMethodChannel?
   private var imageExportChannel: FlutterMethodChannel?
   private var desktopWindows: DesktopWindowController?
 
-  override func awakeFromNib() {
-    let flutterViewController = FlutterViewController()
-    let windowFrame = self.frame
-    self.contentViewController = flutterViewController
-    self.setFrame(windowFrame, display: true)
+  init() {
+    engine = FlutterEngine(name: "BiliSail", project: nil, allowHeadlessExecution: true)
+    applicationWindowChannel = FlutterMethodChannel(
+      name: "bilisail/application_window", binaryMessenger: engine.binaryMessenger
+    )
+    applicationWindowChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self = self else {
+        result(FlutterError(code: "engine_unavailable", message: "Flutter engine is unavailable.", details: nil))
+        return
+      }
+      if call.method == "prepareWindowing" {
+        result(self.engine.viewController == nil)
+        return
+      }
+      guard call.method == "attachMainWindow" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard let args = call.arguments as? [String: Any],
+            let viewID = (args["viewId"] as? NSNumber)?.int64Value,
+            let handle = (args["windowHandle"] as? NSNumber)?.uint64Value,
+            let window = NSApp.windows.first(where: {
+              UInt64(UInt(bitPattern: Unmanaged.passUnretained($0).toOpaque())) == handle
+            }),
+            let controller = window.contentViewController as? FlutterViewController,
+            controller.engine === self.engine, controller.viewIdentifier == viewID else {
+        result(FlutterError(code: "window_unavailable", message: "Main Flutter window is unavailable.", details: nil))
+        return
+      }
+      (NSApp.delegate as? FlutterAppDelegate)?.mainFlutterWindow = window
+      window.contentMinSize = NSSize(width: 420, height: 560)
+      window.center()
+      result(nil)
+    }
 
-    RegisterGeneratedPlugins(registry: flutterViewController)
+    // These plugins use the messenger/texture registry headlessly. Main-window
+    // operations go through the per-view WindowService, never window_manager's
+    // legacy registrar.view (which only looks up implicit view 0).
+    RegisterGeneratedPlugins(registry: engine)
 
     let channel = FlutterMethodChannel(
       name: "bilisail/system_fonts",
-      binaryMessenger: flutterViewController.engine.binaryMessenger
+      binaryMessenger: engine.binaryMessenger
     )
     channel.setMethodCallHandler { call, result in
       guard call.method == "listFamilies" else {
@@ -27,14 +63,16 @@ class MainFlutterWindow: NSWindow {
     }
     systemFontsChannel = channel
     imageExportChannel = registerImageExport(
-      messenger: flutterViewController.engine.binaryMessenger
+      messenger: engine.binaryMessenger
     )
     desktopWindows = DesktopWindowController(
-      messenger: flutterViewController.engine.binaryMessenger
+      messenger: engine.binaryMessenger
     )
-
-    super.awakeFromNib()
   }
+
+  func start() -> Bool { engine.run(withEntrypoint: nil) }
+
+  func shutDown() { engine.shutDownEngine() }
 }
 
 private func registerImageExport(messenger: FlutterBinaryMessenger) -> FlutterMethodChannel {

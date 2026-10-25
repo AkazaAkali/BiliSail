@@ -135,9 +135,10 @@ class AppDependencies {
   static Future<AppDependencies> create({
     CredentialStore? credentials,
     AppDatabase? databaseOverride,
+    WindowService? windowOverride,
   }) async {
     initializePlayerBackend();
-    final window = WindowService();
+    final window = windowOverride ?? WindowService();
     await window.initialize();
     final database = databaseOverride ?? await AppDatabase.open();
     await database.readSetting('schema_probe');

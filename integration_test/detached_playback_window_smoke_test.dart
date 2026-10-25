@@ -2,39 +2,44 @@ import 'dart:io';
 import 'dart:ffi' hide Size;
 import 'dart:ui' show PlatformDispatcher;
 
+import 'package:bilisail/app/release_smoke.dart';
 import 'package:bilisail/core/platform/detached_playback_window.dart';
+import 'package:bilisail/core/platform/macos_application_window.dart';
 import 'package:bilisail/core/platform/window_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:integration_test/integration_test.dart';
 
+import 'support/multi_view_binding.dart';
 import 'support/native_playback_window.dart';
 
-void main() {
-  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+Future<void> main() async {
+  MultiViewIntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  final macOSWindow = await MacOSApplicationWindow.create();
 
   testWidgets('implicit main view uses a compatible playback window path', (
     tester,
   ) async {
     if (!Platform.isWindows && !Platform.isMacOS) return;
-    final implicit = PlatformDispatcher.instance.implicitView!;
-    final baseline = PlatformDispatcher.instance.views.length;
-    if (!DetachedPlaybackWindow.isSupported) {
-      // The production macOS runner has an implicit view. Verify the adapter
-      // rejects the SDK's fatal multiview transition without calling its FFI.
-      expect(Platform.isMacOS, isTrue);
+    if (Platform.isMacOS) {
+      expect(macOSWindow, isNotNull);
       expect(
-        () => DetachedPlaybackWindow.create(
-          title: 'Detached playback probe',
-          onCloseRequested: () {},
-        ),
-        throwsUnsupportedError,
+        macOSWindow!.window.viewId,
+        isNot(PlatformDispatcher.instance.implicitView?.viewId),
       );
-      expect(PlatformDispatcher.instance.implicitView, same(implicit));
-      expect(PlatformDispatcher.instance.views.length, baseline);
-      debugPrint('NATIVE_WINDOW: macOS implicit-view guard passed');
+      await tester.runAsync(() => macOSWindow.prepare());
+      const app = MaterialApp(home: Text('Main browser probe'));
+      await tester.pumpWidget(macOSWindow.wrap(app), wrapWithView: false);
+      final baseline = PlatformDispatcher.instance.views.length;
+      await tester.runAsync(() => verifyMacOSPlaybackWindows(macOSWindow, app));
+      expect(PlatformDispatcher.instance.views, hasLength(baseline));
+      expect(find.text('Main browser probe'), findsOneWidget);
+      debugPrint(
+        'NATIVE_WINDOW: macOS explicit main/two playback lifetimes passed',
+      );
       return;
     }
+    final implicit = PlatformDispatcher.instance.implicitView!;
+    final baseline = PlatformDispatcher.instance.views.length;
     final errors = <Object>[];
     var closeRequests = 0;
     await WindowService().initialize();

@@ -408,6 +408,16 @@ FRB 支持跨平台是可行性依据，但平台构建、取消、错误和流�
 
 ## D52：macOS implicit 主窗口使用应用内双标签
 
+本节记录第一次兼容修复，已由同日用户要求保留双窗口的 D53 取代。
+
 **决定（2026-10-25，修订 D45/D50/D51 的 macOS 呈现）**：固定 Flutter 3.47.6 的 macOS 实验窗口入口不能在已有 implicit view 的 engine 上启用 multiview，用户崩溃栈确认此路径触发原生断言并终止进程。窗口能力检查与创建防护统一放在平台适配，组合根按能力注入；当前 macOS 与 Android 一样使用应用内浏览／播放槽，Windows 保持独立播放窗。双标签偏好、媒体历史、隐藏页面状态和会话释放规则保持。
 
 **迁移边界**：macOS 独立播放窗须与无 implicit view 的原生 engine 启动方式及插件兼容一起迁移验收；不能只改 Dart 实验开关、捕获 Dart 异常或移除原生断言。证据、回归与实机待验项见[macOS 双标签播放崩溃](validation/macos-dual-playback-crash.md)。
+
+## D53：macOS 从原生启动阶段采用共享 engine 双窗口
+
+**决定（2026-10-25，按用户要求取代 D52）**：保留与 Windows 一致的主浏览窗口和唯一播放窗口。macOS 不在 NIB 创建 `FlutterViewController`，由 AppDelegate 启动唯一 headless engine；原生预检确认尚无 implicit 原生控制器后，Dart 的第一个 `RegularWindowController` 初始化 multiview 并创建浏览窗，`runWidget` 明确挂载该 view。后续播放窗口继续复用同一 engine、isolate、账号、下载与会话管理器。
+
+**插件与退出**：主窗口的 `WindowService` 通过组合根注入，跳过会查 implicit view 并替换 NSWindow delegate 的 `window_manager` 初始化。播放器使用 engine 的纹理注册器，全屏按对应 view 操作。主窗口关闭走 Flutter 可取消退出并等待资源释放；热重启暂时关闭全部窗口不自动终止进程。
+
+**验收边界**：同一待打包 Release 的 startup smoke 实际创建、挂载、激活、关闭并重开播放窗，不能以应用内回退代替通过。Dart 的 view 0 可能仍存在；是否能初始化 multiview 以原生控制器预检为准。Windows 自动回归不代替 macOS 编译、真实音视频和窗口操作，见[专项记录](validation/macos-dual-playback-crash.md)。

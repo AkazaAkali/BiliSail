@@ -5,9 +5,59 @@ import 'package:bilisail/core/platform/detached_playback_window.dart';
 import 'package:bilisail/core/platform/window_service.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets(
+    'macOS native preflight grants support and revokes it on rejection',
+    (tester) async {
+      const channel = MethodChannel('bilisail/application_window');
+      var ready = false;
+      final calls = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) async {
+        calls.add(call.method);
+        return ready;
+      });
+      addTearDown(() async {
+        ready = false;
+        await expectLater(
+          DetachedPlaybackWindow.prepareMacOSWindowing(),
+          throwsUnsupportedError,
+        );
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        );
+      });
+      await expectLater(
+        DetachedPlaybackWindow.prepareMacOSWindowing(),
+        throwsUnsupportedError,
+      );
+      expect(DetachedPlaybackWindow.isSupported, isFalse);
+      ready = true;
+      await DetachedPlaybackWindow.prepareMacOSWindowing();
+      expect(DetachedPlaybackWindow.isSupported, isTrue);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (_) async => throw PlatformException(code: 'engine_unavailable'),
+      );
+      await expectLater(
+        DetachedPlaybackWindow.prepareMacOSWindowing(),
+        throwsA(isA<PlatformException>()),
+      );
+      expect(DetachedPlaybackWindow.isSupported, isFalse);
+      expect(calls, ['prepareWindowing', 'prepareWindowing']);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (_) async => false,
+      );
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
   testWidgets(
     'macOS implicit view rejects detached creation before entering native code',
     (tester) async {

@@ -6,6 +6,8 @@ import 'package:bilisail/core/platform/detached_playback_window.dart';
 import 'package:bilisail/core/presentation/workspace_activity.dart';
 import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -14,7 +16,7 @@ import '../support/detached_window_fake.dart';
 
 void main() {
   testWidgets(
-    'macOS implicit view keeps dual playback and media history in the main window',
+    'macOS unprepared engine keeps dual playback in the main window safely',
     (tester) async {
       final fixture = _WindowedWorkspace(
         tester,
@@ -69,11 +71,16 @@ void main() {
   testWidgets(
     'macOS dual profile retains a back entry without a custom caption',
     (tester) async {
+      await _prepareMacOSWindowing(tester);
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(390, 844);
       addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(tester.view.resetPhysicalSize);
-      final fixture = _WindowedWorkspace(tester, customCaption: false);
+      final fixture = _WindowedWorkspace(
+        tester,
+        customCaption: false,
+        checkWindowSupport: true,
+      );
       addTearDown(fixture.dispose);
       await tester.pumpWidget(fixture.app);
       await tester.pumpAndSettle();
@@ -119,11 +126,14 @@ void main() {
   testWidgets(
     'desktop dual keeps browsing visible while every media kind reuses one view',
     (tester) async {
+      if (defaultTargetPlatform == TargetPlatform.macOS) {
+        await _prepareMacOSWindowing(tester);
+      }
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(1280, 844);
       addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(tester.view.resetPhysicalSize);
-      final fixture = _WindowedWorkspace(tester);
+      final fixture = _WindowedWorkspace(tester, checkWindowSupport: true);
       addTearDown(fixture.dispose);
       await tester.pumpWidget(fixture.app);
       await tester.pumpAndSettle();
@@ -268,7 +278,10 @@ void main() {
       expect(fixture.errors, isEmpty);
       expect(tester.takeException(), isNull);
     },
-    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+    variant: TargetPlatformVariant({
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    }),
   );
 
   testWidgets(
@@ -351,6 +364,29 @@ void main() {
 
 Finder _page(String id, {bool skipOffstage = true}) =>
     find.byKey(ValueKey('probe-$id'), skipOffstage: skipOffstage);
+
+Future<void> _prepareMacOSWindowing(WidgetTester tester) async {
+  const channel = MethodChannel('bilisail/application_window');
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+    channel,
+    (_) async => true,
+  );
+  await DetachedPlaybackWindow.prepareMacOSWindowing();
+  addTearDown(() async {
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      channel,
+      (_) async => false,
+    );
+    await expectLater(
+      DetachedPlaybackWindow.prepareMacOSWindowing(),
+      throwsUnsupportedError,
+    );
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      channel,
+      null,
+    );
+  });
+}
 
 ProviderContainer _scope(Element element) =>
     ProviderScope.containerOf(element, listen: false);

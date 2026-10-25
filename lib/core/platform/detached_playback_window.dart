@@ -21,21 +21,40 @@ typedef DetachedPlaybackWindowFactory = DetachedPlaybackWindow Function({
 
 abstract class DetachedPlaybackWindow extends ChangeNotifier {
   static bool _windowingReady = false;
+  static bool _macOSWindowingReady = false;
+
+  static Future<void> prepareMacOSWindowing() async {
+    _macOSWindowingReady = false;
+    final ready = await const MethodChannel('bilisail/application_window')
+        .invokeMethod<bool>('prepareWindowing')
+        .timeout(const Duration(seconds: 5));
+    if (ready != true) {
+      throw UnsupportedError(
+        'macOS engine already has an implicit controller.',
+      );
+    }
+    _macOSWindowingReady = true;
+  }
 
   // Flutter 3.47.6's macOS create-window entry point calls enableMultiView,
   // which NSAsserts if an implicit view controller is already attached. That
   // Objective-C exception aborts the process across FFI; Dart cannot catch it.
-  // The current macOS runner creates that implicit view in awakeFromNib.
+  // The engine can expose a dummy Dart view 0 even without a native controller,
+  // so only the native bootstrap can confirm that this transition is safe.
   static bool get isSupported => switch (defaultTargetPlatform) {
     TargetPlatform.windows => true,
-    TargetPlatform.macOS =>
-      WidgetsBinding.instance.platformDispatcher.implicitView == null,
+    TargetPlatform.macOS => _macOSWindowingReady,
     _ => false,
   };
 
   static DetachedPlaybackWindow create({
     required String title,
     required VoidCallback onCloseRequested,
+    Size size = const Size(1120, 760),
+    BoxConstraints constraints = const BoxConstraints(
+      minWidth: 420,
+      minHeight: 360,
+    ),
   }) {
     if (!Platform.isWindows && !Platform.isMacOS) {
       throw UnsupportedError('Detached playback requires Windows or macOS.');
@@ -59,6 +78,8 @@ abstract class DetachedPlaybackWindow extends ChangeNotifier {
     return _FlutterDetachedPlaybackWindow(
       title: title,
       onCloseRequested: onCloseRequested,
+      size: size,
+      constraints: constraints,
     );
   }
 
@@ -373,10 +394,12 @@ class _FlutterDetachedPlaybackWindow extends DetachedPlaybackWindow {
   _FlutterDetachedPlaybackWindow({
     required String title,
     required VoidCallback onCloseRequested,
+    required Size size,
+    required BoxConstraints constraints,
   }) {
     _controller = flutter_window.RegularWindowController(
-      size: const Size(1120, 760),
-      constraints: const BoxConstraints(minWidth: 420, minHeight: 360),
+      size: size,
+      constraints: constraints,
       title: title,
       delegate: _PlaybackWindowDelegate(
         onCloseRequested: onCloseRequested,

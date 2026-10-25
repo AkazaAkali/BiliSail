@@ -4,7 +4,7 @@
 
 ## macOS 双标签原生崩溃修复（2026-10-25）
 
-macOS 已有 implicit 主窗口时，Flutter 3.47.6 的第二窗口入口触发原生 multiview 断言。当前通过窗口能力检查使用应用内浏览／播放槽，保留双标签偏好、媒体返回与关闭释放；Windows 继续独立播放窗。原因、用户栈证据、回归和待实机项见[专项记录](macos-dual-playback-crash.md)。下文较早的 macOS 独立窗口描述属于修复前实现。
+macOS 已有 implicit 原生主控制器时，Flutter 3.47.6 的第二窗口入口触发 multiview 断言。第一次修复使用应用内回退，随后按用户要求保留双窗口：改为从 headless engine 创建明确的主浏览窗，再创建共享 engine 的播放窗；主窗口服务按 view 注入并保留 SDK delegate。原因、预检、打包时双窗口 smoke 和待实机项见[专项记录](macos-dual-playback-crash.md)。
 
 ## 各平台默认双标签（2026-10-25）
 

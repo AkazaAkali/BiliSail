@@ -246,8 +246,30 @@ void main() {
     _workspaceTestWidgets(
       'dual playback reuses its scoped session through resize, back and close platform=$platform detached=$requestDetached',
       (tester) async {
+        if (platform == TargetPlatform.macOS) {
+          const channel = MethodChannel('bilisail/application_window');
+          tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            channel,
+            (_) async => true,
+          );
+          await DetachedPlaybackWindow.prepareMacOSWindowing();
+          addTearDown(() async {
+            tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+              channel,
+              (_) async => false,
+            );
+            await expectLater(
+              DetachedPlaybackWindow.prepareMacOSWindowing(),
+              throwsUnsupportedError,
+            );
+            tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+              channel,
+              null,
+            );
+          });
+        }
         final detached = requestDetached && DetachedPlaybackWindow.isSupported;
-        if (platform == TargetPlatform.macOS) expect(detached, isFalse);
+        if (platform == TargetPlatform.macOS) expect(detached, isTrue);
         final engines = <CardFakeEngine>[];
         final manager = PlaybackManager(
           createSession: () {
