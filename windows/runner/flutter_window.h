@@ -37,6 +37,9 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<TextInputChannel> text_input_channel_;
   std::unique_ptr<ImageExportChannel> image_export_channel_;
   std::unique_ptr<DesktopWindowChannel> desktop_window_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      application_exit_channel_;
+  bool intercept_main_window_close_ = false;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

@@ -77,6 +77,7 @@ GoRouter createBiliRouter({
   DragRegionBuilder? dragRegionBuilder,
   WorkspaceWindowBuilder? playbackWindowBuilder,
   VoidCallback? onActivateBrowser,
+  Future<void> Function()? onExitRequested,
   String initialLocation = '/',
   InputRouteObserver? inputObserver,
 }) => GoRouter(
@@ -127,6 +128,7 @@ GoRouter createBiliRouter({
             dragRegionBuilder: dragRegionBuilder,
             playbackWindowBuilder: playbackWindowBuilder,
             onActivateBrowser: onActivateBrowser,
+            onExitRequested: onExitRequested,
             pageBuilder: (context, tab) => _WorkspacePage(
               tab: tab,
               playerBuilder: playerBuilder,

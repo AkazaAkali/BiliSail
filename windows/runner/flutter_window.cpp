@@ -2,6 +2,8 @@
 
 #include <optional>
 
+#include <flutter/standard_method_codec.h>
+
 #include "flutter/generated_plugin_registrant.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
@@ -43,6 +45,27 @@ bool FlutterWindow::OnCreate() {
       resolve_view);
   desktop_window_channel_ = std::make_unique<DesktopWindowChannel>(
       flutter_controller_->engine()->messenger(), resolve_view);
+  application_exit_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "bilisail/application_exit",
+          &flutter::StandardMethodCodec::GetInstance());
+  application_exit_channel_->SetMethodCallHandler(
+      [this](const auto& call, auto result) {
+        if (call.method_name() != "setCloseHandler") {
+          result->NotImplemented();
+          return;
+        }
+        const auto* enabled = call.arguments()
+                                  ? std::get_if<bool>(call.arguments())
+                                  : nullptr;
+        if (!enabled) {
+          result->Error("invalid_argument", "Expected a close-handler flag.");
+          return;
+        }
+        intercept_main_window_close_ = *enabled;
+        result->Success();
+      });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -58,6 +81,8 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  intercept_main_window_close_ = false;
+  application_exit_channel_.reset();
   image_export_channel_.reset();
   desktop_window_channel_.reset();
   text_input_channel_.reset();
@@ -73,6 +98,13 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // This runner window owns the engine. Do not use a global plugin delegate:
+  // SDK-managed playback HWNDs share those delegates and must close separately.
+  if (message == WM_CLOSE && intercept_main_window_close_ &&
+      application_exit_channel_) {
+    application_exit_channel_->InvokeMethod("closeRequested", nullptr);
+    return 0;
+  }
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

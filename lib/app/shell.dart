@@ -120,12 +120,14 @@ final class BiliAppShell extends StatefulWidget {
     this.accountIdentity,
     this.playbackWindowBuilder,
     this.onActivateBrowser,
+    this.onExitRequested,
   });
   final ShortcutSettings shortcuts;
   final WorkspaceNavigationMode? navigationMode;
   final Object? accountIdentity;
   final WorkspaceWindowBuilder? playbackWindowBuilder;
   final VoidCallback? onActivateBrowser;
+  final Future<void> Function()? onExitRequested;
   final String location;
   final Widget child;
   final WidgetBuilder? accountBuilder;
@@ -422,6 +424,9 @@ final class _BiliAppShellState extends State<BiliAppShell>
           mounted &&
           widget.location == location &&
           !_canGoBack) {
+        // Android's SystemNavigator.pop finishes the Activity without a
+        // cancelable desktop exit notification. Drain shared resources first.
+        await widget.onExitRequested?.call();
         await SystemNavigator.pop();
       }
     } finally {

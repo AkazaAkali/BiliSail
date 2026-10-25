@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show AppExitResponse, AppExitType;
 
 import 'package:bilisail/core/platform/window_service.dart';
 import 'package:flutter/services.dart';
@@ -10,7 +11,132 @@ import '../../support/native_window_events.dart';
 import '../../support/window_service_fake.dart';
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
+  final binding = _WindowExitTestBinding();
+
+  testWidgets('main close waits for application cleanup with playback open', (
+    tester,
+  ) async {
+    const channel = MethodChannel('window_manager');
+    const exitChannel = MethodChannel('bilisail/application_exit');
+    final calls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      calls.add(call);
+      return null;
+    });
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      exitChannel,
+      (call) async {
+        calls.add(call);
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        exitChannel,
+        null,
+      ),
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+    final main = WindowService();
+    addTearDown(main.dispose);
+    await main.initialize();
+    expect(
+      calls.where((call) => call.method == 'setCloseHandler').single.arguments,
+      true,
+    );
+    // SDK-managed playback views must not take over the implicit main window's
+    // close listener or use window_manager, which only targets that main HWND.
+    final playback = WindowService.forView(
+      viewId: 71,
+      setFullScreen: (_) async {},
+      activate: () async {},
+    );
+    addTearDown(playback.dispose);
+    final initializationCalls = calls.length;
+    await playback.initialize();
+    expect(calls, hasLength(initializationCalls));
+
+    var cleanupCalls = 0;
+    var exitCalls = 0;
+    var exitCompleted = false;
+    var cleanup = Completer<AppExitResponse>();
+    final lifecycle = AppLifecycleListener(
+      onExitRequested: () {
+        cleanupCalls++;
+        return cleanup.future;
+      },
+    );
+    addTearDown(lifecycle.dispose);
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method != 'System.exitApplication') return null;
+        expect(call.arguments, {'type': 'cancelable', 'exitCode': 0});
+        exitCalls++;
+        final response = await tester.binding.handleRequestAppExit();
+        exitCompleted = true;
+        return {'response': response.name};
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    Future<void> closeMainWindow() async {
+      const codec = StandardMethodCodec();
+      final response = await tester.binding.defaultBinaryMessenger
+          .handlePlatformMessage(
+            'bilisail/application_exit',
+            codec.encodeMethodCall(const MethodCall('closeRequested')),
+            null,
+          );
+      if (response != null) codec.decodeEnvelope(response);
+    }
+
+    await closeMainWindow();
+    await closeMainWindow();
+    expect(exitCalls, 1);
+    expect(cleanupCalls, 1);
+    expect(exitCompleted, isFalse);
+    cleanup.complete(AppExitResponse.cancel);
+    await binding.lastExit;
+    expect(exitCompleted, isTrue);
+
+    // A cancelled attempt can be requested again. Keep the native guard until
+    // cleanup completes, then detach it from the main window.
+    cleanup = Completer<AppExitResponse>();
+    exitCompleted = false;
+    await closeMainWindow();
+    await tester.pump();
+    expect(exitCalls, 2);
+    expect(cleanupCalls, 2);
+    expect(exitCompleted, isFalse);
+    await closeMainWindow();
+    expect(exitCalls, 2);
+    expect(
+      calls.where((call) => call.method == 'setCloseHandler'),
+      hasLength(1),
+    );
+    cleanup.complete(AppExitResponse.exit);
+    await binding.lastExit;
+    expect(exitCompleted, isTrue);
+    await main.dispose();
+    expect(
+      calls.where((call) => call.method == 'setCloseHandler').last.arguments,
+      false,
+    );
+    await closeMainWindow();
+    expect(exitCalls, 2);
+  }, skip: !Platform.isWindows);
 
   testWidgets(
     'managed main window never initializes the legacy window plugin',
@@ -582,6 +708,32 @@ void main() {
         expect(calls[3].arguments, 'SystemUiMode.edgeToEdge');
       },
     );
+  }
+}
+
+// The standard test binding cancels exitApplication without calling the
+// platform channel. Keep this suite on the real request/response contract.
+class _WindowExitTestBinding extends AutomatedTestWidgetsFlutterBinding {
+  Future<AppExitResponse>? lastExit;
+
+  @override
+  Future<AppExitResponse> exitApplication(
+    AppExitType exitType, [
+    int exitCode = 0,
+  ]) => lastExit = _exitApplication(exitType, exitCode);
+
+  Future<AppExitResponse> _exitApplication(
+    AppExitType exitType,
+    int exitCode,
+  ) async {
+    final response = await SystemChannels.platform
+        .invokeMethod<Map<String, Object?>>('System.exitApplication', {
+          'type': exitType.name,
+          'exitCode': exitCode,
+        });
+    return response?['response'] == 'exit'
+        ? AppExitResponse.exit
+        : AppExitResponse.cancel;
   }
 }
 

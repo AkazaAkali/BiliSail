@@ -421,3 +421,7 @@ FRB 支持跨平台是可行性依据，但平台构建、取消、错误和流�
 **插件与退出**：主窗口的 `WindowService` 通过组合根注入，跳过会查 implicit view 并替换 NSWindow delegate 的 `window_manager` 初始化。播放器使用 engine 的纹理注册器，全屏按对应 view 操作。主窗口关闭走 Flutter 可取消退出并等待资源释放；热重启暂时关闭全部窗口不自动终止进程。
 
 **验收边界**：同一待打包 Release 的 startup smoke 实际创建、挂载、激活、关闭并重开播放窗，不能以应用内回退代替通过。Dart 的 view 0 可能仍存在；是否能初始化 multiview 以原生控制器预检为准。Windows 自动回归不代替 macOS 编译、真实音视频和窗口操作，见[专项记录](validation/macos-dual-playback-crash.md)。
+
+## D54：应用退出等待同一份资源清理
+
+**决定（2026-10-25）**：关闭主窗口等同于退出整个应用，即使双标签播放窗仍打开。Windows 显式拦截 implicit 主窗关闭，macOS 合并系统退出并区分等待与获准状态，Android 确认退出在结束 Activity 前调用清理；所有入口等待同一个 `AppDependencies.close()` Future。沿用播放进度、下载和原生资源的既有释放顺序，关闭独立播放窗仍只释放其播放会话。实现、回归命令与强制终止／设备验证边界见[主窗口关闭专项](validation/main-window-close.md)。

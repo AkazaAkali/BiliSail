@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:bilisail/app/shell.dart';
 import 'package:bilisail/app/workspace_tabs.dart';
 import 'package:bilisail/core/presentation/page_back_scope.dart';
@@ -13,6 +15,69 @@ import '../support/input_test_app.dart';
 import '../support/system_back_gesture.dart';
 
 void main() {
+  for (final mode in WorkspaceNavigationMode.values) {
+    testWidgets('Android confirmed exit waits for cleanup in $mode', (
+      tester,
+    ) async {
+      final cleanup = Completer<void>();
+      var cleanupCalls = 0;
+      var nativePops = 0;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'SystemNavigator.pop') nativePops++;
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      final router = _router(
+        mode: mode,
+        onExitRequested: () {
+          cleanupCalls++;
+          return cleanup.future;
+        },
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+      await tester.pumpAndSettle();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(cleanupCalls, 0);
+      expect(nativePops, 0);
+
+      if (mode == WorkspaceNavigationMode.dualTabs) {
+        router.go('/video/A');
+        await tester.pumpAndSettle();
+        router.go('/');
+        await tester.pumpAndSettle();
+        expect(find.text('page /video/A'), findsNothing);
+        expect(find.text('page /video/A', skipOffstage: false), findsOneWidget);
+      }
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('退出'));
+      await tester.pumpAndSettle();
+      expect(cleanupCalls, 1);
+      expect(nativePops, 0);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('退出哔帆？'), findsNothing);
+      expect(cleanupCalls, 1);
+      cleanup.complete();
+      await tester.pumpAndSettle();
+      expect(nativePops, 1);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+  }
+
   for (final mode in WorkspaceNavigationMode.values) {
     for (final edge in SwipeEdge.values) {
       testWidgets(
@@ -287,6 +352,7 @@ void main() {
 GoRouter _router({
   WorkspaceNavigationMode mode = WorkspaceNavigationMode.dualTabs,
   WorkspacePageBuilder? builder,
+  Future<void> Function()? onExitRequested,
 }) => GoRouter(
   observers: [],
   routes: [
@@ -295,6 +361,7 @@ GoRouter _router({
       builder: (context, state, child) => BiliAppShell(
         location: state.uri.toString(),
         navigationMode: mode,
+        onExitRequested: onExitRequested,
         pageBuilder: builder ?? (_, tab) => Text('page ${tab.location.path}'),
         child: child,
       ),

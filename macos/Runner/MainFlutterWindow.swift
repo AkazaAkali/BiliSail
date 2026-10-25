@@ -6,6 +6,7 @@ import FlutterMacOS
 final class MacOSApplication {
   private let engine: FlutterEngine
   private let applicationWindowChannel: FlutterMethodChannel
+  private let exitChannel: FlutterMethodChannel
   private var systemFontsChannel: FlutterMethodChannel?
   private var imageExportChannel: FlutterMethodChannel?
   private var desktopWindows: DesktopWindowController?
@@ -14,6 +15,10 @@ final class MacOSApplication {
     engine = FlutterEngine(name: "BiliSail", project: nil, allowHeadlessExecution: true)
     applicationWindowChannel = FlutterMethodChannel(
       name: "bilisail/application_window", binaryMessenger: engine.binaryMessenger
+    )
+    exitChannel = FlutterMethodChannel(
+      name: "flutter/platform", binaryMessenger: engine.binaryMessenger,
+      codec: FlutterJSONMethodCodec.sharedInstance()
     )
     applicationWindowChannel.setMethodCallHandler { [weak self] call, result in
       guard let self = self else {
@@ -71,6 +76,13 @@ final class MacOSApplication {
   }
 
   func start() -> Bool { engine.run(withEntrypoint: nil) }
+
+  func requestExit(_ completion: @escaping (Bool) -> Void) {
+    exitChannel.invokeMethod("System.requestAppExit", arguments: nil) { result in
+      let response = result as? [String: Any]
+      completion(response?["response"] as? String == "exit")
+    }
+  }
 
   func shutDown() { engine.shutDownEngine() }
 }

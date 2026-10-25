@@ -92,6 +92,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
   void initState() {
     super.initState();
     _router = createBiliRouter(
+      onExitRequested: widget.dependencies.close,
       onActivateBrowser: () => unawaited(widget.dependencies.window.activate()),
       playbackWindowBuilder: DetachedPlaybackWindow.isSupported
           ? (

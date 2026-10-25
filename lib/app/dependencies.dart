@@ -130,7 +130,7 @@ class AppDependencies {
   final ApiDownloadSourceRepository downloadSources;
   final StreamSubscription<Object?> _downloadAccountSubscription;
   final files = const FileAccessService();
-  bool _closed = false;
+  Future<void>? _closing;
 
   static Future<AppDependencies> create({
     CredentialStore? credentials,
@@ -478,9 +478,9 @@ class AppDependencies {
     );
   }
 
-  Future<void> close() async {
-    if (_closed) return;
-    _closed = true;
+  Future<void> close() => _closing ??= _close();
+
+  Future<void> _close() async {
     updates.close();
     try {
       await _downloadAccountSubscription.cancel();
@@ -500,8 +500,12 @@ class AppDependencies {
           try {
             await database.close();
           } finally {
-            await playbackLog?.close();
-            await images.close();
+            try {
+              await playbackLog?.close();
+              await images.close();
+            } finally {
+              await window.dispose();
+            }
           }
         }
       }

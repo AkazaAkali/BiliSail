@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show AppExitType;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -27,6 +29,9 @@ class WindowService {
 
   static const _textInputChannel = MethodChannel('bilisail/text_input');
   static const _desktopChannel = MethodChannel('bilisail/desktop_window');
+  static const _applicationExitChannel = MethodChannel(
+    'bilisail/application_exit',
+  );
   static final _backServices = <int, WindowService>{};
   static int _nextGeometryOwner = 0;
   static const _geometryTimeout = Duration(seconds: 2);
@@ -36,6 +41,8 @@ class WindowService {
   Object? _backOwner;
   VoidCallback? _onBack;
   bool _backEnabled = false;
+  bool _handlesMainWindowClose = false;
+  bool _requestingExit = false;
 
   final _maximized = ValueNotifier(false);
   ValueListenable<bool> get maximized => _maximized;
@@ -243,10 +250,40 @@ class WindowService {
     if (viewId != null) return;
     if (!hasDesktopWindow) return;
     await windowManager.ensureInitialized();
+    if (Platform.isWindows && !_handlesMainWindowClose) {
+      // The runner intercepts only its engine-owning implicit main HWND. Global
+      // plugin listeners also receive SDK-managed playback window messages.
+      _applicationExitChannel.setMethodCallHandler((call) async {
+        if (call.method == 'closeRequested') _requestApplicationExit();
+      });
+      _handlesMainWindowClose = true;
+      await _applicationExitChannel.invokeMethod<void>('setCloseHandler', true);
+    }
     await windowManager.setTitle('BiliSail');
     await windowManager.setMinimumSize(const Size(420, 560));
     if (hasCustomTitleBar) {
       await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
+    }
+  }
+
+  void _requestApplicationExit() {
+    if (!_handlesMainWindowClose || _requestingExit) return;
+    _requestingExit = true;
+    unawaited(
+      ServicesBinding.instance
+          .exitApplication(AppExitType.cancelable)
+          .whenComplete(() => _requestingExit = false),
+    );
+  }
+
+  Future<void> dispose() async {
+    if (_handlesMainWindowClose) {
+      _applicationExitChannel.setMethodCallHandler(null);
+      _handlesMainWindowClose = false;
+      await _applicationExitChannel.invokeMethod<void>(
+        'setCloseHandler',
+        false,
+      );
     }
   }
 
