@@ -82,7 +82,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 21);
+      expect(snapshot['schemaVersion'], 22);
       expect(snapshot['wheelDampingRatio'], ratio);
     }
     expect(database.schemaVersion, 3);
@@ -201,7 +201,7 @@ void main() {
         final snapshot = jsonDecode(
           (await database.readSetting('preferences.v1')) ?? '{}',
         ) as Map<String, Object?>;
-        expect(snapshot['schemaVersion'], 21);
+        expect(snapshot['schemaVersion'], 22);
         expect(snapshot['preferredLiveQuality'], quality);
       }
       expect(database.schemaVersion, 3);
@@ -305,7 +305,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 21);
+          expect(snapshot['schemaVersion'], 22);
           expect(snapshot['playerControlsMode'], mode.name);
         }
         expect(database.schemaVersion, 3);
@@ -349,6 +349,46 @@ void main() {
       expect(settings.navigationMode, mode);
     }
   });
+  for (final fallback in WorkspaceNavigationMode.values) {
+    test(
+      'retired singlePage always migrates to dualTabs with $fallback default',
+      () async {
+        await database.writeSetting(
+          'preferences.v1',
+          jsonEncode({
+            'schemaVersion': 21,
+            'navigationMode': 'singlePage',
+            'theme': 'dark',
+            'autoPlay': false,
+            'defaultVolume': 37,
+            'allowConcurrentPlayback': true,
+          }),
+        );
+        final platformRepository = SqliteSettingsRepository(
+          database,
+          defaultNavigationMode: fallback,
+        );
+        final loaded = await platformRepository.load();
+        expect(loaded.navigationMode, WorkspaceNavigationMode.dualTabs);
+        expect(loaded.theme, AppThemePreference.dark);
+        expect(loaded.autoPlay, isFalse);
+        expect(loaded.defaultVolume, 37);
+        expect(loaded.allowConcurrentPlayback, isTrue);
+        expect(loaded.concurrentPlaybackEnabled, isFalse);
+        await platformRepository.save(loaded);
+        final snapshot = jsonDecode(
+          (await database.readSetting('preferences.v1')) ?? '{}',
+        ) as Map<String, Object?>;
+        expect(snapshot['schemaVersion'], 22);
+        expect(snapshot['navigationMode'], 'dualTabs');
+        expect(
+          (await platformRepository.load()).navigationMode,
+          WorkspaceNavigationMode.dualTabs,
+        );
+        expect(database.schemaVersion, 3);
+      },
+    );
+  }
   for (final mode in WorkspaceNavigationMode.values) {
     test(
       'missing, automatic and invalid navigation values migrate to $mode',
@@ -373,7 +413,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 21);
+          expect(snapshot['schemaVersion'], 22);
           expect(snapshot['navigationMode'], mode.name);
         }
         for (final selected in WorkspaceNavigationMode.values) {
@@ -424,7 +464,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 21);
+      expect(snapshot['schemaVersion'], 22);
       expect(snapshot['theme'], 'dark');
       expect(database.schemaVersion, 3);
     },
@@ -467,9 +507,9 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 21);
+      expect(snapshot['schemaVersion'], 22);
       expect(snapshot['allowConcurrentPlayback'], allowed);
-      expect(snapshot['navigationMode'], 'singlePage');
+      expect(snapshot['navigationMode'], 'dualTabs');
       final reloaded = await repository.load();
       expect(reloaded.allowConcurrentPlayback, allowed);
       expect(

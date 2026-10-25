@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/ui/page_tab_style.dart';
+import '../../../shared/ui/paging_tab_strip.dart';
+import '../../../shared/ui/smooth_scroll_behavior.dart';
 import '../../../shared/ui/state_view.dart';
 import '../../../shared/ui/retained_tab_view.dart';
 import '../../../shared/ui/system_font_picker.dart';
@@ -40,6 +43,9 @@ final class SettingsScreen extends StatefulWidget {
 
 final class _SettingsScreenState extends State<SettingsScreen> {
   late SettingsCategory _category = widget.category;
+  late final _localProgress = TabPagingProgress(
+    widget.category.index.toDouble(),
+  );
 
   @override
   void didUpdateWidget(SettingsScreen oldWidget) {
@@ -48,21 +54,71 @@ final class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => RetainedTabView<SettingsCategory>(
-    tabs: SettingsCategory.values,
-    value: _category,
-    viewKey: const ValueKey('settings-category-swipe'),
-    onChanged: (category) {
-      final onChanged = widget.onCategoryChanged;
-      if (onChanged == null) {
-        setState(() => _category = category);
-      } else {
-        onChanged(category);
-      }
-    },
-    pageBuilder: (context, category, active) =>
-        _SettingsCategoryPage(category: category),
-  );
+  void dispose() {
+    _localProgress.dispose();
+    super.dispose();
+  }
+
+  void _selectCategory(SettingsCategory category) {
+    final onChanged = widget.onCategoryChanged;
+    if (onChanged == null) {
+      setState(() => _category = category);
+    } else {
+      onChanged(category);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = TabPagingScope.maybeOf(context) ?? _localProgress;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+          child: Text(
+            '设置',
+            key: const ValueKey('settings-page-title'),
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+        ),
+        SizedBox(
+          height: PageTabStyle.barHeight,
+          child: ScrollConfiguration(
+            behavior: const SmoothScrollBehavior(horizontalMouseWheel: true),
+            child: SingleChildScrollView(
+              key: const ValueKey('settings-category-strip'),
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: PagingTabStrip<SettingsCategory>(
+                tabs: SettingsCategory.values,
+                value: _category,
+                progress: progress,
+                itemKey: (category) =>
+                    ValueKey('settings-category-${category.name}'),
+                buttonStyle: PageTabStyle.buttonStyle(context),
+                labelBuilder: (context, category) =>
+                    PageTabStyle.label(category.label),
+                onSelected: _selectCategory,
+              ),
+            ),
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: RetainedTabView<SettingsCategory>(
+            tabs: SettingsCategory.values,
+            value: _category,
+            viewKey: const ValueKey('settings-category-swipe'),
+            progress: progress,
+            onChanged: _selectCategory,
+            pageBuilder: (context, category, active) =>
+                _SettingsCategoryPage(category: category),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 final class _SettingsCategoryPage extends ConsumerStatefulWidget {
@@ -169,10 +225,6 @@ final class _SettingsCategoryPageState
       key: PageStorageKey('settings-${widget.category.name}'),
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
       children: [
-        Text('设置', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 8),
-        Text(widget.category.label),
-        const SizedBox(height: 18),
         ref
             .watch(settingsControllerProvider)
             .when(
@@ -191,11 +243,11 @@ final class _SettingsCategoryPageState
                       if (widget.category == SettingsCategory.appearance)
                         _section('外观', [
                           _choices('页面导航模式', s.navigationMode, const {
-                            WorkspaceNavigationMode.singlePage: '单标签页',
+                            WorkspaceNavigationMode.dualTabs: '双标签页',
                             WorkspaceNavigationMode.multipleTabs: '多标签页',
                           }, controller.setNavigationMode),
                           const Text(
-                            'Windows 和 macOS 默认多标签页，Android 默认单标签页。可手动切换；单标签页支持顶部返回按钮和系统返回。',
+                            'Windows 和 macOS 默认多标签页，Android 默认双标签页。双标签模式在桌面使用独立播放窗口，视频、影视和直播共用；Android 在应用内切换浏览与播放。返回可播放上一个视频，关闭播放回到浏览。切换模式保留未关闭页面。',
                             style: TextStyle(fontSize: 12),
                           ),
                           _choices('应用主题', s.theme, const {

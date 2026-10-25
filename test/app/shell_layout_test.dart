@@ -1,13 +1,399 @@
 import 'package:bilisail/app/shell.dart';
+import 'package:bilisail/app/workspace_navigation.dart';
 import 'package:bilisail/app/theme.dart';
-import 'package:bilisail/features/feed/domain/home_channel.dart';
 import 'package:bilisail/features/settings/domain/app_settings.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets(
+    'narrow navigation has four destinations and desktop keeps live separate',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      tester.view.physicalSize = const Size(390, 844);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BiliTheme.light(),
+          home: const BiliAppShell(
+            navigationMode: WorkspaceNavigationMode.dualTabs,
+            location: '/',
+            child: SizedBox.expand(key: ValueKey('retained-content')),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final content = tester.element(
+        find.byKey(const ValueKey('retained-content')),
+      );
+      final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+      expect(
+        bar.destinations.whereType<NavigationDestination>().map(
+          (item) => item.label,
+        ),
+        ['首页', '动态', '我的', '设置'],
+      );
+      expect(find.byKey(const ValueKey('channel-live')), findsOneWidget);
+      for (final width in [600.0, 960.0, 1440.0]) {
+        tester.view.physicalSize = Size(width, 844);
+        await tester.pumpAndSettle();
+        expect(
+          tester.element(find.byKey(const ValueKey('retained-content'))),
+          same(content),
+        );
+        expect(find.byType(NavigationBar), findsNothing);
+        expect(
+          find.byKey(const ValueKey('workspace-nav-live')),
+          findsOneWidget,
+        );
+        expect(find.byKey(const ValueKey('channel-live')), findsNothing);
+        expect(find.byKey(const ValueKey('channel-bangumi')), findsOneWidget);
+        expect(find.byKey(const ValueKey('channel-cinema')), findsOneWidget);
+        expect(find.text('媒体库'), findsNothing);
+        expect(tester.takeException(), isNull);
+      }
+    },
+  );
+  testWidgets(
+    'desktop utilities stay at the bottom while main navigation scrolls',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1280, 844);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BiliTheme.light(),
+          home: const BiliAppShell(
+            navigationMode: WorkspaceNavigationMode.dualTabs,
+            location: '/',
+            child: SizedBox.expand(key: ValueKey('retained-content')),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final image = tester.widget<Image>(
+        find.byKey(const ValueKey('workspace-brand-logo')),
+      );
+      expect(
+        (image.image as AssetImage).assetName,
+        'assets/branding/app_icon.png',
+      );
+      final content = tester.element(
+        find.byKey(const ValueKey('retained-content')),
+      );
+      for (final size in const [
+        Size(1280, 844),
+        Size(600, 844),
+        Size(600, 320),
+        Size(1280, 320),
+        Size(720, 240),
+        Size(1280, 240),
+      ]) {
+        tester.view.physicalSize = size;
+        await tester.pumpAndSettle();
+        final side = tester.getRect(
+          find.byKey(const ValueKey('workspace-side-navigation')),
+        );
+        final utilities = [
+          for (final name in ['messages', 'downloads', 'settings'])
+            find.byKey(ValueKey('workspace-nav-$name')),
+        ];
+        for (final utility in utilities) {
+          expect(
+            utility.hitTestable(),
+            findsOneWidget,
+            reason: '$size $utility',
+          );
+        }
+        final before = utilities.map(tester.getRect).toList();
+        expect(side.bottom - before.last.bottom, closeTo(15, 0.1));
+        await tester.drag(
+          find.byKey(const ValueKey('workspace-primary-navigation')),
+          const Offset(0, -350),
+        );
+        await tester.pumpAndSettle();
+        expect(utilities.map(tester.getRect), before);
+        expect(
+          find.byKey(const ValueKey('workspace-nav-mine')).hitTestable(),
+          findsOneWidget,
+        );
+        expect(
+          tester.element(find.byKey(const ValueKey('retained-content'))),
+          same(content),
+        );
+        expect(tester.takeException(), isNull, reason: '$size');
+      }
+    },
+  );
+
+  testWidgets(
+    'mine keeps channels without common tools',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      for (final location in [
+        '/?channel=watchLater',
+        '/?channel=favorites',
+        '/me',
+        '/history',
+        '/downloads',
+        '/messages',
+      ]) {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: BiliAppShell(
+              key: ValueKey(location),
+              location: location,
+              navigationMode: WorkspaceNavigationMode.dualTabs,
+              accountBuilder: (_) => const Icon(Icons.account_circle),
+              child: const SizedBox.expand(),
+            ),
+          ),
+        );
+        for (final width in [320.0, 390.0, 600.0, 1280.0]) {
+          tester.view.physicalSize = Size(width, 800);
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const ValueKey('workspace-common-tools')),
+            findsNothing,
+            reason: '$location width=$width',
+          );
+          expect(find.byIcon(Icons.account_circle), findsNothing);
+          expect(find.byKey(const ValueKey('workspace-search')), findsNothing);
+          if (Uri.parse(location).queryParameters['channel']
+              case final channel?) {
+            expect(find.byKey(ValueKey('channel-$channel')), findsOneWidget);
+          } else {
+            expect(
+              find.byKey(const ValueKey('home-channel-strip')),
+              findsNothing,
+            );
+          }
+          expect(
+            find.byKey(const ValueKey('workspace-bottom-navigation')),
+            width < 600 ? findsOneWidget : findsNothing,
+          );
+          final utilityPage = location == '/history';
+          expect(
+            find.byKey(const ValueKey('workspace-page-back-header')),
+            utilityPage ? findsOneWidget : findsNothing,
+          );
+          expect(
+            tester.takeException(),
+            isNull,
+            reason: '$location width=$width',
+          );
+        }
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
+    'dynamic keeps account and search with a recognizable icon',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      for (final channel in ['dynamic', 'videoDynamic']) {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: BiliAppShell(
+              key: ValueKey(channel),
+              location: '/?channel=$channel',
+              navigationMode: WorkspaceNavigationMode.multipleTabs,
+              accountBuilder: (_) => const Icon(Icons.account_circle),
+              child: const SizedBox.expand(),
+            ),
+          ),
+        );
+        for (final width in [320.0, 390.0, 600.0, 1280.0]) {
+          tester.view.physicalSize = Size(width, 844);
+          await tester.pumpAndSettle();
+          expect(find.byIcon(Icons.account_circle), findsOneWidget);
+          expect(
+            find.byKey(const ValueKey('workspace-search')),
+            findsOneWidget,
+          );
+          expect(find.byKey(const ValueKey('channel-dynamic')), findsOneWidget);
+          expect(
+            find.byKey(const ValueKey('channel-videoDynamic')),
+            findsOneWidget,
+          );
+          expect(
+            find.byWidgetPredicate(
+              (widget) =>
+                  widget is IconButton &&
+                  const ['观看历史', '下载', '设置'].contains(widget.tooltip),
+            ),
+            findsNothing,
+          );
+          final tabIcon = tester.widget<Icon>(
+            find.descendant(
+              of: find.byKey(const ValueKey('workspace-tab-home')),
+              matching: find.byType(Icon),
+            ),
+          );
+          expect(tabIcon.icon, Icons.rss_feed_rounded);
+          if (width >= 600) {
+            final icon = tester.widget<Icon>(
+              find.descendant(
+                of: find.byKey(const ValueKey('workspace-nav-dynamic')),
+                matching: find.byType(Icon),
+              ),
+            );
+            expect(icon.icon, Icons.rss_feed_rounded);
+          } else {
+            final bar = tester.widget<NavigationBar>(
+              find.byType(NavigationBar),
+            );
+            final destination = bar.destinations
+                .whereType<NavigationDestination>()
+                .singleWhere((item) => item.label == '动态');
+            expect((destination.icon as Icon).icon, Icons.rss_feed_rounded);
+            expect(
+              (destination.selectedIcon as Icon).icon,
+              Icons.rss_feed_rounded,
+            );
+          }
+          expect(
+            tester.takeException(),
+            isNull,
+            reason: '$channel width=$width',
+          );
+        }
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
+    'home and search keep account and search without shortcut tools',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      for (final location in ['/', '/search?q=cat']) {
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              home: BiliAppShell(
+                key: ValueKey(location),
+                location: location,
+                navigationMode: WorkspaceNavigationMode.dualTabs,
+                accountBuilder: (_) => const Icon(Icons.account_circle),
+                pageBuilder: (_, tab) => tab.location.path == '/search'
+                    ? Builder(
+                        builder: (context) => WorkspacePageHeader.wrap(
+                          context,
+                          const SizedBox.expand(),
+                        ),
+                      )
+                    : const SizedBox.expand(),
+                child: const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        );
+        for (final width in [320.0, 390.0, 600.0, 1280.0]) {
+          tester.view.physicalSize = Size(width, 800);
+          await tester.pumpAndSettle();
+          expect(find.byIcon(Icons.account_circle), findsOneWidget);
+          expect(
+            find.byKey(const ValueKey('workspace-search')),
+            findsOneWidget,
+          );
+          expect(
+            find.byWidgetPredicate(
+              (widget) =>
+                  widget is IconButton &&
+                  const ['观看历史', '下载', '设置'].contains(widget.tooltip),
+            ),
+            findsNothing,
+          );
+          expect(
+            find.byKey(const ValueKey('search-category-strip')),
+            location == '/' ? findsNothing : findsOneWidget,
+          );
+          expect(
+            tester.takeException(),
+            isNull,
+            reason: '$location width=$width',
+          );
+        }
+      }
+    },
+  );
+
+  testWidgets('desktop live shows business sections with account and search', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: BiliTheme.light(),
+        home: BiliAppShell(
+          location: '/?channel=live&section=我的关注',
+          navigationMode: WorkspaceNavigationMode.multipleTabs,
+          accountBuilder: (_) => const Icon(Icons.account_circle),
+          child: const SizedBox.expand(key: ValueKey('live-content')),
+        ),
+      ),
+    );
+    Element? content;
+    for (final width in [600.0, 960.0, 1440.0, 390.0, 1280.0]) {
+      tester.view.physicalSize = Size(width, 844);
+      await tester.pumpAndSettle();
+      content ??= tester.element(find.byKey(const ValueKey('live-content')));
+      expect(
+        tester.element(find.byKey(const ValueKey('live-content'))),
+        same(content),
+      );
+      expect(find.byIcon(Icons.account_circle), findsOneWidget);
+      expect(find.byKey(const ValueKey('workspace-search')), findsOneWidget);
+      expect(find.text('全部分区'), findsNothing);
+      expect(find.byKey(const ValueKey('channel-ranking')), findsNothing);
+      expect(find.byKey(const ValueKey('workspace-back')), findsNothing);
+      if (width >= 600) {
+        expect(find.byKey(const ValueKey('home-channel-strip')), findsNothing);
+        expect(find.byKey(const ValueKey('channel-live')), findsNothing);
+        for (final section in ['推荐直播', '我的关注', '观看记录']) {
+          expect(
+            find.byKey(ValueKey('workspace-live-section-$section')),
+            findsOneWidget,
+          );
+        }
+      } else {
+        expect(find.byKey(const ValueKey('channel-live')), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('workspace-live-section-strip')),
+          findsNothing,
+        );
+        final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+        expect(
+          bar.destinations.whereType<NavigationDestination>().map(
+            (item) => item.label,
+          ),
+          ['首页', '动态', '我的', '设置'],
+        );
+      }
+      expect(tester.takeException(), isNull, reason: '$width');
+    }
+  });
+
   testWidgets('keyboard height changes retain active and hidden page widgets', (
     tester,
   ) async {
@@ -21,7 +407,7 @@ void main() {
       MaterialApp(
         home: BiliAppShell(
           location: '/video/BV1abc123456',
-          navigationMode: WorkspaceNavigationMode.singlePage,
+          navigationMode: WorkspaceNavigationMode.dualTabs,
           pageBuilder: (_, tab) {
             builds++;
             return SizedBox.expand(key: ValueKey('page-${tab.location.path}'));
@@ -73,7 +459,10 @@ void main() {
             ),
           );
           await tester.pumpAndSettle();
-          for (final channel in HomeChannel.values) {
+          for (final channel in channelsForSection(
+            WorkspaceSection.home,
+            compact: width < 600,
+          )) {
             final tab = find.byKey(ValueKey('channel-${channel.name}'));
             final label = find.descendant(
               of: find.descendant(of: tab, matching: find.text(channel.label)),
@@ -103,7 +492,7 @@ void main() {
   }
   for (final mode in WorkspaceNavigationMode.values) {
     testWidgets(
-      'messages hide home navigation across resizing in $mode',
+      'messages hide home navigation and common tools across resizing in $mode',
       (tester) async {
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.resetPhysicalSize);
@@ -126,18 +515,26 @@ void main() {
             find.byKey(const ValueKey('home-channel-strip')),
             findsNothing,
           );
-          expect(find.byIcon(Icons.account_circle), findsOneWidget);
+          expect(find.byIcon(Icons.account_circle), findsNothing);
+          expect(find.byKey(const ValueKey('workspace-search')), findsNothing);
+          expect(find.byTooltip('观看历史'), findsNothing);
           expect(
-            find.byKey(const ValueKey('workspace-search')),
-            findsOneWidget,
+            find.byKey(const ValueKey('workspace-bottom-navigation')),
+            width < 600 ? findsOneWidget : findsNothing,
           );
-          expect(find.byTooltip('观看历史'), findsOneWidget);
-          expect(find.byTooltip('下载'), findsOneWidget);
-          expect(find.byTooltip('设置'), findsOneWidget);
+          final tabs = find.byKey(const ValueKey('workspace-tab-strip'));
+          final headerBottom = tabs.evaluate().isNotEmpty
+              ? tester.getBottomLeft(tabs).dy
+              : 0;
+          final pageBack = find.byKey(
+            const ValueKey('workspace-page-back-header'),
+          );
+          final pageBackHeight = pageBack.evaluate().isEmpty
+              ? 0
+              : tester.getSize(pageBack).height;
           expect(
             tester.getTopLeft(find.byKey(const ValueKey('message-content'))).dy,
-            (width < 760 ? 52 : 58) +
-                (defaultTargetPlatform == TargetPlatform.windows ? 42 : 0),
+            headerBottom + pageBackHeight + (width >= 600 ? 12 : 0),
           );
           expect(tester.takeException(), isNull, reason: 'window width $width');
         }

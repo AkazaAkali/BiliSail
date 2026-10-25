@@ -5,7 +5,7 @@ import '../features/settings/domain/app_settings.dart';
 abstract final class BiliTheme {
   static const accent = Color(0xFFD94B68);
   static const canvas = Colors.white;
-  static const ink = Color(0xFF242424);
+  static const ink = Color(0xFF253343);
 
   static ThemeData light({
     AppFontPreference font = AppFontPreference.harmonyOsSans,
@@ -18,11 +18,11 @@ abstract final class BiliTheme {
 
   static ThemeData _build(Brightness brightness, String? fontFamily) {
     final dark = brightness == Brightness.dark;
-    final surface = dark ? const Color(0xFF202020) : canvas;
+    final surface = dark ? const Color(0xFF1C2530) : canvas;
     final foreground = dark ? const Color(0xFFEAEAEA) : ink;
-    final muted = dark ? const Color(0xFFADADAD) : const Color(0xFF777777);
-    final panel = dark ? const Color(0xFF292929) : const Color(0xFFF8F8F8);
-    final border = dark ? const Color(0xFF414141) : const Color(0xFFE5E5E5);
+    final muted = dark ? const Color(0xFFACB8C7) : const Color(0xFF66778A);
+    final panel = dark ? const Color(0xFF232F3D) : const Color(0xFFF2F6FA);
+    final border = dark ? const Color(0xFF384657) : const Color(0xFFE1E9F1);
     final primary = dark ? const Color(0xFFEF8399) : accent;
     final scheme =
         ColorScheme.fromSeed(
@@ -43,11 +43,11 @@ abstract final class BiliTheme {
           surfaceContainerLow: panel,
           surfaceContainer: panel,
           surfaceContainerHigh: dark
-              ? const Color(0xFF333333)
-              : const Color(0xFFF1F1F1),
+              ? const Color(0xFF2C3948)
+              : const Color(0xFFEAF1F7),
           surfaceContainerHighest: dark
-              ? const Color(0xFF383838)
-              : const Color(0xFFECECEC),
+              ? const Color(0xFF334252)
+              : const Color(0xFFE3EDF5),
           outline: muted,
           outlineVariant: border,
         );
@@ -56,14 +56,16 @@ abstract final class BiliTheme {
       brightness: brightness,
       colorScheme: scheme,
       fontFamily: fontFamily,
-      scaffoldBackgroundColor: surface,
+      scaffoldBackgroundColor: dark
+          ? const Color(0xFF141D27)
+          : const Color(0xFFEDF3F9),
       dividerColor: border,
       hoverColor: primary.withValues(alpha: 0.045),
       focusColor: primary.withValues(alpha: 0.1),
       splashColor: primary.withValues(alpha: 0.08),
     );
     final controlShape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(10),
     );
     return base.copyWith(
       appBarTheme: AppBarTheme(
@@ -106,15 +108,15 @@ abstract final class BiliTheme {
           vertical: 12,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: primary),
         ),
       ),

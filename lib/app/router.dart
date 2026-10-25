@@ -33,6 +33,7 @@ import '../features/playback/application/playback_manager.dart';
 import '../features/auth/application/auth_controller.dart';
 import '../features/comments/application/comment_link_resolver.dart';
 import '../features/auth/presentation/account_button.dart';
+import '../features/auth/presentation/account_screen.dart';
 import '../features/feed/application/feed_controller.dart';
 import '../features/feed/application/home_controller.dart';
 import '../features/feed/domain/home_channel.dart';
@@ -53,6 +54,7 @@ import '../features/live/domain/live_room.dart';
 import '../shared/ui/state_view.dart';
 import 'shell.dart';
 import 'workspace_tabs.dart';
+import 'workspace_root_page.dart';
 import 'platform_defaults.dart';
 
 GoRouter createBiliRouter({
@@ -71,10 +73,27 @@ GoRouter createBiliRouter({
   WidgetBuilder? accountBuilder,
   WidgetBuilder? windowControlsBuilder,
   DragRegionBuilder? dragRegionBuilder,
+  WorkspaceWindowBuilder? playbackWindowBuilder,
+  VoidCallback? onActivateBrowser,
   String initialLocation = '/',
   InputRouteObserver? inputObserver,
 }) => GoRouter(
   initialLocation: initialLocation,
+  redirect: (context, state) {
+    final uri = state.uri;
+    if (uri.path != '/') return null;
+    final parameters = {...uri.queryParameters};
+    if (parameters['channel'] == 'ranking') {
+      parameters['channel'] = 'popular';
+      parameters['section'] = '排行榜';
+    } else if (parameters['channel'] == 'live' &&
+        parameters['section'] == '全部分区') {
+      parameters['section'] = '推荐直播';
+    } else {
+      return null;
+    }
+    return uri.replace(queryParameters: parameters).toString();
+  },
   observers: [?inputObserver],
   routes: [
     ShellRoute(
@@ -87,12 +106,25 @@ GoRouter createBiliRouter({
                 navigationMode: defaultWorkspaceNavigationMode,
               );
           return BiliAppShell(
+            accountIdentity: accountBuilder == null
+                ? null
+                : ref.watch(
+                    authControllerProvider.select(
+                      (auth) => (
+                        auth.isSignedIn,
+                        auth.mid,
+                        ref.read(sessionEpochProvider)(),
+                      ),
+                    ),
+                  ),
             navigationMode: settings.navigationMode,
             shortcuts: settings.shortcuts,
             location: state.uri.toString(),
             accountBuilder: accountBuilder,
             windowControlsBuilder: windowControlsBuilder,
             dragRegionBuilder: dragRegionBuilder,
+            playbackWindowBuilder: playbackWindowBuilder,
+            onActivateBrowser: onActivateBrowser,
             pageBuilder: (context, tab) => _WorkspacePage(
               tab: tab,
               playerBuilder: playerBuilder,
@@ -129,6 +161,7 @@ GoRouter createBiliRouter({
           '/messages',
           '/settings',
           '/downloads',
+          '/me',
           '/offline/:taskId',
         ])
           GoRoute(
@@ -176,6 +209,237 @@ final class _WorkspacePage extends ConsumerWidget {
   final bool observeAccount;
   final bool allowConcurrentPlayback;
 
+  HomeChannel _channelFor(Uri location) =>
+      HomeChannel.values
+          .where(
+            (channel) => channel.name == location.queryParameters['channel'],
+          )
+          .firstOrNull ??
+      HomeChannel.recommended;
+
+  // Feature controllers keep their tab owner. Repeating family overrides here
+  // would invalidate retained queries; AccountContent isolates its own queries.
+  Widget _rootBranch({
+    required WorkspaceRootSection section,
+    required Uri location,
+    required WidgetBuilder builder,
+  }) => ProviderScope(
+    key: ValueKey(section),
+    child: Builder(
+      builder: (context) => CommandTargetScope<Object>(
+        scope: CommandScope.page,
+        active: WorkspaceActivity.isActive(context),
+        merge: const {ShortcutAction.refresh},
+        commands: {
+          if ((section == WorkspaceRootSection.feed &&
+                  _channelFor(location).hasVideoFeed) ||
+              section == WorkspaceRootSection.messages ||
+              section == WorkspaceRootSection.downloads)
+            ShortcutAction.refresh: (stroke) => _refresh(context, stroke),
+        },
+        child: builder(context),
+      ),
+    ),
+  );
+
+  Widget _rootPage(BuildContext context, bool signedIn) => WorkspaceRootPage(
+    location: tab.location,
+    feedBuilder: (context, location) => _rootBranch(
+      section: WorkspaceRootSection.feed,
+      location: location,
+      builder: (context) {
+        final channel = _channelFor(location);
+        return FeedScreen(
+          key: PageStorageKey('feed-${tab.id}'),
+          channel: channel,
+          initialSection: location.queryParameters['section'],
+          showLiveSectionTabs: MediaQuery.sizeOf(context).width < 600,
+          onSectionChanged: (section) => context.go(
+            Uri(
+              path: '/',
+              queryParameters: {
+                ...location.queryParameters,
+                'channel': channel.name,
+                'section': section,
+                'tab': tab.id,
+              },
+            ).toString(),
+          ),
+          onChannelChanged: (channel) => context.go(
+            Uri(
+              path: '/',
+              queryParameters: {'channel': channel.name, 'tab': tab.id},
+            ).toString(),
+          ),
+          isSignedIn: signedIn,
+          onLogin: observeAccount
+              ? () => showDialog<void>(
+                  context: context,
+                  builder: (_) => const AccountDialog(),
+                )
+              : null,
+        );
+      },
+    ),
+    accountBuilder: (context) => _rootBranch(
+      section: WorkspaceRootSection.account,
+      location: Uri(path: '/me'),
+      builder: (context) {
+        void login() => showDialog<void>(
+          context: context,
+          builder: (_) => const AccountDialog(),
+        );
+        return AccountScreen(
+          key: PageStorageKey('me-${tab.id}'),
+          onNavigate: context.go,
+          onLogin: login,
+          contentBuilder: (context, section) =>
+              _accountContent(context, section, signedIn, login),
+        );
+      },
+    ),
+    messagesBuilder: (context, location) => _rootBranch(
+      section: WorkspaceRootSection.messages,
+      location: location,
+      builder: (context) => _messagesPage(context, location),
+    ),
+    downloadsBuilder: (context, location) => _rootBranch(
+      section: WorkspaceRootSection.downloads,
+      location: location,
+      builder: (context) => _downloadsPage(context),
+    ),
+    settingsBuilder: (context, location) => _rootBranch(
+      section: WorkspaceRootSection.settings,
+      location: location,
+      builder: (context) => _settingsPage(context, location),
+    ),
+  );
+
+  Widget _messagesPage(BuildContext context, Uri uri) => MessagesScreen(
+    key: PageStorageKey('messages-${tab.id}'),
+    initialUserId: UserId.tryParse(uri.queryParameters['talker']),
+    initialUserName: uri.queryParameters['name'],
+    initialUserAvatar: switch (uri.queryParameters['avatar']) {
+      final avatar? => Uri.tryParse(avatar),
+      _ => null,
+    },
+    onInitialConversationOpened: () {
+      // A recipient can finish opening after another primary destination was
+      // selected. Consuming it must not bring a hidden inbox to the foreground.
+      if (context.mounted && WorkspaceActivity.isActive(context)) {
+        context.go('/messages?tab=${tab.id}');
+      }
+    },
+    onLogin: () => showDialog<void>(
+      context: context,
+      builder: (_) => const AccountDialog(),
+    ),
+    onOpenUser: (user) => context.go('/user/${user.value}'),
+    onOpenTarget: (target) {
+      final parts = target.pathSegments;
+      if (target.host == 'www.bilibili.com' &&
+          parts.length >= 2 &&
+          parts.first == 'video' &&
+          VideoId(parts[1]).isValid) {
+        context.go('/video/${parts[1]}');
+      } else {
+        ProviderScope.containerOf(
+          context,
+          listen: false,
+        ).read(externalLinkOpenerProvider)(target);
+      }
+    },
+  );
+
+  Widget _settingsPage(BuildContext context, Uri uri) => SettingsScreen(
+    key: PageStorageKey('settings-${tab.id}'),
+    category: SettingsCategory.fromName(uri.queryParameters['section']),
+    onCategoryChanged: (category) => context.go(
+      Uri(
+        path: '/settings',
+        queryParameters: {'tab': tab.id, 'section': category.name},
+      ).toString(),
+    ),
+  );
+
+  Widget _downloadsPage(BuildContext context) => DownloadsScreen(
+    key: PageStorageKey('downloads-${tab.id}'),
+    onPlay: (task) => context.go('/offline/${task.id}'),
+    onOpenDirectory: onOpenDownloadDirectory,
+    allowCustomDirectory: allowCustomDownloadDirectory,
+    coverProvider: downloadCoverProvider,
+  );
+
+  Widget _accountContent(
+    BuildContext context,
+    AccountContentTab section,
+    bool signedIn,
+    VoidCallback onLogin,
+  ) => ProviderScope(
+    key: ValueKey(('account-content', tab.id, section)),
+    overrides: [
+      if (section == AccountContentTab.history)
+        historyProvider.overrideWith(HistoryController.new),
+      if (section == AccountContentTab.watchLater ||
+          section == AccountContentTab.favorites) ...[
+        feedControllerProvider.overrideWith(FeedController.new),
+        homeControllerProvider.overrideWith2(HomeController.new),
+      ],
+    ],
+    child: Consumer(
+      builder: (context, ref, _) => CommandTargetScope<Object>(
+        scope: CommandScope.page,
+        active: WorkspaceActivity.isActive(context),
+        merge: const {ShortcutAction.refresh},
+        commands: {
+          if ((signedIn && section == AccountContentTab.history) ||
+              section == AccountContentTab.downloads)
+            ShortcutAction.refresh: (stroke) async {
+              if (stroke.phase != InputPhase.down) return CommandOutcome.noOp;
+              switch (section) {
+                case AccountContentTab.history:
+                  await ref.read(historyProvider.notifier).refresh();
+                case AccountContentTab.watchLater:
+                case AccountContentTab.favorites:
+                  return CommandOutcome.noOp;
+                case AccountContentTab.downloads:
+                  await ref.read(downloadControllerProvider.notifier).refresh();
+              }
+              return CommandOutcome.completed;
+            },
+        },
+        child: switch (section) {
+          AccountContentTab.history =>
+            signedIn
+                ? const HistoryScreen(showHeading: false)
+                : SingleChildScrollView(
+                    child: StateView.empty(
+                      message: '登录后可查看历史记录',
+                      icon: Icons.history_rounded,
+                      actionLabel: '登录账号',
+                      onAction: onLogin,
+                    ),
+                  ),
+          AccountContentTab.watchLater ||
+          AccountContentTab.favorites => FeedScreen(
+            channel: section == AccountContentTab.watchLater
+                ? HomeChannel.watchLater
+                : HomeChannel.favorites,
+            isSignedIn: signedIn,
+            onLogin: onLogin,
+          ),
+          AccountContentTab.downloads => DownloadsScreen(
+            showHeading: false,
+            onPlay: (task) => context.go('/offline/${task.id}'),
+            onOpenDirectory: onOpenDownloadDirectory,
+            allowCustomDirectory: allowCustomDownloadDirectory,
+            coverProvider: downloadCoverProvider,
+          ),
+        },
+      ),
+    ),
+  );
+
   Future<CommandOutcome> _refresh(
     BuildContext context,
     InputStroke stroke,
@@ -184,7 +448,6 @@ final class _WorkspacePage extends ConsumerWidget {
     final container = ProviderScope.containerOf(context, listen: false);
     final uri = tab.location;
     if (tab.isBrowse) {
-      container.invalidate(homeControllerProvider);
       await container.read(feedControllerProvider.notifier).refresh();
     } else if (uri.path == '/search') {
       await container.read(searchControllerProvider.notifier).refresh();
@@ -231,7 +494,10 @@ final class _WorkspacePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final playback = ref.watch(playbackManagerProvider);
-    if (playback != null && WorkspaceActivity.isActive(context)) {
+    final selectedPlayback = WorkspacePlaybackSelection.of(context);
+    if (playback != null &&
+        WorkspaceActivity.isActive(context) &&
+        (selectedPlayback == null || selectedPlayback == tab.id)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!context.mounted || !WorkspaceActivity.isActive(context)) return;
         unawaited(
@@ -282,54 +548,20 @@ final class _WorkspacePage extends ConsumerWidget {
           active: WorkspaceActivity.isActive(context),
           merge: const {ShortcutAction.refresh},
           commands: {
-            if (!tab.isPgc &&
-                (tab.isBrowse ||
-                    tab.isVideo ||
+            if (!tab.isRoot &&
+                !tab.isPgc &&
+                (tab.isVideo ||
                     tab.isLive ||
                     tab.isProfile ||
                     tab.isOffline ||
-                    const [
-                      '/search',
-                      '/history',
-                      '/messages',
-                      '/downloads',
-                    ].contains(tab.location.path)))
+                    const ['/search', '/history'].contains(tab.location.path)))
               ShortcutAction.refresh: (stroke) => _refresh(context, stroke),
           },
           child: Builder(
             builder: (context) {
               final uri = tab.location;
+              if (tab.isRoot) return _rootPage(context, account.$1);
               switch (uri.path) {
-                case '/':
-                  final channel =
-                      HomeChannel.values
-                          .where(
-                            (channel) =>
-                                channel.name == uri.queryParameters['channel'],
-                          )
-                          .firstOrNull ??
-                      HomeChannel.recommended;
-                  return FeedScreen(
-                    key: PageStorageKey('feed-${tab.id}'),
-                    channel: channel,
-                    initialSection: uri.queryParameters['section'],
-                    onChannelChanged: (channel) => context.go(
-                      Uri(
-                        path: '/',
-                        queryParameters: {
-                          'channel': channel.name,
-                          'tab': tab.id,
-                        },
-                      ).toString(),
-                    ),
-                    isSignedIn: account.$1,
-                    onLogin: observeAccount
-                        ? () => showDialog<void>(
-                            context: context,
-                            builder: (_) => const AccountDialog(),
-                          )
-                        : null,
-                  );
                 case '/search':
                   return WorkspacePageHeader.wrap(
                     context,
@@ -341,60 +573,6 @@ final class _WorkspacePage extends ConsumerWidget {
                 case '/history':
                   return HistoryScreen(
                     key: PageStorageKey('history-${tab.id}'),
-                  );
-                case '/messages':
-                  return MessagesScreen(
-                    key: PageStorageKey('messages-${tab.id}'),
-                    initialUserId: UserId.tryParse(
-                      uri.queryParameters['talker'],
-                    ),
-                    initialUserName: uri.queryParameters['name'],
-                    initialUserAvatar: switch (uri.queryParameters['avatar']) {
-                      final avatar? => Uri.tryParse(avatar),
-                      _ => null,
-                    },
-                    onInitialConversationOpened: () =>
-                        context.go('/messages?tab=${tab.id}'),
-                    onLogin: () => showDialog<void>(
-                      context: context,
-                      builder: (_) => const AccountDialog(),
-                    ),
-                    onOpenUser: (user) => context.go('/user/${user.value}'),
-                    onOpenTarget: (target) {
-                      final parts = target.pathSegments;
-                      if (target.host == 'www.bilibili.com' &&
-                          parts.length >= 2 &&
-                          parts.first == 'video' &&
-                          VideoId(parts[1]).isValid) {
-                        context.go('/video/${parts[1]}');
-                      } else {
-                        ref.read(externalLinkOpenerProvider)(target);
-                      }
-                    },
-                  );
-                case '/settings':
-                  return SettingsScreen(
-                    key: PageStorageKey('settings-${tab.id}'),
-                    category: SettingsCategory.fromName(
-                      uri.queryParameters['section'],
-                    ),
-                    onCategoryChanged: (category) => context.go(
-                      Uri(
-                        path: '/settings',
-                        queryParameters: {
-                          'tab': tab.id,
-                          'section': category.name,
-                        },
-                      ).toString(),
-                    ),
-                  );
-                case '/downloads':
-                  return DownloadsScreen(
-                    key: PageStorageKey('downloads-${tab.id}'),
-                    onPlay: (task) => context.go('/offline/${task.id}'),
-                    onOpenDirectory: onOpenDownloadDirectory,
-                    allowCustomDirectory: allowCustomDownloadDirectory,
-                    coverProvider: downloadCoverProvider,
                   );
                 default:
                   if (tab.isOffline) {

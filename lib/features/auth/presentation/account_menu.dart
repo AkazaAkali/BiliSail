@@ -10,9 +10,17 @@ import '../application/account_overview_controller.dart';
 import '../application/auth_controller.dart';
 
 class AccountMenu extends ConsumerWidget {
-  const AccountMenu({super.key, this.onOpenUser, this.onNavigate});
+  const AccountMenu({
+    super.key,
+    this.onOpenUser,
+    this.onNavigate,
+    this.embedded = false,
+    this.onLogin,
+  });
   final ValueChanged<UserId>? onOpenUser;
   final ValueChanged<String>? onNavigate;
+  final bool embedded;
+  final VoidCallback? onLogin;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -20,7 +28,8 @@ class AccountMenu extends ConsumerWidget {
       previous,
       next,
     ) {
-      if (previous != next &&
+      if (!embedded &&
+          previous != next &&
           context.mounted &&
           ModalRoute.of(context)?.isCurrent == true) {
         Navigator.pop(context);
@@ -34,7 +43,7 @@ class AccountMenu extends ConsumerWidget {
     final id = UserId.tryParse(auth.mid);
     final theme = Theme.of(context);
     void go(String path, {bool profile = false}) {
-      Navigator.pop(context);
+      if (!embedded) Navigator.pop(context);
       if (onNavigate != null) {
         onNavigate?.call(path);
       } else if (profile && id != null) {
@@ -70,39 +79,47 @@ class AccountMenu extends ConsumerWidget {
         ),
       ),
     );
-    return Drawer(
-      width: math.min(360, MediaQuery.sizeOf(context).width * 0.8),
-      semanticLabel: '我的账号',
-      backgroundColor: theme.colorScheme.surface,
-      surfaceTintColor: Colors.transparent,
-      elevation: 16,
-      clipBehavior: Clip.antiAlias,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.horizontal(left: Radius.circular(16)),
-      ),
-      child: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 8, 4),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text('我的账号', style: theme.textTheme.titleMedium),
-                  ),
+    final content = SafeArea(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 8, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text('我的账号', style: theme.textTheme.titleMedium),
+                ),
+                if (!embedded)
                   IconButton(
                     tooltip: '关闭',
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close),
                   ),
-                ],
-              ),
+              ],
             ),
-            Expanded(
-              child: Scrollbar(
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: [
+          ),
+          Expanded(
+            child: Scrollbar(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    if (!auth.isSignedIn)
+                      Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          children: [
+                            const Icon(Icons.account_circle_outlined, size: 48),
+                            const SizedBox(height: 12),
+                            const Text('登录后同步收藏、动态和观看记录'),
+                            const SizedBox(height: 12),
+                            FilledButton(
+                              onPressed: onLogin,
+                              child: const Text('登录账号'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (auth.isSignedIn)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(20, 22, 20, 8),
                         child: Column(
@@ -174,6 +191,7 @@ class AccountMenu extends ConsumerWidget {
                           ],
                         ),
                       ),
+                    if (auth.isSignedIn)
                       Row(
                         children: [
                           statistic('关注', data?.following, 'following'),
@@ -181,43 +199,46 @@ class AccountMenu extends ConsumerWidget {
                           statistic('动态', data?.dynamics, 'dynamics'),
                         ],
                       ),
-                      const Divider(height: 12),
-                      if (id != null)
-                        item(
-                          '个人中心',
-                          Icons.person_outline,
-                          '/user/${id.value}',
-                          profile: true,
+                    const Divider(height: 12),
+                    if (id != null)
+                      item(
+                        '个人中心',
+                        Icons.person_outline,
+                        '/user/${id.value}',
+                        profile: true,
+                      ),
+                    item(
+                      '我的消息',
+                      Icons.mail_outline,
+                      '/messages',
+                      trailing: count > 0
+                          ? Badge(label: Text(count > 99 ? '99+' : '$count'))
+                          : null,
+                    ),
+                    if (unread.failed)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: TextButton(
+                          onPressed: unread.refresh,
+                          child: const Text('未读数量获取失败，重试'),
                         ),
-                      item(
-                        '我的消息',
-                        Icons.mail_outline,
-                        '/messages',
-                        trailing: count > 0
-                            ? Badge(label: Text(count > 99 ? '99+' : '$count'))
-                            : null,
                       ),
-                      if (unread.failed)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: TextButton(
-                            onPressed: unread.refresh,
-                            child: const Text('未读数量获取失败，重试'),
-                          ),
-                        ),
-                      item(
-                        '稍后再看',
-                        Icons.play_circle_outline,
-                        '/?channel=watchLater',
-                      ),
-                      item('我的收藏', Icons.star_border, '/?channel=favorites'),
-                      item('历史记录', Icons.history, '/history'),
-                      item(
-                        '直播中心',
-                        Icons.flag_outlined,
-                        '/?channel=live&section=我的关注',
-                      ),
-                      const Divider(height: 12),
+                    item(
+                      '稍后再看',
+                      Icons.play_circle_outline,
+                      '/?channel=watchLater',
+                    ),
+                    item('我的收藏', Icons.star_border, '/?channel=favorites'),
+                    item('历史记录', Icons.history, '/history'),
+                    if (embedded)
+                      item('下载管理', Icons.download_outlined, '/downloads'),
+                    item(
+                      '直播中心',
+                      Icons.flag_outlined,
+                      '/?channel=live&section=我的关注',
+                    ),
+                    const Divider(height: 12),
+                    if (auth.isSignedIn)
                       ListTile(
                         minTileHeight: 48,
                         contentPadding: const EdgeInsets.symmetric(
@@ -226,19 +247,39 @@ class AccountMenu extends ConsumerWidget {
                         leading: const Icon(Icons.logout, size: 20),
                         title: const Text('退出登录'),
                         onTap: () {
-                          Navigator.pop(context);
+                          if (!embedded) Navigator.pop(context);
                           ref.read(authControllerProvider.notifier).signOut();
                         },
                       ),
-                      const SizedBox(height: 12),
-                    ],
-                  ),
+                    const SizedBox(height: 12),
+                  ],
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+    if (embedded) {
+      return Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: content,
+        ),
+      );
+    }
+    return Drawer(
+      width: math.min(360, MediaQuery.sizeOf(context).width * 0.8),
+      semanticLabel: '我的账号',
+      backgroundColor: theme.colorScheme.surface,
+      surfaceTintColor: Colors.transparent,
+      elevation: 16,
+      clipBehavior: Clip.antiAlias,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.horizontal(left: Radius.circular(16)),
+      ),
+      child: content,
     );
   }
 }

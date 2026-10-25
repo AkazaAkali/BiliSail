@@ -2,6 +2,8 @@
 
 日期：2026-10-06。工具链：Flutter 3.47.6 / Dart 3.13.5。
 
+2026-10-25：单标签模式已按用户要求退役，旧 `singlePage` 偏好迁移至双标签；Android 默认双标签，Windows/macOS 默认多标签。以下为历史实施记录；当前导航与迁移以[晴湾第三轮方案](../ui-redesign/third-round-plan.md)和[实施记录](../ui-redesign/implementation.md)为准。
+
 ## 行为
 
 设置 → 外观 → 页面导航模式仅提供“单标签页、多标签页”。Windows 和 macOS 默认多标签页，Android 默认单标签页；用户手动选择优先，保存后跨启动保留。平台决定默认模式，调整窗口宽度或横竖屏不会改变模式。两种模式共用现有页面身份、ProviderScope 与 PageStorage，切换模式或调整窗口宽度不会重新挂载搜索、首页或播放页面。

@@ -10,6 +10,8 @@ import 'package:go_router/go_router.dart';
 import 'package:path/path.dart' as path;
 
 import '../core/platform/desktop_window_chrome.dart';
+import '../core/platform/detached_playback_window.dart';
+import '../core/platform/window_service.dart';
 import '../features/auth/application/auth_controller.dart';
 import '../features/downloads/domain/download_models.dart';
 import '../features/downloads/presentation/download_dialog.dart';
@@ -46,6 +48,7 @@ import 'image_cache_binding.dart';
 import 'dependencies.dart';
 import 'router.dart';
 import 'theme.dart';
+import 'workspace_playback_window.dart';
 
 class BiliApp extends ConsumerStatefulWidget {
   const BiliApp({
@@ -88,6 +91,37 @@ class _BiliAppState extends ConsumerState<BiliApp> {
   void initState() {
     super.initState();
     _router = createBiliRouter(
+      onActivateBrowser: () => unawaited(widget.dependencies.window.activate()),
+      playbackWindowBuilder: Platform.isWindows || Platform.isMacOS
+          ? (
+              context, {
+              required child,
+              required playback,
+              required activationToken,
+              required onClose,
+              required onBack,
+              required onError,
+            }) => DesktopPlaybackWindow(
+              activationToken: activationToken,
+              onCloseRequested: onClose,
+              onError: onError,
+              playback: playback == null
+                  ? null
+                  : WorkspacePlaybackWindow(
+                      theme: Theme.of(context),
+                      shortcuts:
+                          (ref.read(settingsControllerProvider).value ??
+                                  const AppSettings.defaults())
+                              .shortcuts,
+                      onClose: onClose,
+                      onBack: onBack,
+                      onActivateBrowser: () =>
+                          unawaited(widget.dependencies.window.activate()),
+                      child: playback,
+                    ),
+              child: child,
+            )
+          : null,
       inputObserver: _input.routes,
       onOpenDownloadDirectory: widget.dependencies.files.canOpenDirectory
           ? widget.dependencies.files.openDirectory
@@ -135,7 +169,9 @@ class _BiliAppState extends ConsumerState<BiliApp> {
             ),
             title: '${task.item.video.title} · ${task.item.part.title}',
             settings: settings,
-            window: widget.dependencies.window,
+            window:
+                WindowServiceScope.maybeOf(context) ??
+                widget.dependencies.window,
             onToggleComments: () => ref
                 .read(settingsControllerProvider.notifier)
                 .setDanmakuEnabled(!settings.danmakuEnabled),
@@ -165,7 +201,9 @@ class _BiliAppState extends ConsumerState<BiliApp> {
                 builder: (_) => const AccountDialog(),
               ),
             ),
-            window: widget.dependencies.window,
+            window:
+                WindowServiceScope.maybeOf(context) ??
+                widget.dependencies.window,
             onToggleComments: () => ref
                 .read(settingsControllerProvider.notifier)
                 .setDanmakuEnabled(!settings.danmakuEnabled),
@@ -203,7 +241,9 @@ class _BiliAppState extends ConsumerState<BiliApp> {
               ),
               settings: settings,
               danmakuOverlayBuilder: (_) => overlay,
-              window: widget.dependencies.window,
+              window:
+                  WindowServiceScope.maybeOf(context) ??
+                  widget.dependencies.window,
               onToggleComments: () => ref
                   .read(settingsControllerProvider.notifier)
                   .setDanmakuEnabled(!settings.danmakuEnabled),
@@ -275,7 +315,9 @@ class _BiliAppState extends ConsumerState<BiliApp> {
                 builder: (_) => const AccountDialog(),
               ),
             ),
-            window: widget.dependencies.window,
+            window:
+                WindowServiceScope.maybeOf(context) ??
+                widget.dependencies.window,
             onToggleComments: () => ref
                 .read(settingsControllerProvider.notifier)
                 .setDanmakuEnabled(!settings.danmakuEnabled),

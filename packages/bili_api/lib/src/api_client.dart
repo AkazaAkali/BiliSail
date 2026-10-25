@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'cookies.dart';
 import 'decoding/pgc_season_decoder.dart';
 import 'models.dart';
+import 'models/popular_models.dart';
 import 'models/pgc_models.dart';
 import 'mappers/video_access_parser.dart';
 import 'transport.dart';
@@ -908,6 +909,87 @@ final class BiliApiClient {
       items,
       hasMore: _bool(data['no_more']) != true && items.isNotEmpty,
       nextCursor: items.isEmpty ? null : '${page + 1}',
+    );
+  }
+
+  Future<List<ApiPopularWeek>> getPopularWeeks({
+    ApiRequestContext? context,
+  }) async {
+    const endpoint = 'popular_weeks';
+    final data = await _json(
+      _api.replace(path: '/x/web-interface/popular/series/list'),
+      endpoint,
+      context,
+    );
+    final list = _list(data['list'], endpoint);
+    if (list.length > 1024) {
+      throw const ApiFailure(ApiFailureCategory.protocol, endpoint);
+    }
+    final seen = <int>{};
+    final weeks = <ApiPopularWeek>[];
+    for (final item in list) {
+      final entry = _map(item, endpoint);
+      final number = _requiredInt(entry['number'], endpoint);
+      final name = _requiredString(entry['name'], endpoint);
+      final subject = _string(entry['subject']) ?? '';
+      if (number < 1 ||
+          number > 1000000 ||
+          name.length > 256 ||
+          subject.length > 1024) {
+        throw const ApiFailure(ApiFailureCategory.protocol, endpoint);
+      }
+      if (seen.add(number)) {
+        weeks.add(ApiPopularWeek(number: number, name: name, subject: subject));
+      }
+    }
+    return List.unmodifiable(weeks);
+  }
+
+  Future<ApiPage<ApiVideoSummary>> getPopularWeek({
+    required int number,
+    ApiRequestContext? context,
+  }) async {
+    if (number < 1 || number > 1000000) {
+      throw ArgumentError.value(number, 'number');
+    }
+    return _popularSelection(
+      '/x/web-interface/popular/series/one',
+      {'number': '$number'},
+      'popular_week',
+      context,
+    );
+  }
+
+  Future<ApiPage<ApiVideoSummary>> getPreciousVideos({
+    ApiRequestContext? context,
+  }) => _popularSelection(
+    '/x/web-interface/popular/precious',
+    const {'page_size': '100', 'page': '1'},
+    'popular_precious',
+    context,
+  );
+
+  Future<ApiPage<ApiVideoSummary>> _popularSelection(
+    String path,
+    Map<String, String> parameters,
+    String endpoint,
+    ApiRequestContext? context,
+  ) async {
+    final data = await _json(
+      _api.replace(path: path, queryParameters: parameters),
+      endpoint,
+      context,
+    );
+    final list = _list(data['list'], endpoint);
+    if (list.length > 500) {
+      throw ApiFailure(ApiFailureCategory.protocol, endpoint);
+    }
+    return ApiPage(
+      list
+          .map((item) => _videoSummary(_map(item, endpoint), endpoint))
+          .toList(growable: false),
+      // The official weekly/precious views each display one complete selection.
+      hasMore: false,
     );
   }
 

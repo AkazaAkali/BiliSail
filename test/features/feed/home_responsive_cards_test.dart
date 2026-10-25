@@ -23,16 +23,18 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final repository = _Repository();
-      // Widths include the home page's 40 logical pixels of horizontal padding.
+      // Widths include 24px compact or 40px desktop horizontal page padding.
       for (final (width, scale, columns) in [
-        (339.0, 1.0, 1),
-        (340.0, 1.0, 2),
+        (323.0, 1.0, 1),
+        (324.0, 1.0, 2),
         (375.0, 1.0, 2),
+        (600.0, 1.0, 2),
+        (640.0, 1.0, 2),
         (979.0, 1.0, 2),
         (980.0, 1.0, 3),
         (1920.0, 1.0, 5),
-        (479.0, 2.0, 1),
-        (480.0, 2.0, 2),
+        (463.0, 2.0, 1),
+        (464.0, 2.0, 2),
         (375.0, 1.0, 2),
       ]) {
         tester.view.physicalSize = Size(width, 1400);
@@ -46,13 +48,15 @@ void main() {
         final first = tester.getRect(slots.first);
         final last = tester.getRect(slots[columns - 1]);
         final next = tester.getRect(slots[columns]);
-        expect(first.left, 20);
+        final inset = width < 600 ? 12.0 : 20.0;
+        final gap = width - inset * 2 < 600 ? 10.0 : 20.0;
+        expect(first.left, inset);
         expect(
           first.width,
-          closeTo((width - 40 - (columns - 1) * 20) / columns, .01),
+          closeTo((width - inset * 2 - (columns - 1) * gap) / columns, .01),
         );
         expect(last.top, first.top);
-        expect(last.right, closeTo(width - 20, .01));
+        expect(last.right, closeTo(width - inset, .01));
         expect(next.top, closeTo(first.bottom + 24, .01));
         final cover = tester.getSize(
           find.descendant(of: slots.first, matching: find.byType(AspectRatio)),
@@ -84,15 +88,17 @@ void main() {
 }
 
 List<Finder> _slots(WidgetTester tester) => tester
-    .widgetList<Row>(
+    .widgetList<SizedBox>(
       find.descendant(
         of: find.byType(SliverResponsiveCardGrid),
         matching: find.byWidgetPredicate(
-          (widget) => widget is Row && widget.spacing == 20,
+          (widget) =>
+              widget is SizedBox &&
+              widget.width != null &&
+              widget.child is RepaintBoundary,
         ),
       ),
     )
-    .expand((row) => row.children)
     .map(find.byWidget)
     .toList();
 

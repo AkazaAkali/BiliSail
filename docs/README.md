@@ -9,6 +9,15 @@
 | 文档 | 内容 |
 | --- | --- |
 | [整体架构](architecture.md) | 产品范围、技术栈、模块依赖、目录、状态管理、存储和平台适配 |
+| [界面改版候选方案](ui-redesign/proposals.md) | 晴湾／素白／映厅三套视觉与用户最终选择，功能保留清单及双标签设计 |
+| [晴湾与双标签实施](ui-redesign/implementation.md) | 共享外观、桌面分组与窄屏四项导航、双标签会话及状态保留、验证边界 |
+| [晴湾第二轮调整](ui-redesign/refinement-plan.md) | 桌面独立播放窗口、正式图标、侧栏底部入口、页面工具栏与独立我的页 |
+| [晴湾第三轮调整](ui-redesign/third-round-plan.md) | 单标签退役、播放窗原生返回与尺寸保留、首页工具精简、我的页内容标签 |
+| [晴湾第四轮调整](ui-redesign/fourth-round-plan.md) | 一级导航同层、双标签返回关闭、直播与消息标签、热门四栏目与旧链接兼容 |
+| [晴湾第五轮调整](ui-redesign/fifth-round-plan.md) | 消息/下载/设置同层、统一标签与导航图标、窄屏卡片留白、紧凑账号资料 |
+| [晴湾第六轮调整](ui-redesign/sixth-round-plan.md) | 热门内容子标签、动态工具与初始分类、播放窗口会话位置和尺寸记忆 |
+| [晴湾第七轮调整](ui-redesign/seventh-round-plan.md) | 设置标题与分类顺序、消息标签精简、播放窗口最大化恢复优先级 |
+| [热门四子标签](validation/popular-tabs.md) | 官网协议依据、期数切换与缓存、排行兼容、游客单期风控的验证边界 |
 | [PiliPlus 与 media-kit fork 移植](validation/piliplus-media-kit-port.md) | 固定 Git 依赖、Android Surface、macOS SwiftPM stub 修复、解码与弹幕优化及验证边界 |
 | [下载与离线播放](downloads.md) | 分 P／剧集、下载队列、断点恢复、校验、本地分轨播放及三端验收边界 |
 | [项目更名](validation/project-renaming.md) | BiliSail／哔帆的命名范围、安装／存储标识与平台验证 |
@@ -39,7 +48,7 @@
 | [参考项目与资料](references.md) | 本地源码定位、借鉴边界、官方资料和待确认事项 |
 | [首版实测记录](validation/m0-results.md) | Windows 原生播放、工程检查、构建结果和未测项 |
 | [界面与多标签验证](validation/uwp-workspace.md) | UWP 风格布局、首页频道、多标签状态与本轮验证边界 |
-| [单标签导航与顶部滚动](validation/single-page-navigation.md) | 平台默认／手动导航模式、页面回退、状态保留、横向滚轮与平台验证 |
+| [旧单标签导航与顶部滚动](validation/single-page-navigation.md) | 单标签退役前的历史记录；状态保留与横向滚轮验证 |
 | [首页子频道协议](validation/home-subtabs.md) | 各首页列表的端点、游标与前序接入记录 |
 | [排行榜分区参数](validation/ranking-regions.md) | 官网配置动态目录、新分区 ID、刷新撤下处理与风控验证边界 |
 | [影视与直播内置播放](validation/content-playback.md) | 四频道内置入口、三类播放页、影视选集、直播线路与原生验证 |
@@ -57,7 +66,7 @@
 | [隐藏控件进度条与直播发送](validation/collapsed-progress-live-send.md) | 视频／影视底部细进度、直播双发送栏／表情权限和单次写验证 |
 | [评论与直播表情选择](validation/emoticon-picker-tabs.md) | 居中弹窗、系列子标签、草稿插入与权限验证 |
 | [播放器与标签保留](validation/player-workspace.md) | UWP 播放页、只读子标签和未关闭页面的生命周期修正 |
-| [多标签并发播放](validation/multi-tab-playback.md) | 标签独立播放器、单标签互斥、模式切换与资源释放 |
+| [多标签并发播放](validation/multi-tab-playback.md) | 标签独立播放器、互斥播放、模式切换与资源释放 |
 | [云端进度与续播](validation/cloud-playback-progress.md) | 播放进度上报、本地优先/云端补充、账号和源隔离、Windows 验证边界 |
 | [点播打开优化](validation/playback-startup.md) | CDN 对照、共享准备预算、可取消外部音轨加载和 Windows 竞态验证 |
 | [云端观看历史](validation/cloud-watch-history.md) | 当前账号云列表、游标分页、统计补齐与观看日期、离线验证边界 |

@@ -762,7 +762,7 @@ void main() {
           playerBuilder: (_, detail, part) => PlaybackPanel(
             detail: detail,
             part: part,
-            settings: const AppSettings.defaults(),
+            settings: settings.value,
             onToggleComments: () {},
             window: _FakeWindowService(),
           ),
@@ -792,6 +792,65 @@ void main() {
         final generation = firstSession.sourceGeneration;
         router.go('/video/${second.summary.id.value}');
         await _pumpFrames(tester);
+        if (mode == WorkspaceNavigationMode.dualTabs) {
+          expect(sessions.length, 1);
+          expect(firstSession.detail?.summary.id, second.summary.id);
+          expect((firstSession.engine as _FakeEngine).activeSurfaces, 1);
+          await firstSession.pause();
+          await firstSession.seek(const Duration(seconds: 24));
+          await tester.tap(find.byTooltip('返回上一视频'));
+          await _pumpFrames(tester);
+          expect(firstSession.detail?.summary.id, _detail.summary.id);
+          expect(
+            firstSession.snapshots.value.position,
+            const Duration(milliseconds: 1234),
+          );
+          router.go('/video/${second.summary.id.value}');
+          await _pumpFrames(tester);
+          expect(
+            firstSession.snapshots.value.position,
+            const Duration(seconds: 24),
+          );
+          expect(firstSession.snapshots.value.desiredPlaying, isFalse);
+          expect(
+            firstSession.snapshots.value.phase,
+            isNot(PlaybackPhase.playing),
+          );
+          final container = ProviderScope.containerOf(
+            tester.element(find.byType(PlaybackPanel)),
+          );
+          final controller = container.read(
+            settingsControllerProvider.notifier,
+          );
+          final beforeModeChange = firstSession.sourceGeneration;
+          for (final targetMode in [
+            WorkspaceNavigationMode.multipleTabs,
+            WorkspaceNavigationMode.dualTabs,
+          ]) {
+            await controller.setNavigationMode(targetMode);
+            await _pumpFrames(tester);
+            expect(sessions.length, 1);
+            expect(firstSession.sourceGeneration, beforeModeChange);
+            expect(firstSession.snapshots.value.desiredPlaying, isFalse);
+            expect(
+              firstSession.snapshots.value.phase,
+              isNot(PlaybackPhase.playing),
+            );
+          }
+          await tester.tap(find.byTooltip('关闭播放'));
+          await _pumpFrames(tester);
+          expect(find.byType(PlaybackPanel), findsNothing);
+          expect(firstSession.media, isNull);
+          await tester.pumpWidget(const SizedBox());
+          await _pumpFrames(tester);
+          final closing = manager.close();
+          for (var i = 0; i < 5; i++) {
+            await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+            await tester.pump();
+          }
+          await closing;
+          return;
+        }
         expect(sessions.length, 2);
         final secondSession = sessions.last;
         expect(secondSession.detail?.summary.id, second.summary.id);
@@ -811,7 +870,7 @@ void main() {
           listen: false,
         );
         final controller = container.read(settingsControllerProvider.notifier);
-        await controller.setNavigationMode(WorkspaceNavigationMode.singlePage);
+        await controller.setNavigationMode(WorkspaceNavigationMode.dualTabs);
         await _pumpFrames(tester);
         expect(firstSession.snapshots.value.phase, PlaybackPhase.paused);
         expect(secondSession.snapshots.value.phase, PlaybackPhase.playing);

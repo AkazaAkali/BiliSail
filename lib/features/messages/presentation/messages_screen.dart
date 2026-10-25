@@ -6,6 +6,8 @@ import '../../../core/platform/external_links.dart';
 import '../../../core/presentation/workspace_activity.dart';
 import '../../../domain/user.dart';
 import '../../../shared/ui/network_avatar.dart';
+import '../../../shared/ui/page_tab_style.dart';
+import '../../../shared/ui/paging_tab_strip.dart';
 import '../../../shared/ui/smooth_scroll_behavior.dart';
 import '../../../shared/ui/state_view.dart';
 import '../../auth/application/auth_controller.dart';
@@ -37,6 +39,20 @@ class MessagesScreen extends ConsumerStatefulWidget {
 class _MessagesScreenState extends ConsumerState<MessagesScreen> {
   final Map<String, String> _drafts = {};
   int _openVersion = 0;
+
+  IconData _sectionIcon(InboxSection section) => switch (section) {
+    InboxSection.private => Icons.chat_bubble_outline_rounded,
+    InboxSection.replies => Icons.reply_rounded,
+    InboxSection.mentions => Icons.alternate_email_rounded,
+    InboxSection.likes => Icons.favorite_border_rounded,
+    InboxSection.system => Icons.notifications_none_rounded,
+  };
+
+  String _sectionTabLabel(InboxSection section) => switch (section) {
+    InboxSection.replies => '回复',
+    InboxSection.mentions => '我的',
+    _ => section.label,
+  };
 
   @override
   void initState() {
@@ -136,7 +152,7 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
           ),
         ),
         SizedBox(
-          height: 58,
+          height: PageTabStyle.barHeight,
           child: ScrollConfiguration(
             behavior: const SmoothScrollBehavior(horizontalMouseWheel: true)
                 .copyWith(
@@ -149,49 +165,17 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
               key: const ValueKey('message-section-strip'),
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Row(
-                children: [
-                  for (final section in InboxSection.values)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 3),
-                      child: Semantics(
-                        selected: state.section == section,
-                        button: true,
-                        child: TextButton(
-                          key: ValueKey('message-section-${section.name}'),
-                          onPressed: () => controller.selectSection(section),
-                          style: TextButton.styleFrom(
-                            minimumSize: const Size(48, 42),
-                            padding: const EdgeInsets.symmetric(horizontal: 7),
-                            foregroundColor: state.section == section
-                                ? Theme.of(context).colorScheme.primary
-                                : Theme.of(context).colorScheme.onSurface,
-                            textStyle: Theme.of(context).textTheme.labelLarge
-                                ?.copyWith(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                '${section.label}${(unread[section] ?? 0) > 0 ? ' · ${unread[section]}' : ''}',
-                              ),
-                              const SizedBox(height: 4),
-                              Container(
-                                width: 20,
-                                height: 2,
-                                color: state.section == section
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.transparent,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
+              child: PagingTabStrip<InboxSection>(
+                tabs: InboxSection.values,
+                value: state.section,
+                onSelected: controller.selectSection,
+                itemKey: (section) =>
+                    ValueKey('message-section-${section.name}'),
+                buttonStyle: PageTabStyle.buttonStyle(context),
+                labelBuilder: (context, section) => PageTabStyle.label(
+                  '${_sectionTabLabel(section)}${(unread[section] ?? 0) > 0 ? ' · ${unread[section]}' : ''}',
+                  icon: _sectionIcon(section),
+                ),
               ),
             ),
           ),

@@ -1,9 +1,15 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:bili_api/bili_api.dart';
 import 'package:bili_danmaku/bili_danmaku.dart';
+import 'package:bilisail/app/theme.dart';
+import 'package:bilisail/app/workspace_playback_window.dart';
 import 'package:bilisail/core/network/api_requests.dart';
+import 'package:bilisail/core/platform/detached_playback_window.dart';
+import 'package:bilisail/core/platform/window_service.dart';
 import 'package:bilisail/core/storage/credential_store.dart';
 import 'package:bilisail/features/playback/data/api_content_playback_repository.dart';
 import 'package:bilisail/features/playback/data/api_playback_repository.dart';
@@ -19,15 +25,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
+import 'support/native_playback_window.dart';
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized().framePolicy =
       LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
   testWidgets(
-    'Windows shared live session decodes HLS and FLV with native headers',
+    'Windows detached window reuses UGC, PGC and live native playback',
     (tester) async {
       initializePlayerBackend();
       final directory = Platform.environment['BILI_CONTENT_MEDIA_DIR'];
       expect(directory, isNotNull, reason: 'Use tool/test-windows-content.ps1');
+      final mainWindow = WindowService();
+      await mainWindow.initialize();
+      final primaryView = PlatformDispatcher.instance.implicitView;
+      final viewCount = PlatformDispatcher.instance.views.length;
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final paths = <String>{};
       var rejectedHeaders = 0;
@@ -58,26 +70,116 @@ void main() {
         await request.response.close();
       });
       final engine = MediaKitEngine();
-      final repository = _ContentRepository(server.port);
+      final repository = _ContentRepository(server.port, directory!);
       final progress = _Progress();
       final session = PlaybackSession(
         engine: engine,
-        repository: _UnusedVideoRepository(),
+        repository: _FixtureVideoRepository(directory),
         contentRepository: repository,
         progress: progress,
         accountScope: () => 'guest',
       );
+      final owner = Object();
+      session.attach(owner);
+      final windowOpen = ValueNotifier(true);
+      final activation = ValueNotifier('ugc');
+      final windowErrors = <Object>[];
+      void closePlayback() {
+        session.detach(owner);
+        windowOpen.value = false;
+      }
+
       addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(milliseconds: 100));
         await session.close();
         await server.close(force: true);
+        windowOpen.dispose();
+        activation.dispose();
       });
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: VideoSurface(engine: engine)),
+          home: ValueListenableBuilder(
+            valueListenable: windowOpen,
+            builder: (context, open, _) => ValueListenableBuilder(
+              valueListenable: activation,
+              builder: (context, token, _) => DesktopPlaybackWindow(
+                onCloseRequested: closePlayback,
+                onError: windowErrors.add,
+                activationToken: token,
+                playback: !open
+                    ? null
+                    : WorkspacePlaybackWindow(
+                        theme: BiliTheme.light(),
+                        shortcuts: const AppSettings.defaults().shortcuts,
+                        onBack: () {},
+                        onClose: closePlayback,
+                        onActivateBrowser: () =>
+                            unawaited(mainWindow.activate()),
+                        child: VideoSurface(engine: engine),
+                      ),
+                child: const Scaffold(body: Text('受控内容浏览窗口')),
+              ),
+            ),
+          ),
         ),
       );
-      final owner = Object();
-      session.attach(owner);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(windowErrors, isEmpty);
+      expect(PlatformDispatcher.instance.views.length, viewCount + 1);
+      final playbackView = View.of(tester.element(find.byType(VideoSurface)));
+      expect(playbackView.viewId, isNot(primaryView?.viewId));
+      void expectSharedWindow() {
+        expect(windowErrors, isEmpty);
+        expect(PlatformDispatcher.instance.implicitView, same(primaryView));
+        expect(PlatformDispatcher.instance.views.length, viewCount + 1);
+        expect(find.byType(VideoSurface, skipOffstage: false), findsOneWidget);
+        expect(
+          View.of(tester.element(find.byType(VideoSurface))).viewId,
+          playbackView.viewId,
+        );
+        expect(find.text('受控内容浏览窗口'), findsOneWidget);
+      }
+
+      const part = VideoPart(
+        cid: 'controlled-on-demand',
+        page: 1,
+        title: '本地分轨',
+        duration: Duration(seconds: 12),
+      );
+      const detail = VideoDetail(
+        summary: VideoSummary(
+          id: VideoId('BV1abc123456'),
+          title: '独立播放窗受控内容',
+          coverUrl: '',
+          author: 'fixture',
+          duration: Duration(seconds: 12),
+        ),
+        description: '',
+        parts: [part],
+      );
+      await session.activate(owner, detail, part);
+      await _decoded(tester, engine);
+      await session.setVolume(0);
+      expectSharedWindow();
+      final ugcGeneration = engine.currentSnapshot.generation;
+      activation.value = 'pgc';
+      await tester.pump();
+      await session.activate(
+        owner,
+        detail,
+        part,
+        target: const PgcPlaybackTarget(
+          'controlled-episode',
+          cid: 'controlled-on-demand',
+        ),
+      );
+      await _decoded(tester, engine);
+      expect(engine.currentSnapshot.generation, greaterThan(ugcGeneration));
+      expect(session.contentTarget, isA<PgcPlaybackTarget>());
+      expectSharedWindow();
+      activation.value = 'live-hls';
+      await tester.pump();
       await session.activate(
         owner,
         null,
@@ -85,6 +187,8 @@ void main() {
         target: const LivePlaybackTarget('1'),
       );
       await _decoded(tester, engine);
+      expectSharedWindow();
+      final onDemandWrites = progress.writes;
       expect(paths.contains('/live.m3u8'), isTrue);
       expect(paths.any((path) => path.endsWith('.ts')), isTrue);
       final generation = engine.currentSnapshot.generation;
@@ -109,6 +213,8 @@ void main() {
       expect(engine.currentSnapshot.generation, generation);
       await session.stop();
       repository.flv = true;
+      activation.value = 'live-flv';
+      await tester.pump();
       await session.activate(
         owner,
         null,
@@ -116,10 +222,27 @@ void main() {
         target: const LivePlaybackTarget('2'),
       );
       await _decoded(tester, engine);
+      expectSharedWindow();
       expect(paths.contains('/live.flv'), isTrue);
       expect(rejectedHeaders, 0);
-      expect(progress.writes, 0);
+      expect(progress.writes, onDemandWrites);
       expect(session.error, isNull);
+      NativePlaybackWindow(playbackView.viewId).close();
+      final closeDeadline = DateTime.now().add(const Duration(seconds: 5));
+      while ((engine.currentSnapshot.phase != PlaybackPhase.idle ||
+              PlatformDispatcher.instance.views.length != viewCount) &&
+          DateTime.now().isBefore(closeDeadline)) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(engine.currentSnapshot.phase, PlaybackPhase.idle);
+      expect(PlatformDispatcher.instance.views.length, viewCount);
+      expect(find.byType(VideoSurface, skipOffstage: false), findsNothing);
+      expect(find.text('受控内容浏览窗口'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      debugPrint(
+        'NATIVE_DETACHED_CONTENT ugcDash=true pgcDash=true liveHls=true '
+        'liveFlv=true oneSession=true reusedView=true closed=true',
+      );
     },
   );
   testWidgets('Windows PGC and live CDN decode through the shared resolver', (
@@ -258,8 +381,9 @@ Future<void> _decoded(WidgetTester tester, MediaKitEngine engine) async {
 }
 
 final class _ContentRepository implements ContentPlaybackRepository {
-  _ContentRepository(this.port);
+  _ContentRepository(this.port, this.directory);
   final int port;
+  final String directory;
   bool flv = false;
   @override
   Future<PlaybackMedia> resolve(
@@ -267,22 +391,26 @@ final class _ContentRepository implements ContentPlaybackRepository {
     required int quality,
     VideoCodecPreference preferredCodec = VideoCodecPreference.h264,
     required RequestCancellation cancellation,
-  }) async => PlaybackMedia(
-    video: PlaybackTrack(
-      urls: [Uri.parse('http://127.0.0.1:$port/live.${flv ? 'flv' : 'm3u8'}')],
-      codec: 'avc',
-      bandwidth: 0,
-    ),
-    audio: null,
-    quality: quality,
-    qualities: [quality],
-    duration: Duration.zero,
-    headers: const {
-      'Referer': 'https://live.bilibili.com/',
-      'User-Agent': 'BiliSail-Content-Validation',
-    },
-    kind: flv ? PlaybackMediaKind.liveFlv : PlaybackMediaKind.liveHls,
-  );
+  }) async => target is PgcPlaybackTarget
+      ? _onDemandMedia(directory, quality)
+      : PlaybackMedia(
+          video: PlaybackTrack(
+            urls: [
+              Uri.parse('http://127.0.0.1:$port/live.${flv ? 'flv' : 'm3u8'}'),
+            ],
+            codec: 'avc',
+            bandwidth: 0,
+          ),
+          audio: null,
+          quality: quality,
+          qualities: [quality],
+          duration: Duration.zero,
+          headers: const {
+            'Referer': 'https://live.bilibili.com/',
+            'User-Agent': 'BiliSail-Content-Validation',
+          },
+          kind: flv ? PlaybackMediaKind.liveFlv : PlaybackMediaKind.liveHls,
+        );
 }
 
 final class _Progress implements PlaybackProgressStore {
@@ -303,7 +431,9 @@ final class _Progress implements PlaybackProgressStore {
   }
 }
 
-final class _UnusedVideoRepository implements PlaybackRepository {
+final class _FixtureVideoRepository implements PlaybackRepository {
+  const _FixtureVideoRepository(this.directory);
+  final String directory;
   @override
   Future<PlaybackMedia> resolve(
     VideoId video,
@@ -311,7 +441,7 @@ final class _UnusedVideoRepository implements PlaybackRepository {
     required int quality,
     VideoCodecPreference preferredCodec = VideoCodecPreference.h264,
     required RequestCancellation cancellation,
-  }) => throw StateError('Live must use its content resolver');
+  }) async => _onDemandMedia(directory, quality);
   @override
   Future<List<TimedComment>> comments(
     String cid,
@@ -330,3 +460,20 @@ final class _UnusedVideoRepository implements PlaybackRepository {
     required RequestCancellation cancellation,
   }) async => [];
 }
+
+PlaybackMedia _onDemandMedia(String directory, int quality) => PlaybackMedia(
+  video: PlaybackTrack(
+    urls: [File('$directory/video.mp4').uri],
+    codec: 'avc1',
+    bandwidth: 1000000,
+  ),
+  audio: PlaybackTrack(
+    urls: [File('$directory/audio.m4a').uri],
+    codec: 'mp4a',
+    bandwidth: 64000,
+  ),
+  quality: quality,
+  qualities: [quality],
+  duration: const Duration(seconds: 12),
+  headers: const {},
+);

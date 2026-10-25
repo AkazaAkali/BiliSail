@@ -10,10 +10,12 @@ import '../../../domain/request_cancellation.dart';
 import '../../../domain/video.dart';
 import '../../video/domain/video_actions_repository.dart';
 import '../domain/feed_repository.dart';
+import '../domain/popular_feed.dart';
 
 class ApiFeedRepository
     implements
         FeedRepository,
+        PopularFeedRepository,
         RankingFeedRepository,
         RecommendationFeedbackRepository {
   ApiFeedRepository(this.api, this.requests);
@@ -133,6 +135,39 @@ class ApiFeedRepository
     final result = await api.getPopular(page: page, context: context);
     return _mapPage(result);
   }, cancellation: cancellation);
+
+  @override
+  Future<List<PopularWeek>> loadPopularWeeks({
+    required RequestCancellation cancellation,
+  }) => requests.run((context) async {
+    final weeks = await api.getPopularWeeks(context: context);
+    return List.unmodifiable([
+      for (final week in weeks)
+        PopularWeek(
+          number: week.number,
+          name: week.name,
+          subject: week.subject,
+        ),
+    ]);
+  }, cancellation: cancellation);
+
+  @override
+  Future<PageResult<VideoSummary>> loadPopularWeek({
+    required int number,
+    required RequestCancellation cancellation,
+  }) => requests.run(
+    (context) async =>
+        _mapPage(await api.getPopularWeek(number: number, context: context)),
+    cancellation: cancellation,
+  );
+
+  @override
+  Future<PageResult<VideoSummary>> loadPrecious({
+    required RequestCancellation cancellation,
+  }) => requests.run(
+    (context) async => _mapPage(await api.getPreciousVideos(context: context)),
+    cancellation: cancellation,
+  );
 
   PageResult<VideoSummary> _mapPage(ApiPage<ApiVideoSummary> result) =>
       PageResult(

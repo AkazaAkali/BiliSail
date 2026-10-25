@@ -28,6 +28,57 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  for (final detached in [false, true]) {
+    test(
+      'dual media back restores position and pause after owner detached=$detached',
+      () async {
+        var epoch = 0;
+        final engine = _FakeEngine();
+        final session = PlaybackSession(
+          engine: engine,
+          repository: _FakeRepository(autoResolve: true),
+          progress: _FakeProgress(),
+          accountScope: () => 'guest',
+          sessionEpoch: () => epoch,
+        );
+        addTearDown(session.close);
+        session.configureSettings(
+          AppSettings(
+            navigationMode: WorkspaceNavigationMode.dualTabs,
+            autoPlay: true,
+            resumePlayback: false,
+          ),
+        );
+        var owner = Object();
+        session.attach(owner);
+        await session.activate(owner, _detail('one'), _part('one'));
+        await session.seek(const Duration(seconds: 24));
+        await session.pause();
+        if (detached) {
+          session.detach(owner);
+          await _flush();
+          owner = Object();
+          session.attach(owner);
+        }
+        await session.activate(owner, _detail('two'), _part('two'));
+        await session.activate(owner, _detail('one'), _part('one'));
+        expect(
+          engine.openOptions.last.startPosition,
+          const Duration(seconds: 24),
+        );
+        expect(engine.currentSnapshot.phase, PlaybackPhase.paused);
+        expect(engine.maxSimultaneousPlayers, 1);
+        await session.activate(owner, _detail('two'), _part('two'));
+        epoch++;
+        await session.activate(owner, _detail('one'), _part('one'));
+        expect(
+          engine.openOptions.last.startPosition,
+          isNot(const Duration(seconds: 24)),
+        );
+      },
+    );
+  }
+
   for (final kind in [PlaybackMediaKind.progressive, PlaybackMediaKind.dash]) {
     test(
       'single local file uses progressive open; missing DASH audio still fails: $kind',
@@ -2275,7 +2326,7 @@ void main() {
     },
   );
 
-  test('single page suspends other sources and preserves manual pause and preferences', () async {
+  test('exclusive workspace policy suspends other sources and preserves manual pause and preferences', () async {
     final manager = _manager();
     addTearDown(manager.close);
     final first = manager.acquire('first');
@@ -2312,7 +2363,7 @@ void main() {
     expect(second.snapshots.value.phase, PlaybackPhase.playing);
   });
 
-  test('single page blocks late resolution and keeps one source behind ordinary pages', () async {
+  test('exclusive workspace policy blocks late resolution and keeps one source behind ordinary pages', () async {
     final repository = _FakeRepository();
     final manager = _manager(repository: repository);
     addTearDown(manager.close);
@@ -2346,7 +2397,7 @@ void main() {
     expect(second.snapshots.value.phase, PlaybackPhase.playing);
   });
 
-  test('single page waits for an outgoing native pause and rejects a stale selection', () async {
+  test('exclusive workspace policy waits for an outgoing native pause and rejects a stale selection', () async {
     final manager = _manager();
     addTearDown(manager.close);
     final first = manager.acquire('first');

@@ -20,8 +20,8 @@ final class HomeChannelSwipe extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => RetainedTabView<HomeChannel>(
-    tabs: HomeChannel.values,
-    value: channel,
+    tabs: HomeChannel.primaryValues,
+    value: channel == HomeChannel.ranking ? HomeChannel.popular : channel,
     onChanged: onChanged,
     pageBuilder: pageBuilder,
     viewKey: const ValueKey('home-channel-swipe'),

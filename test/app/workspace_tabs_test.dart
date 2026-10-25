@@ -2,6 +2,130 @@ import 'package:bilisail/app/workspace_tabs.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('desktop browser back skips playback visits and keeps the player', () {
+    final workspace = WorkspaceTabs()..setDualMode(true);
+    workspace.acceptRoute(Uri.parse('/search?q=cat'));
+    final search = workspace.activeId;
+    workspace.acceptRoute(Uri.parse('/video/A'));
+    final playback = workspace.activeId;
+    workspace.acceptRoute(Uri.parse('/history'));
+    final history = workspace.activeId;
+    expect(workspace.canGoBackBrowsing, isTrue);
+    expect(workspace.goBackBrowsing(), isTrue);
+    expect(workspace.activeId, search);
+    expect(workspace.tabs.map((tab) => tab.id), isNot(contains(history)));
+    expect(workspace.playbackId, playback);
+    expect(
+      workspace.tabs.where((tab) => tab.id == playback).single.location.path,
+      '/video/A',
+    );
+    expect(workspace.goBackBrowsing(), isTrue);
+    expect(workspace.activeId, 'home');
+    expect(workspace.tabs.map((tab) => tab.id), isNot(contains(search)));
+    expect(workspace.goBackBrowsing(), isFalse);
+  });
+
+  test(
+    'dual slots reuse media, back restores URI and close returns to browsing',
+    () {
+      final workspace = WorkspaceTabs()..setDualMode(true);
+      workspace.acceptRoute(Uri.parse('/search?q=cat'));
+      final browse = workspace.active;
+      workspace.acceptRoute(Uri.parse('/video/A?cid=2&queue=test'));
+      final playback = workspace.active.id;
+      workspace.acceptRoute(Uri.parse('/video/B'));
+      workspace.acceptRoute(Uri.parse('/pgc/episode/3'));
+      expect(workspace.visibleTabs.map((tab) => tab.id), [browse.id, playback]);
+      expect(workspace.tabs, hasLength(3));
+      expect(workspace.goBack(), isTrue);
+      expect(workspace.active.location.path, '/video/B');
+      // Committing the selected route must not reinsert the item just popped.
+      workspace.acceptRoute(workspace.active.route);
+      expect(workspace.goBack(), isTrue);
+      expect(workspace.active.location, Uri.parse('/video/A?cid=2&queue=test'));
+      expect(workspace.close(playback), isTrue);
+      expect(workspace.active, same(browse));
+      expect(workspace.visibleTabs, hasLength(1));
+      expect(workspace.close(browse.id), isFalse);
+    },
+  );
+
+  test(
+    'dual history ignores advancement and rejects an obsolete page callback',
+    () {
+      final workspace = WorkspaceTabs()..setDualMode(true);
+      workspace.acceptRoute(Uri.parse('/video/A'));
+      final first = workspace.active;
+      workspace.acceptRoute(Uri.parse('/video/B'));
+      expect(
+        workspace.updateLocation(
+          first.id,
+          Uri.parse('/video/stale'),
+          expectedLocation: first.location,
+        ),
+        isFalse,
+      );
+      workspace.updateLocation(first.id, Uri.parse('/video/C?queue=test'));
+      workspace.goBack();
+      expect(workspace.active.location.path, '/video/A');
+      workspace.goBack();
+      expect(workspace.active.id, 'home');
+      expect(workspace.playbackId, isNull);
+      expect(workspace.tabs.map((tab) => tab.id), isNot(contains(first.id)));
+      workspace.cycle();
+      expect(workspace.active.id, 'home');
+      expect(
+        workspace.updateLocation(first.id, Uri.parse('/video/late')),
+        isFalse,
+      );
+      workspace.acceptRoute(Uri.parse('/video/fresh'));
+      expect(workspace.active.id, isNot(first.id));
+      workspace.goBack();
+      expect(workspace.active.id, 'home');
+    },
+  );
+
+  test(
+    'mode changes retain old tabs and dual history and browsing are bounded',
+    () {
+      final workspace = WorkspaceTabs();
+      workspace.acceptRoute(Uri.parse('/video/old'));
+      final old = workspace.active;
+      workspace.acceptRoute(Uri.parse('/video/current'));
+      workspace.setDualMode(true);
+      for (var index = 0; index < 40; index++) {
+        workspace.acceptRoute(Uri.parse('/video/$index'));
+        workspace.acceptRoute(Uri.parse('/search?q=$index'));
+      }
+      expect(workspace.tabs, hasLength(WorkspaceTabs.maximumTabs));
+      expect(workspace.visibleTabs, hasLength(2));
+      workspace.select(workspace.playbackId!);
+      var count = 0;
+      while (workspace.active.isPlayback) {
+        workspace.goBack();
+        count++;
+      }
+      expect(count, WorkspaceTabs.maximumTabs + 1);
+      // Capacity eviction is permitted; mode changes themselves never discard.
+      workspace.setDualMode(false);
+      expect(workspace.visibleTabs, workspace.tabs);
+      expect(workspace.tabs.where((tab) => tab.id == old.id), isEmpty);
+    },
+  );
+
+  test('switching modes alone preserves all retained pages and selection', () {
+    final workspace = WorkspaceTabs();
+    workspace.acceptRoute(Uri.parse('/video/A'));
+    workspace.acceptRoute(Uri.parse('/video/B'));
+    workspace.acceptRoute(Uri.parse('/search?q=keep'));
+    final before = workspace.tabs;
+    final active = workspace.active;
+    workspace.setDualMode(true);
+    expect(workspace.visibleTabs, hasLength(2));
+    workspace.setDualMode(false);
+    expect(workspace.tabs, before);
+    expect(workspace.active, same(active));
+  });
   test(
     'profile recipients reuse the inbox and consume intent without a visit',
     () {
@@ -12,11 +136,12 @@ void main() {
       final profileId = workspace.activeId;
       workspace.acceptRoute(Uri.parse('/messages?talker=2'));
       expect(workspace.activeId, inboxId);
-      expect(workspace.tabs, hasLength(3));
+      expect(workspace.tabs, hasLength(2));
       expect(workspace.active.location.queryParameters['talker'], '2');
       workspace.acceptRoute(Uri.parse('/messages?tab=$inboxId'));
-      expect(workspace.goBack(), isTrue);
-      expect(workspace.activeId, profileId);
+      expect(workspace.goBack(), isFalse);
+      expect(workspace.activeId, 'home');
+      expect(workspace.tabs.map((tab) => tab.id), contains(profileId));
     },
   );
   test('background playback updates preserve selection and visit history', () {
@@ -86,21 +211,21 @@ void main() {
     },
   );
 
-  test('section updates stay on a page and back restores the home channel', () {
+  test('settings categories stay on the primary root without a visit', () {
     final workspace = WorkspaceTabs();
     workspace.acceptRoute(Uri.parse('/?channel=bangumi&tab=home'));
     workspace.acceptRoute(Uri.parse('/settings'));
     workspace.acceptRoute(
       Uri.parse('/settings?section=playback&tab=${workspace.activeId}'),
     );
-    workspace.goBack(closeCurrent: true);
-    expect(workspace.active.location.queryParameters['channel'], 'bangumi');
+    expect(workspace.goBack(), isFalse);
+    expect(workspace.active.location.queryParameters['section'], 'playback');
     expect(workspace.canGoBack, isFalse);
     expect(workspace.tabs, hasLength(1));
   });
 
   test(
-    'single-page back keeps repeated destinations until their final pop',
+    'workspace back keeps repeated destinations and their retained pages',
     () {
       final workspace = WorkspaceTabs();
       workspace.acceptRoute(Uri.parse('/search?q=test'));
@@ -108,15 +233,15 @@ void main() {
       workspace.acceptRoute(Uri.parse('/video/BV1234567890'));
       final video = workspace.active;
       workspace.acceptRoute(Uri.parse('/search?q=test'));
-      workspace.goBack(closeCurrent: true);
+      workspace.goBack();
       expect(workspace.activeId, video.id);
       expect(workspace.tabs.map((tab) => tab.id), contains(search.id));
-      workspace.goBack(closeCurrent: true);
+      workspace.goBack();
       expect(workspace.activeId, search.id);
-      expect(workspace.tabs.map((tab) => tab.id), isNot(contains(video.id)));
-      workspace.goBack(closeCurrent: true);
-      expect(workspace.tabs, hasLength(1));
-      expect(workspace.goBack(closeCurrent: true), isFalse);
+      expect(workspace.tabs.map((tab) => tab.id), contains(video.id));
+      workspace.goBack();
+      expect(workspace.tabs, hasLength(3));
+      expect(workspace.goBack(), isFalse);
     },
   );
 
@@ -128,31 +253,79 @@ void main() {
     workspace.select(search);
     workspace.close(search);
     expect(workspace.activeId, 'home');
-    workspace.goBack();
+    expect(workspace.goBack(), isFalse);
     expect(workspace.active.location.path, '/settings');
-    workspace.goBack();
     expect(workspace.activeId, 'home');
     expect(workspace.canGoBack, isFalse);
   });
 
-  test('single-page browsing evicts old pages and remains bounded past 16', () {
-    final workspace = WorkspaceTabs();
+  test('dual browsing evicts old pages and remains bounded past 16', () {
+    final workspace = WorkspaceTabs()..setDualMode(true);
     for (var i = 0; i < 40; i++) {
-      expect(
-        workspace.acceptRoute(Uri.parse('/search?q=$i'), singlePage: true),
-        isTrue,
-      );
+      expect(workspace.acceptRoute(Uri.parse('/search?q=$i')), isTrue);
     }
     expect(workspace.tabs, hasLength(WorkspaceTabs.maximumTabs));
     expect(workspace.active.location.queryParameters['q'], '39');
     expect(workspace.tabs.first.id, 'home');
     var backCount = 0;
-    while (workspace.goBack(closeCurrent: true)) {
+    while (workspace.goBack()) {
       backCount++;
     }
     expect(backCount, WorkspaceTabs.maximumTabs - 1);
     expect(workspace.activeId, 'home');
     expect(workspace.tabs, hasLength(1));
+  });
+
+  test('all primary routes share the protected root without visits', () {
+    final workspace = WorkspaceTabs();
+    for (final route in [
+      '/me',
+      '/messages?talker=2&tab=old-inbox',
+      '/downloads?tab=old-downloads',
+      '/settings?section=shortcuts&tab=old-settings',
+      '/?channel=popular&section=每周必看',
+      '/me?tab=obsolete',
+      '/?channel=live&section=我的关注&tab=home',
+    ]) {
+      workspace.acceptRoute(Uri.parse(route));
+      expect(workspace.activeId, 'home');
+      expect(workspace.active.isRoot, isTrue);
+      expect(workspace.active.pinned, isTrue);
+      expect(workspace.tabs, hasLength(1));
+      expect(workspace.canGoBack, isFalse);
+      expect(workspace.close('home'), isFalse);
+    }
+    expect(workspace.updateLocation('home', Uri.parse('/me')), isTrue);
+    expect(workspace.active.isAccount, isTrue);
+    expect(workspace.active.title, '我的');
+    expect(workspace.updateLocation('home', Uri.parse('/user/2')), isFalse);
+    final browse = workspace.addBrowseTab();
+    workspace.acceptRoute(Uri.parse('/?channel=popular&tab=${browse.id}'));
+    expect(workspace.activeId, browse.id);
+    expect(workspace.active.pinned, isFalse);
+    workspace.acceptRoute(Uri.parse('/me?tab=${browse.id}'));
+    expect(workspace.activeId, 'home');
+    expect(workspace.tabs, hasLength(2));
+  });
+
+  test('dual Back consumes transient pages and falls back to the My root', () {
+    final workspace = WorkspaceTabs()..setDualMode(true);
+    workspace.acceptRoute(Uri.parse('/me'));
+    workspace.acceptRoute(Uri.parse('/search?q=keep'));
+    final search = workspace.activeId;
+    workspace.acceptRoute(Uri.parse('/user/42'));
+    final profile = workspace.activeId;
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.activeId, search);
+    expect(workspace.tabs.map((tab) => tab.id), isNot(contains(profile)));
+    expect(workspace.updateLocation(profile, Uri.parse('/user/43')), isFalse);
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.activeId, 'home');
+    expect(workspace.active.isAccount, isTrue);
+    expect(workspace.tabs, hasLength(1));
+    expect(workspace.goBack(), isFalse);
+    workspace.setDualMode(false);
+    expect(workspace.goBack(), isFalse);
   });
 
   test('repeated tab selection has a bounded navigation history', () {
@@ -168,7 +341,7 @@ void main() {
     expect(backCount, WorkspaceTabs.maximumHistory);
   });
 
-  test('messages open and reuse their own tab while keeping the video tab', () {
+  test('messages reuse the fixed root while keeping the video tab', () {
     final workspace = WorkspaceTabs();
     workspace.acceptRoute(Uri.parse('/video/BV1234567890'));
     final video = workspace.active.id;
@@ -179,7 +352,11 @@ void main() {
     expect(workspace.active.id, video);
     workspace.acceptRoute(Uri.parse('/messages'));
     expect(workspace.active.id, messages);
-    expect(workspace.tabs, hasLength(3));
+    workspace.acceptRoute(Uri.parse('/messages?tab=$video'));
+    expect(workspace.activeId, 'home');
+    expect(workspace.tabs.firstWhere((tab) => tab.id == video).isVideo, isTrue);
+    expect(messages, 'home');
+    expect(workspace.tabs, hasLength(2));
   });
   test('user spaces reuse their tab by UID and preserve the video tab', () {
     final workspace = WorkspaceTabs();

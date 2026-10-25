@@ -154,6 +154,10 @@ class _CommandTargetScopeState<C> extends State<CommandTargetScope<C>> {
   }
 
   void _register() {
+    if (!_hasHandlers(widget)) {
+      _registration = null;
+      return;
+    }
     _registration = _input?.dispatcher.register(
       owner: this,
       scope: widget.scope,
@@ -169,6 +173,11 @@ class _CommandTargetScopeState<C> extends State<CommandTargetScope<C>> {
     );
   }
 
+  bool _hasHandlers(CommandTargetScope<C> scope) =>
+      scope.commands.isNotEmpty ||
+      scope.onCancel != null ||
+      scope.onNavigate != null;
+
   @override
   void didUpdateWidget(covariant CommandTargetScope<C> oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -176,7 +185,8 @@ class _CommandTargetScopeState<C> extends State<CommandTargetScope<C>> {
       final registration = _registration;
       if (registration != null) _input?.dispatcher.invalidate(registration);
     }
-    if (oldWidget.commands.keys
+    if (_hasHandlers(oldWidget) != _hasHandlers(widget) ||
+        oldWidget.commands.keys
             .toSet()
             .difference(widget.commands.keys.toSet())
             .isNotEmpty ||

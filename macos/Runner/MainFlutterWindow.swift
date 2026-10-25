@@ -3,6 +3,7 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var systemFontsChannel: FlutterMethodChannel?
+  private var desktopWindows: DesktopWindowController?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -24,7 +25,256 @@ class MainFlutterWindow: NSWindow {
       result(NSFontManager.shared.availableFontFamilies)
     }
     systemFontsChannel = channel
+    desktopWindows = DesktopWindowController(
+      messenger: flutterViewController.engine.binaryMessenger
+    )
 
     super.awakeFromNib()
+  }
+}
+
+// The SDK's public registrar currently exposes only its implicit view. Resolve
+// the pinned windowing API's handle against this process's real NSWindows;
+// never dereference a window pointer received over the channel.
+private final class DesktopWindowController {
+  private let channel: FlutterMethodChannel
+  private var captions: [Int64: PlaybackTitlebarBack] = [:]
+  private var geometryOwner: (view: Int64, owner: Int64)?
+  private var normalPlaybackFrame: NSRect?
+  private var playbackMaximized = false
+  private var geometryTracker: PlaybackGeometryTracker?
+
+  init(messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(
+      name: "bilisail/desktop_window", binaryMessenger: messenger
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self = self,
+            let args = call.arguments as? [String: Any],
+            let viewID = (args["viewId"] as? NSNumber)?.int64Value else {
+        result(FlutterError(code: "invalid_argument", message: "Expected a view ID.", details: nil))
+        return
+      }
+      let geometryCall = ["restoreGeometry", "captureGeometry", "retireGeometry"].contains(call.method)
+      let owner = (args["owner"] as? NSNumber)?.int64Value ?? -1
+      if geometryCall && owner <= 0 {
+        result(FlutterError(code: "invalid_argument", message: "Expected a geometry owner.", details: nil))
+        return
+      }
+      let ownsGeometry = self.geometryOwner?.view == viewID && self.geometryOwner?.owner == owner
+      if call.method == "retireGeometry" {
+        if ownsGeometry {
+          self.geometryTracker?.detach()
+          self.geometryTracker = nil
+          self.geometryOwner = nil
+        }
+        result(nil)
+        return
+      }
+      if call.method == "captureGeometry" && !ownsGeometry {
+        result(nil)
+        return
+      }
+      if call.method == "removeBackButton" {
+        self.captions.removeValue(forKey: viewID)?.detach()
+        result(nil)
+        return
+      }
+      guard let handle = (args["windowHandle"] as? NSNumber)?.uint64Value,
+            let window = NSApp.windows.first(where: {
+              UInt64(UInt(bitPattern: Unmanaged.passUnretained($0).toOpaque())) == handle
+            }) else {
+        result(FlutterError(code: "window_unavailable", message: "Flutter window is unavailable.", details: nil))
+        return
+      }
+      switch call.method {
+      case "restoreGeometry":
+        self.geometryTracker?.detach()
+        let restoreMaximized = self.playbackMaximized
+        if let saved = self.normalPlaybackFrame,
+           let fitted = PlaybackGeometryTracker.fitToVisibleScreen(saved) {
+          window.setFrame(fitted, display: false)
+        }
+        self.geometryOwner = (viewID, owner)
+        self.geometryTracker = PlaybackGeometryTracker(window: window) { [weak self] frame, maximized in
+          guard let self = self, self.geometryOwner?.view == viewID,
+                self.geometryOwner?.owner == owner else { return }
+          if let frame = frame { self.normalPlaybackFrame = frame }
+          self.playbackMaximized = maximized
+        }
+        // Zoom after installing the normal frame, preserving Cocoa's unzoom
+        // rectangle. Fullscreen is deliberately not restored as zoom.
+        if restoreMaximized && !window.isZoomed { window.zoom(nil) }
+        self.geometryTracker?.capture()
+        result(nil)
+      case "captureGeometry":
+        self.geometryTracker?.capture()
+        result(nil)
+      case "activate":
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        result(nil)
+      case "setBackButton":
+        guard let enabled = args["enabled"] as? Bool else {
+          result(FlutterError(code: "invalid_argument", message: "Expected a Back enabled state.", details: nil))
+          return
+        }
+        if self.captions[viewID] == nil {
+          let caption = PlaybackTitlebarBack(window: window) { [weak self] in
+            self?.channel.invokeMethod("back", arguments: ["viewId": viewID])
+          }
+          self.captions[viewID] = caption
+          window.addTitlebarAccessoryViewController(caption)
+        }
+        self.captions[viewID]?.backButton.isEnabled = enabled
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  deinit {
+    channel.setMethodCallHandler(nil)
+    for caption in captions.values { caption.detach() }
+    geometryTracker?.detach()
+  }
+}
+
+// Frame coordinates stay in Cocoa desktop points. This engine-owned tracker
+// keeps one normal rectangle plus zoom state; never writes NSWindow autosave.
+private final class PlaybackGeometryTracker {
+  private weak var window: NSWindow?
+  private let onCapture: (NSRect?, Bool) -> Void
+  private var observers: [NSObjectProtocol] = []
+  private var fullscreenTransition = false
+
+  init(window: NSWindow, onCapture: @escaping (NSRect?, Bool) -> Void) {
+    self.window = window
+    self.onCapture = onCapture
+    let center = NotificationCenter.default
+    for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification,
+                 NSWindow.willMiniaturizeNotification] {
+      observers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+        self?.capture()
+      })
+    }
+    observers.append(center.addObserver(forName: NSWindow.willEnterFullScreenNotification,
+                                       object: window, queue: .main) { [weak self] _ in
+      self?.capture()
+      self?.fullscreenTransition = true
+    })
+    observers.append(center.addObserver(forName: NSWindow.willExitFullScreenNotification,
+                                       object: window, queue: .main) { [weak self] _ in
+      self?.fullscreenTransition = true
+    })
+    observers.append(center.addObserver(forName: NSWindow.didExitFullScreenNotification,
+                                       object: window, queue: .main) { [weak self] _ in
+      self?.fullscreenTransition = false
+      self?.capture()
+    })
+    observers.append(center.addObserver(forName: NSWindow.willCloseNotification,
+                                       object: window, queue: .main) { [weak self] _ in
+      self?.capture()
+      self?.detach()
+    })
+    capture()
+  }
+
+  func capture() {
+    guard let window = window, !fullscreenTransition,
+          !window.isMiniaturized,
+          !window.styleMask.contains(.fullScreen), Self.valid(window.frame) else { return }
+    onCapture(window.isZoomed ? nil : window.frame, window.isZoomed)
+  }
+
+  static func valid(_ frame: NSRect) -> Bool {
+    frame.origin.x.isFinite && frame.origin.y.isFinite &&
+      frame.width.isFinite && frame.height.isFinite &&
+      abs(frame.origin.x) <= 1_000_000 && abs(frame.origin.y) <= 1_000_000 &&
+      frame.width >= 100 && frame.height >= 100 &&
+      frame.width <= 100_000 && frame.height <= 100_000
+  }
+
+  static func fitToVisibleScreen(_ saved: NSRect) -> NSRect? {
+    guard valid(saved), !NSScreen.screens.isEmpty else { return nil }
+    // Prefer overlap; after a display is removed choose the nearest work area.
+    let screen = NSScreen.screens.min { first, second in
+      func score(_ screen: NSScreen) -> CGFloat {
+        let area = saved.intersection(screen.visibleFrame)
+        if !area.isNull && !area.isEmpty { return -(area.width * area.height) }
+        return hypot(saved.midX - screen.visibleFrame.midX, saved.midY - screen.visibleFrame.midY)
+      }
+      return score(first) < score(second)
+    }
+    guard let work = screen?.visibleFrame, valid(work) else { return nil }
+    let width = min(saved.width, work.width)
+    let height = min(saved.height, work.height)
+    return NSRect(x: max(work.minX, min(saved.minX, work.maxX - width)),
+                  y: max(work.minY, min(saved.minY, work.maxY - height)),
+                  width: width, height: height)
+  }
+
+  func detach() {
+    for observer in observers { NotificationCenter.default.removeObserver(observer) }
+    observers.removeAll()
+    window = nil
+  }
+
+  deinit { detach() }
+}
+
+private final class PlaybackTitlebarBack: NSTitlebarAccessoryViewController {
+  let backButton = NSButton(title: "‹", target: nil, action: nil)
+  private weak var playbackWindow: NSWindow?
+  private let onBack: () -> Void
+  private var observers: [NSObjectProtocol] = []
+
+  init(window: NSWindow, onBack: @escaping () -> Void) {
+    self.playbackWindow = window
+    self.onBack = onBack
+    super.init(nibName: nil, bundle: nil)
+    layoutAttribute = .left
+    view = NSView(frame: NSRect(x: 0, y: 0, width: 36, height: 28))
+    backButton.frame = NSRect(x: 3, y: 3, width: 30, height: 22)
+    backButton.bezelStyle = .texturedRounded
+    backButton.font = .systemFont(ofSize: 20)
+    backButton.setAccessibilityLabel("返回上一视频或浏览窗口")
+    backButton.toolTip = "返回上一视频或浏览窗口"
+    backButton.target = self
+    backButton.action = #selector(back)
+    view.addSubview(backButton)
+    let center = NotificationCenter.default
+    observers.append(center.addObserver(forName: NSWindow.willEnterFullScreenNotification,
+                                       object: window, queue: .main) { [weak self] _ in
+      self?.view.isHidden = true
+    })
+    observers.append(center.addObserver(forName: NSWindow.didExitFullScreenNotification,
+                                       object: window, queue: .main) { [weak self] _ in
+      self?.view.isHidden = false
+    })
+  }
+
+  required init?(coder: NSCoder) { return nil }
+
+  @objc private func back() {
+    // A double click is one navigation action, matching the Windows caption.
+    if let event = NSApp.currentEvent,
+       event.type == .leftMouseDown || event.type == .leftMouseUp,
+       event.clickCount > 1 { return }
+    onBack()
+  }
+
+  func detach() {
+    guard let window = playbackWindow else { return }
+    if let index = window.titlebarAccessoryViewControllers.firstIndex(where: { $0 === self }) {
+      window.removeTitlebarAccessoryViewController(at: index)
+    }
+    playbackWindow = nil
+  }
+
+  deinit {
+    for observer in observers { NotificationCenter.default.removeObserver(observer) }
   }
 }

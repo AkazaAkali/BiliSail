@@ -12,17 +12,19 @@
 
 ## 应用侧修正
 
-新增 `core/presentation/bili_widgets_binding.dart`，由 `main.dart` 在初始化时安装。仅 Windows 单 Flutter view 的语义更新使用保护路径；不升级或改写全局 SDK、原生 DLL、播放器和依赖，不强制关闭无障碍。
+新增 `core/presentation/bili_widgets_binding.dart`，由 `main.dart` 在初始化时安装。Windows 语义更新使用保护路径；2026-10-25 为独立播放窗口扩展到按 view 的 SemanticsOwner 分别维护。不升级或改写全局 SDK、原生 DLL、播放器和依赖，不强制关闭无障碍。
 
 - 从当前 `SemanticsOwner` 根节点及原始 portal identifiers 推导实际遍历连通性，排除 merged 后代；不把 attached 状态或旧序列化缓存等同于当前可见。
 - 仅向原生端提交连通节点。遍历子列表剔除根 ID 0、自引用、循环／双父以及旧父引用；命中列表保持其独立次序，只过滤无效或不连通节点，不将两套子列表强行合并。
 - 缓存每个仍由当前 owner 持有的节点的最新不可变参数；列表／矩阵拥有副本。重新连通的干净节点补发数据，过滤导致干净父节点子边改变时也补发父节点，保留标签页面状态、语义字段和自定义动作。
 - 缓存同时核对 owner 与节点对象身份，避免 ID 复用；节点移除、owner 更换和关闭语义时清理，不写盘或输出语义文字。
-- 当前应用是单窗口／单 view；若以后引入多个 view，需要按 owner 分离该更新路径，不能共享根 ID 0。Android／macOS 保持标准语义更新，未将 Windows 规避结论推广至其他平台。
+- 多 view 按 owner 和根对象身份隔离；批次先收集更新，再由非根 ID 或根子 ID 确定归属。仅含空根且无法区分的批次不污染任何 owner 的根 ID 0 缓存，并令后续重发干净节点。关闭 view、替换根或关闭语义时清理。Android／macOS 保持标准语义更新，未将 Windows 规避结论推广至其他平台。
 
 源码依据为本机锁定的 Flutter public API 和语义序列化实现（Flutter BSD-3-Clause）。同时阅读 [OpenHarness 的公开应用侧方案](https://github.com/autonomous-ai/openharness/pull/620) 了解连通过滤与干净节点重连思路；本项目按自身入口独立实现，没有导入该仓库源码、测试、资源或运行时依赖。上游 issue／外部方案均不能替代本项目运行验收；SDK 更新后应重新评估是否移除这层规避。
 
 ## 构建与验收边界
+
+2026-10-25 多 view 扩展的 16 项定向回归及静态分析通过；本轮全量/窗口验证见[晴湾实施记录](../ui-redesign/implementation.md)。下列构建记录为原单 view 修复时的历史证据。
 
 按用户要求不运行或新增测试流程，没有自动执行订阅／取消等账号写入。根应用和 `bili_api` 静态分析通过，受影响 Dart 目录格式检查通过。分析与转储符号记录保存在忽略目录 `build/crash-diagnostics/`，未输出凭据或原始内存内容。
 

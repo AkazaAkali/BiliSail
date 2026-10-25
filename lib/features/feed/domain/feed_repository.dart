@@ -1,6 +1,7 @@
 import '../../../domain/page_result.dart';
 import '../../../domain/request_cancellation.dart';
 import '../../../domain/video.dart';
+import 'popular_feed.dart';
 
 final class VideoCategory {
   const VideoCategory({required this.id, required this.name});
@@ -36,6 +37,21 @@ abstract interface class RankingFeedRepository {
 
   Future<PageResult<VideoSummary>> loadRanking({
     required String categoryId,
+    required RequestCancellation cancellation,
+  });
+}
+
+abstract interface class PopularFeedRepository {
+  Future<List<PopularWeek>> loadPopularWeeks({
+    required RequestCancellation cancellation,
+  });
+
+  Future<PageResult<VideoSummary>> loadPopularWeek({
+    required int number,
+    required RequestCancellation cancellation,
+  });
+
+  Future<PageResult<VideoSummary>> loadPrecious({
     required RequestCancellation cancellation,
   });
 }

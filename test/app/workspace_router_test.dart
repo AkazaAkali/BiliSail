@@ -3,10 +3,22 @@ import 'package:bilisail/features/video/application/video_author_controller.dart
 import '../support/follow_repository_fake.dart';
 
 import '../support/input_test_app.dart';
+import '../support/video_card_fake_engine.dart';
+import '../support/detached_window_fake.dart';
+import '../support/native_window_events.dart';
+
+import 'package:bilisail/app/workspace_playback_window.dart';
+import 'package:bilisail/core/platform/detached_playback_window.dart';
+
+import 'package:bilisail/features/playback/application/playback_manager.dart';
+import 'package:bilisail/features/playback/application/playback_session.dart';
+import 'package:bilisail/features/playback/domain/playback_repository.dart';
+import 'package:bilisail/features/video/presentation/video_screen.dart';
 
 import 'dart:async';
 
 import 'package:bilisail/app/router.dart';
+import 'package:bilisail/app/shell.dart';
 import 'package:bilisail/app/platform_defaults.dart';
 import 'package:bilisail/features/messages/application/messages_controller.dart';
 import 'package:bilisail/features/messages/presentation/messages_screen.dart';
@@ -55,6 +67,192 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final detached in [false, true]) {
+    _workspaceTestWidgets(
+      'dual playback reuses its scoped session through resize, back and close detached=$detached',
+      (tester) async {
+        final engines = <CardFakeEngine>[];
+        final manager = PlaybackManager(
+          createSession: () {
+            final engine = CardFakeEngine();
+            engines.add(engine);
+            return PlaybackSession(
+              engine: engine,
+              repository: _UnusedPlaybackRepository(),
+              progress: _UnusedProgressRepository(),
+              accountScope: () => 'guest',
+            );
+          },
+        );
+        addTearDown(manager.close);
+        final settings = _SettingsRepository()
+          ..settings = const AppSettings.defaults().copyWith(
+            navigationMode: WorkspaceNavigationMode.dualTabs,
+          );
+        final scopes = <ProviderContainer>[];
+        final sessions = <PlaybackSession>[];
+        final windows = FakeDetachedWindowFactory(tester.view);
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          const MethodChannel('bilisail/desktop_window'),
+          (_) async => null,
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            const MethodChannel('bilisail/desktop_window'),
+            null,
+          ),
+        );
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          const MethodChannel('bilisail/text_input'),
+          (_) async => null,
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            const MethodChannel('bilisail/text_input'),
+            null,
+          ),
+        );
+        final router = createBiliRouter(
+          playbackWindowBuilder: !detached
+              ? null
+              : (
+                  context, {
+                  required child,
+                  required playback,
+                  required activationToken,
+                  required onClose,
+                  required onBack,
+                  required onError,
+                }) => DesktopPlaybackWindow(
+                  windowFactory: windows.call,
+                  onError: (error) => fail('$error'),
+                  onCloseRequested: onClose,
+                  activationToken: activationToken,
+                  playback: playback == null
+                      ? null
+                      : WorkspacePlaybackWindow(
+                          theme: Theme.of(context),
+                          shortcuts: settings.settings.shortcuts,
+                          onClose: onClose,
+                          onBack: onBack,
+                          onActivateBrowser: () {},
+                          child: playback,
+                        ),
+                  child: child,
+                ),
+          playerBuilder: (context, detail, part) => Consumer(
+            builder: (context, ref, _) {
+              scopes.add(ProviderScope.containerOf(context));
+              sessions.add(ref.watch(playbackSessionProvider));
+              return Text('playing ${detail.summary.id.value}/${part.cid}');
+            },
+          ),
+        );
+        addTearDown(router.dispose);
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1280, 900);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              settingsRepositoryProvider.overrideWithValue(settings),
+              playbackManagerProvider.overrideWithValue(manager),
+              videoRepositoryProvider.overrideWithValue(_VideoRepository()),
+              relatedVideosProvider.overrideWith((ref, id) async => []),
+              videoTagsProvider.overrideWith((ref, id) async => []),
+              feedRepositoryProvider.overrideWithValue(_FeedRepository()),
+              homeRepositoryProvider.overrideWithValue(_HomeRepository()),
+            ],
+            child: InputTestApp.router(routerConfig: router),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final feedState = tester.state(find.byType(FeedScreen));
+        router.go('/video/BV1234567890?cid=2');
+        await tester.pumpAndSettle();
+        final session = sessions.last;
+        final scope = scopes.last;
+        router.go('/video/BV0987654321');
+        await tester.pumpAndSettle();
+        expect(sessions.last, same(session));
+        expect(scopes.last, same(scope));
+        expect(engines, hasLength(1));
+        if (detached) {
+          expect(windows.creationCount, 1);
+          expect(tester.state(find.byType(FeedScreen)), same(feedState));
+          expect(
+            View.of(tester.element(find.byType(VideoScreen))).viewId,
+            windows.lastWindow!.viewId,
+          );
+          router.go('/');
+          await tester.pumpAndSettle();
+          expect(find.byType(VideoScreen), findsOneWidget);
+          expect(sessions.last, same(session));
+        }
+        for (final width in [390.0, 760.0, 1440.0]) {
+          tester.view.physicalSize = Size(width, 900);
+          await tester.pumpAndSettle();
+          expect(sessions.last, same(session));
+          expect(scopes.last, same(scope));
+        }
+        if (detached) {
+          await sendNativeWindowBack(tester, windows.lastWindow!.viewId);
+        } else {
+          await tester.tap(find.byTooltip('返回上一视频'));
+        }
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<VideoScreen>(find.byType(VideoScreen)).initialCid,
+          '2',
+        );
+        expect(find.text('playing BV1234567890/2'), findsOneWidget);
+        if (detached) {
+          final controller = scope.read(settingsControllerProvider.notifier);
+          for (final mode in [
+            WorkspaceNavigationMode.multipleTabs,
+            WorkspaceNavigationMode.dualTabs,
+          ]) {
+            await controller.setNavigationMode(mode);
+            await tester.pumpAndSettle();
+            expect(sessions.last, same(session));
+            expect(scopes.last, same(scope));
+            expect(engines, hasLength(1));
+          }
+          expect(windows.creationCount, 2);
+        }
+        if (detached) {
+          // Once the previous media visit was consumed, native Back closes
+          // the playback slot and releases its sole scoped session.
+          await sendNativeWindowBack(tester, windows.lastWindow!.viewId);
+        } else {
+          await tester.tap(find.byTooltip('关闭播放'));
+        }
+        await tester.pumpAndSettle();
+        expect(tester.state(find.byType(FeedScreen)), same(feedState));
+        // Session shutdown drains asynchronous engine commands after the scope
+        // is unmounted; no animation frame is needed to finish that drain.
+        for (var frame = 0; frame < 5; frame++) {
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        expect(engines.single.stops, greaterThan(0));
+        expect(engines.single.disposals, 1);
+        if (detached) {
+          expect(windows.lastWindow!.disposed, isTrue);
+          expect(find.byType(VideoScreen, skipOffstage: false), findsNothing);
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump();
+        await tester.runAsync(
+          () => manager.close().timeout(const Duration(seconds: 2)),
+        );
+      },
+    );
+  }
   for (final mode in WorkspaceNavigationMode.values) {
     _workspaceTestWidgets(
       'home swipes synchronize routes and visible channels in $mode',
@@ -105,9 +303,15 @@ void main() {
         await tester.drag(surface, const Offset(-220, 0));
         await tester.pumpAndSettle();
         expect(find.text('登录后可查看动态'), findsOneWidget);
-        await tester.tap(find.byKey(const ValueKey('channel-recommended')));
+        await tester.tap(find.byKey(const ValueKey('workspace-bottom-home')));
         await tester.pumpAndSettle();
-        for (final channel in HomeChannel.values.skip(1)) {
+        expect(
+          tester.widget<FeedScreen>(find.byType(FeedScreen)).channel,
+          HomeChannel.popular,
+        );
+        router.go('/?channel=recommended&tab=home');
+        await tester.pumpAndSettle();
+        for (final channel in HomeChannel.primaryValues.skip(1)) {
           await tester.drag(surface, const Offset(-220, 0));
           await tester.pumpAndSettle();
           expect(
@@ -324,7 +528,8 @@ void main() {
         expect(find.text('99+'), findsNothing);
         expect(find.text('2'), findsOneWidget);
         final callsBeforeReturn = search.calls.length;
-        if (mode == WorkspaceNavigationMode.singlePage) {
+        final dogSignal = search.cancellations.last;
+        if (mode != WorkspaceNavigationMode.multipleTabs) {
           await tester.tap(find.byKey(const ValueKey('workspace-back')));
         } else {
           await tester.tap(find.byKey(const ValueKey('workspace-tab-tab-1')));
@@ -339,6 +544,7 @@ void main() {
         expect(find.text('99+'), findsOneWidget);
         expect(find.text('粉丝数由高到低'), findsOneWidget);
         expect(search.calls.length, callsBeforeReturn);
+        expect(dogSignal.isCancelled, mode == WorkspaceNavigationMode.dualTabs);
         expect(root.read(searchControllerProvider).query, isEmpty);
         expect(tester.takeException(), isNull);
       },
@@ -392,6 +598,13 @@ void main() {
         expect(find.text('“$tag” 的搜索结果'), findsOneWidget);
         await tester.binding.handlePopRoute();
         await tester.pumpAndSettle();
+        if (mode == WorkspaceNavigationMode.dualTabs) {
+          expect(find.byType(SearchScreen, skipOffstage: false), findsNothing);
+          expect(find.byType(FeedScreen), findsOneWidget);
+          expect(find.text('播放 第二集', skipOffstage: false), findsOneWidget);
+          router.go('/video/BV1234567890?cid=2');
+          await tester.pumpAndSettle();
+        }
         expect(find.text('播放 第二集'), findsOneWidget);
         expect(created, 1);
         expect(tester.takeException(), isNull);
@@ -427,25 +640,28 @@ void main() {
           ),
         );
         await tester.pump();
-        final singlePage =
+        final dual =
             workspaceNavigationModeForPlatform(platform) ==
-            WorkspaceNavigationMode.singlePage;
+            WorkspaceNavigationMode.dualTabs;
         expect(
           find.byKey(const ValueKey('workspace-tab-strip')),
-          singlePage ? findsNothing : findsOneWidget,
+          dual ? findsNothing : findsOneWidget,
         );
         settings.loaded.complete(
           AppSettings(
-            navigationMode: singlePage
+            navigationMode: dual
                 ? WorkspaceNavigationMode.multipleTabs
-                : WorkspaceNavigationMode.singlePage,
+                : WorkspaceNavigationMode.dualTabs,
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
         expect(
-          find.byKey(const ValueKey('single-page-header')),
-          platform == TargetPlatform.android ? findsNothing : findsOneWidget,
+          find.byKey(const ValueKey('workspace-tab-strip')),
+          dual ? findsOneWidget : findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('new-workspace-tab')),
+          dual ? findsOneWidget : findsNothing,
         );
         expect(tester.takeException(), isNull);
       },
@@ -453,7 +669,7 @@ void main() {
     );
   }
   _workspaceTestWidgets(
-    'saved navigation mode applies live and single-page back retains real search state',
+    'saved navigation modes apply live and back retains real search state',
     (tester) async {
       final settings = _SettingsRepository();
       final search = _SearchRepository();
@@ -477,29 +693,48 @@ void main() {
       expect(search.queries, ['cat']);
       router.go('/settings');
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ChoiceChip, '单标签页'));
+      await tester.tap(find.widgetWithText(ChoiceChip, '双标签页'));
       await tester.pumpAndSettle();
       expect(
         settings.settings.navigationMode,
-        WorkspaceNavigationMode.singlePage,
+        WorkspaceNavigationMode.dualTabs,
       );
-      expect(find.byKey(const ValueKey('single-page-header')), findsOneWidget);
       expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
       expect(find.byKey(const ValueKey('new-workspace-tab')), findsNothing);
       await tester.tap(find.widgetWithText(ChoiceChip, '多标签页'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('workspace-tab-tab-1')), findsOneWidget);
-      await tester.tap(find.widgetWithText(ChoiceChip, '单标签页'));
+      await tester.tap(find.widgetWithText(ChoiceChip, '双标签页'));
+      await tester.pumpAndSettle();
+      // Settings is a primary destination; Back does not turn it into a
+      // transient visit. The retained search can still be selected explicitly.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(ChoiceChip, '双标签页'), findsOneWidget);
+      router.go('/search?q=cat');
+      await tester.pumpAndSettle();
+      router.go('/search?q=dog');
       await tester.pumpAndSettle();
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(find.text('“cat” 的搜索结果'), findsOneWidget);
-      expect(search.queries, ['cat']);
+      expect(search.queries, ['cat', 'dog']);
       final signals = search.cancellations.toList();
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(signals.every((signal) => signal.isCancelled), isTrue);
-      expect(find.byType(FeedScreen), findsOneWidget);
+      expect(find.widgetWithText(ChoiceChip, '双标签页'), findsOneWidget);
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(BiliAppShell)),
+        listen: false,
+      );
+      await container
+          .read(settingsControllerProvider.notifier)
+          .setNavigationMode(WorkspaceNavigationMode.multipleTabs);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('workspace-tab-tab-1')), findsNothing);
+      expect(find.byKey(const ValueKey('workspace-tab-tab-2')), findsNothing);
+      expect(signals.every((signal) => signal.isCancelled), isTrue);
       expect(tester.takeException(), isNull);
     },
   );
@@ -598,8 +833,6 @@ void main() {
         '/',
         '/search?q=test',
         '/history',
-        '/settings?section=shortcuts',
-        '/downloads',
         '/user/42',
         '/video/BV1234567890',
         '/pgc/season/28747',
@@ -799,6 +1032,22 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      final title = find.byKey(const ValueKey('settings-page-title'));
+      final strip = find.byKey(const ValueKey('settings-category-strip'));
+      expect(title, findsOneWidget);
+      expect(strip, findsOneWidget);
+      expect(
+        tester.getBottomLeft(title).dy,
+        lessThan(tester.getTopLeft(strip).dy),
+      );
+      expect(
+        tester.getBottomLeft(strip).dy,
+        lessThan(
+          tester
+              .getTopLeft(find.byKey(const ValueKey('settings-category-swipe')))
+              .dy,
+        ),
+      );
       final originalPager = tester.element(
         find.byKey(const ValueKey('settings-category-swipe')),
       );
@@ -1307,6 +1556,12 @@ void main() {
     },
   );
 }
+
+final class _UnusedPlaybackRepository extends Fake
+    implements PlaybackRepository {}
+
+final class _UnusedProgressRepository extends Fake
+    implements PlaybackProgressStore {}
 
 final class _HistoryRepository implements LibraryRepository {
   @override

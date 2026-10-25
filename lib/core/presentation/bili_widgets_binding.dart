@@ -15,7 +15,7 @@ import 'package:flutter/widgets.dart';
 class BiliWidgetsBinding extends WidgetsFlutterBinding {
   BiliWidgetsBinding._() {
     addSemanticsEnabledListener(() {
-      if (!semanticsEnabled) _resetSemanticsUpdates();
+      if (!semanticsEnabled) _semanticsUpdates.reset();
     });
   }
 
@@ -32,9 +32,17 @@ class BiliWidgetsBinding extends WidgetsFlutterBinding {
     return binding;
   }
 
-  SemanticsOwner? _semanticsOwner;
-  final _nodeUpdates = <int, _NodeUpdate>{};
-  final _previousReachable = <int>{};
+  final _semanticsUpdates = WindowsSemanticsUpdateGuard();
+
+  Iterable<SemanticsOwner> get _activeSemanticsOwners => renderViews
+      .map((view) => view.owner?.semanticsOwner)
+      .whereType<SemanticsOwner>();
+
+  @override
+  void removeRenderView(RenderView view) {
+    super.removeRenderView(view);
+    _semanticsUpdates.retainOwners(_activeSemanticsOwners);
+  }
 
   @override
   ui.SemanticsUpdateBuilder createSemanticsUpdateBuilder() {
@@ -42,42 +50,61 @@ class BiliWidgetsBinding extends WidgetsFlutterBinding {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.windows) {
       return delegate;
     }
-    final owners = renderViews
-        .map((view) => view.owner?.semanticsOwner)
-        .whereType<SemanticsOwner>()
-        .where((owner) => owner.rootSemanticsNode != null)
-        .toSet();
-    // The app has one Flutter view. Do not combine unrelated view roots, whose
-    // semantics root IDs are both 0, if multi-view support is added later.
-    if (owners.length != 1) {
-      _resetSemanticsUpdates();
-      return delegate;
-    }
-    final owner = owners.single;
-    if (!identical(owner, _semanticsOwner)) {
-      _resetSemanticsUpdates();
-      _semanticsOwner = owner;
-    }
-    final root = owner.rootSemanticsNode;
-    if (root == null) return delegate;
-    final tree = _TraversalTree(root);
-    _nodeUpdates.removeWhere(
-      (id, update) => !identical(owner.getSemanticsNode(id), update.node),
-    );
-    _previousReachable.retainAll(_nodeUpdates.keys);
-    return _ReachableSemanticsBuilder(
-      delegate,
-      owner,
-      tree,
-      _nodeUpdates,
-      _previousReachable,
+    return _semanticsUpdates.wrap(delegate, _activeSemanticsOwners);
+  }
+}
+
+/// Per-view Windows AX state, separate from binding initialization for tests.
+@visibleForTesting
+final class WindowsSemanticsUpdateGuard {
+  final _owners = Map<SemanticsOwner, _OwnerSemanticsUpdates>.identity();
+
+  void retainOwners(Iterable<SemanticsOwner> owners) {
+    final active = owners.toSet();
+    _owners.removeWhere(
+      (owner, state) =>
+          !active.contains(owner) ||
+          !identical(owner.rootSemanticsNode, state.root),
     );
   }
 
-  void _resetSemanticsUpdates() {
-    _semanticsOwner = null;
-    _nodeUpdates.clear();
-    _previousReachable.clear();
+  ui.SemanticsUpdateBuilder wrap(
+    ui.SemanticsUpdateBuilder delegate,
+    Iterable<SemanticsOwner> owners,
+  ) {
+    final active = owners.toSet();
+    retainOwners(active);
+    final states = <_OwnerSemanticsUpdates>[];
+    for (final owner in active) {
+      final root = owner.rootSemanticsNode;
+      if (root == null) continue;
+      final state = _owners.putIfAbsent(
+        owner,
+        () => _OwnerSemanticsUpdates(owner, root),
+      );
+      state.prune();
+      states.add(state);
+    }
+    if (states.isEmpty) return delegate;
+    return _ReachableSemanticsBuilder(delegate, states);
+  }
+
+  void reset() => _owners.clear();
+}
+
+final class _OwnerSemanticsUpdates {
+  _OwnerSemanticsUpdates(this.owner, this.root);
+
+  final SemanticsOwner owner;
+  final SemanticsNode root;
+  final nodeUpdates = <int, _NodeUpdate>{};
+  final previousReachable = <int>{};
+
+  void prune() {
+    nodeUpdates.removeWhere(
+      (id, update) => !identical(owner.getSemanticsNode(id), update.node),
+    );
+    previousReachable.retainAll(nodeUpdates.keys);
   }
 }
 
@@ -134,6 +161,18 @@ final class _TraversalTree {
     }
   }
 
+  _TraversalTree.common(List<_TraversalTree> trees) {
+    reachable.addAll(trees.first.reachable);
+    reachable.removeWhere(
+      (id) => !trees.every((tree) => tree.reachable.contains(id)),
+    );
+    for (final entry in trees.first.parentByChild.entries) {
+      if (trees.every((tree) => tree.parentByChild[entry.key] == entry.value)) {
+        parentByChild[entry.key] = entry.value;
+      }
+    }
+  }
+
   final reachable = <int>{};
   // First visit fixes one parent per node and prevents ancestor cycles. This
   // also rejects a stale cached edge when a reachable child changes parents.
@@ -149,14 +188,15 @@ typedef _WriteNode = void Function(
 
 final class _NodeUpdate {
   _NodeUpdate({
-    required this.node,
+    required this.id,
     required this.traversalChildren,
     required this.hitTestChildren,
     required this.traversalParent,
     required this.write,
   });
 
-  final SemanticsNode node;
+  final int id;
+  SemanticsNode? node;
   final Int32List traversalChildren;
   final Int32List hitTestChildren;
   final int traversalParent;
@@ -170,16 +210,9 @@ final class _NodeUpdate {
     _TraversalTree tree, {
     required bool force,
   }) {
-    final traversal = _children(
-      node.id,
-      traversalChildren,
-      tree,
-      traversal: true,
-    );
-    final hitTest = _children(node.id, hitTestChildren, tree);
-    final parent = traversalParent >= 0
-        ? tree.parentByChild[node.id] ?? -1
-        : -1;
+    final traversal = _children(id, traversalChildren, tree, traversal: true);
+    final hitTest = _children(id, hitTestChildren, tree);
+    final parent = traversalParent >= 0 ? tree.parentByChild[id] ?? -1 : -1;
     if (force ||
         !listEquals(_sentTraversalChildren, traversal) ||
         !listEquals(_sentHitTestChildren, hitTest) ||
@@ -210,20 +243,11 @@ final class _NodeUpdate {
 }
 
 final class _ReachableSemanticsBuilder implements ui.SemanticsUpdateBuilder {
-  _ReachableSemanticsBuilder(
-    this._delegate,
-    this._owner,
-    this._tree,
-    this._nodeUpdates,
-    this._previousReachable,
-  );
+  _ReachableSemanticsBuilder(this._delegate, this._owners);
 
   final ui.SemanticsUpdateBuilder _delegate;
-  final SemanticsOwner _owner;
-  final _TraversalTree _tree;
-  final Map<int, _NodeUpdate> _nodeUpdates;
-  final Set<int> _previousReachable;
-  final _changed = <int>{};
+  final List<_OwnerSemanticsUpdates> _owners;
+  final _pending = <int, _NodeUpdate>{};
 
   @override
   void updateNode({
@@ -273,8 +297,6 @@ final class _ReachableSemanticsBuilder implements ui.SemanticsUpdateBuilder {
     required String minValue,
     required String maxValue,
   }) {
-    final node = _owner.getSemanticsNode(id);
-    if (node == null) return;
     // The framework can mutate matrices and lists after this batch. Each
     // retained node owns its latest payload until it detaches or reconnects.
     transform = Float64List.fromList(transform);
@@ -290,9 +312,8 @@ final class _ReachableSemanticsBuilder implements ui.SemanticsUpdateBuilder {
     controlsNodes = controlsNodes == null
         ? null
         : List.unmodifiable(controlsNodes);
-    _changed.add(id);
-    _nodeUpdates[id] = _NodeUpdate(
-      node: node,
+    _pending[id] = _NodeUpdate(
+      id: id,
       traversalChildren: childrenInTraversalOrder,
       hitTestChildren: childrenInHitTestOrder,
       traversalParent: traversalParent,
@@ -359,20 +380,77 @@ final class _ReachableSemanticsBuilder implements ui.SemanticsUpdateBuilder {
 
   @override
   ui.SemanticsUpdate build() {
+    if (_pending.isEmpty) return _delegate.build();
+    // The pinned SDK creates one builder per owner and writes its root first.
+    // Wait for the complete batch: root ID 0 alone cannot identify a view.
+    var candidates = _owners;
+    for (final id in _pending.keys.where((id) => id != 0)) {
+      final matching = candidates
+          .where((state) => state.owner.getSemanticsNode(id) != null)
+          .toList();
+      // A detached node is omitted, as in the single-owner guard; it must not
+      // discard the rest of an otherwise identifiable owner's batch.
+      if (matching.isNotEmpty) candidates = matching;
+    }
+    if (candidates.length > 1) {
+      // A root-only batch may still identify its owner by a current child ID.
+      final root = _pending[0];
+      final references = <int>{
+        ...?root?.traversalChildren,
+        ...?root?.hitTestChildren,
+      }..remove(0);
+      for (final id in references) {
+        final matching = candidates
+            .where((state) => state.owner.getSemanticsNode(id) != null)
+            .toList();
+        if (matching.isNotEmpty) candidates = matching;
+      }
+    }
+    if (candidates.length != 1) {
+      // Empty roots can be indistinguishable. Submit only common safe edges,
+      // never put that root's payload into another owner's cache, and replay
+      // each candidate's clean nodes on its next identifiable update. Removing
+      // ambiguous cached payloads also prevents replay of an old root geometry.
+      if (candidates.isNotEmpty) {
+        final tree = _TraversalTree.common(
+          candidates.map((state) => _TraversalTree(state.root)).toList(),
+        );
+        for (final update in _pending.values) {
+          if (tree.reachable.contains(update.id)) {
+            update.submit(_delegate, tree, force: true);
+          }
+        }
+        for (final state in candidates) {
+          state.nodeUpdates.removeWhere((id, _) => _pending.containsKey(id));
+          state.previousReachable.clear();
+        }
+      }
+      return _delegate.build();
+    }
+    final state = candidates.single;
+    final owner = state.owner;
+    final tree = _TraversalTree(state.root);
+    for (final update in _pending.values) {
+      final node = owner.getSemanticsNode(update.id);
+      if (node == null) continue;
+      update.node = node;
+      state.nodeUpdates[update.id] = update;
+    }
     // AX removes unreachable nodes. Reconnecting a retained clean node needs
     // its payload even when Flutter omits that node from the dirty batch.
-    for (final id in _tree.reachable) {
+    for (final id in tree.reachable) {
       // A clean parent also needs resubmitting when filtering changes its child
       // lists; otherwise native AX would retain the old disconnected edge.
-      _nodeUpdates[id]?.submit(
+      state.nodeUpdates[id]?.submit(
         _delegate,
-        _tree,
-        force: _changed.contains(id) || !_previousReachable.contains(id),
+        tree,
+        force:
+            _pending.containsKey(id) || !state.previousReachable.contains(id),
       );
     }
-    _previousReachable
+    state.previousReachable
       ..clear()
-      ..addAll(_tree.reachable);
+      ..addAll(tree.reachable);
     return _delegate.build();
   }
 }

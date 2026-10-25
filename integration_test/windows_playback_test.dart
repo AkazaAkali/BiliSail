@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show PointerDeviceKind;
+import 'dart:ui' show PlatformDispatcher, PointerDeviceKind;
 
 import 'package:bili_api/bili_api.dart';
 import 'package:bili_danmaku/bili_danmaku.dart';
 import 'package:bilisail/app/shell.dart';
 import 'package:bilisail/app/theme.dart';
+import 'package:bilisail/app/workspace_playback_window.dart';
+import 'package:bilisail/core/platform/detached_playback_window.dart';
 import 'package:bilisail/shared/ui/app_notice.dart';
 import 'package:bilisail/core/platform/desktop_window_chrome.dart';
 import 'package:bilisail/core/network/api_requests.dart';
@@ -29,12 +31,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:integration_test/integration_test.dart';
+
+import 'support/multi_view_binding.dart';
 
 import '../test/support/input_test_app.dart';
+import 'support/native_playback_window.dart';
 
 void main() {
-  IntegrationTestWidgetsFlutterBinding.ensureInitialized().framePolicy =
+  MultiViewIntegrationTestWidgetsFlutterBinding.ensureInitialized()
+          .framePolicy =
       LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
 
   testWidgets(
@@ -137,7 +142,7 @@ void main() {
   );
 
   testWidgets(
-    'Windows independent tabs decode concurrently and single page pauses other streams',
+    'Windows independent tabs decode concurrently and exclusive playback pauses other streams',
     (tester) async {
       initializePlayerBackend();
       final fixturePath = Platform.environment['BILI_TEST_MEDIA_DIR'];
@@ -1077,6 +1082,33 @@ void main() {
               valueListenable: navigationMode,
               builder: (context, mode, _) => BiliAppShell(
                 navigationMode: mode,
+                onActivateBrowser: () => unawaited(window.activate()),
+                playbackWindowBuilder:
+                    (
+                      context, {
+                      required child,
+                      required playback,
+                      required activationToken,
+                      required onClose,
+                      required onBack,
+                      required onError,
+                    }) => DesktopPlaybackWindow(
+                      activationToken: activationToken,
+                      onCloseRequested: onClose,
+                      onError: onError,
+                      playback: playback == null
+                          ? null
+                          : WorkspacePlaybackWindow(
+                              theme: BiliTheme.light(),
+                              shortcuts: const AppSettings.defaults().shortcuts,
+                              onBack: onBack,
+                              onClose: onClose,
+                              onActivateBrowser: () =>
+                                  unawaited(window.activate()),
+                              child: playback,
+                            ),
+                      child: child,
+                    ),
                 location: state.uri.toString(),
                 windowControlsBuilder: (_) => const DesktopWindowControls(),
                 dragRegionBuilder: (_, child) =>
@@ -1090,26 +1122,31 @@ void main() {
                                 width: 640,
                                 child: AspectRatio(
                                   aspectRatio: 16 / 9,
-                                  child: PlaybackPanel(
-                                    detail: VideoDetail(
-                                      summary: VideoSummary(
-                                        id: VideoId(
-                                          tab.location.pathSegments.last,
+                                  child: Builder(
+                                    builder: (context) => PlaybackPanel(
+                                      detail: VideoDetail(
+                                        summary: VideoSummary(
+                                          id: VideoId(
+                                            tab.location.pathSegments.last,
+                                          ),
+                                          title: detail.summary.title,
+                                          coverUrl: '',
+                                          author: 'fixture',
+                                          duration: part.duration,
                                         ),
-                                        title: detail.summary.title,
-                                        coverUrl: '',
-                                        author: 'fixture',
-                                        duration: part.duration,
+                                        description: '',
+                                        parts: [part],
                                       ),
-                                      description: '',
-                                      parts: [part],
+                                      part: part,
+                                      settings: AppSettings(
+                                        navigationMode: mode,
+                                        danmakuEnabled: false,
+                                      ),
+                                      onToggleComments: () {},
+                                      window:
+                                          WindowServiceScope.maybeOf(context) ??
+                                          window,
                                     ),
-                                    part: part,
-                                    settings: AppSettings(
-                                      danmakuEnabled: false,
-                                    ),
-                                    onToggleComments: () {},
-                                    window: window,
                                   ),
                                 ),
                               ),
@@ -1269,7 +1306,7 @@ void main() {
         expect(find.byType(PlaybackPanel, skipOffstage: false), findsNothing);
         expect(find.text('本地工作区首页'), findsOneWidget);
 
-        navigationMode.value = WorkspaceNavigationMode.singlePage;
+        navigationMode.value = WorkspaceNavigationMode.multipleTabs;
         router.go('/video/BV1abc123456');
         await _until(
           tester,
@@ -1279,20 +1316,120 @@ void main() {
         await session.seek(const Duration(milliseconds: 1700));
         await session.setRate(1.5);
         await session.pause();
+        final retainedPanel = tester.state(find.byType(PlaybackPanel));
+        final retainedGeneration = engine.currentSnapshot.generation;
+        final mainViewCount = PlatformDispatcher.instance.views.length;
+        final mainViewId = PlatformDispatcher.instance.implicitView!.viewId;
+        bool panelPresented({required bool detached}) {
+          final panels = find.byType(PlaybackPanel).evaluate();
+          return panels.length == 1 &&
+              (View.of(panels.single).viewId != mainViewId) == detached;
+        }
+
+        navigationMode.value = WorkspaceNavigationMode.dualTabs;
+        await _until(
+          tester,
+          // Native view creation completes before the next frame reparents the
+          // retained panel out of the adapter's temporary Offstage subtree.
+          () =>
+              PlatformDispatcher.instance.views.length == mainViewCount + 1 &&
+              panelPresented(detached: true),
+        );
+        expect(tester.state(find.byType(PlaybackPanel)), same(retainedPanel));
+        expect(engine.currentSnapshot.generation, retainedGeneration);
+        await _until(
+          tester,
+          () =>
+              find
+                  .byType(VideoSurface, skipOffstage: false)
+                  .evaluate()
+                  .length ==
+              1,
+        );
+        navigationMode.value = WorkspaceNavigationMode.multipleTabs;
+        await _until(
+          tester,
+          () =>
+              PlatformDispatcher.instance.views.length == mainViewCount &&
+              panelPresented(detached: false) &&
+              find.byType(VideoSurface).evaluate().length == 1,
+        );
+        expect(tester.state(find.byType(PlaybackPanel)), same(retainedPanel));
+        expect(engine.currentSnapshot.generation, retainedGeneration);
+        expect(
+          engine.currentSnapshot.position.inMilliseconds,
+          closeTo(1700, 150),
+        );
+        expect(engine.currentSnapshot.rate, 1.5);
+        expect(find.byType(PlaybackPanel, skipOffstage: false), findsOneWidget);
+        expect(find.byType(VideoSurface, skipOffstage: false), findsOneWidget);
+        debugPrint(
+          'NATIVE_WORKSPACE_TRANSFER samePanel=true sameGeneration=true '
+          'mainToDetachedToMain=true',
+        );
+        await tester.tap(
+          find.byWidgetPredicate((widget) {
+            final key = widget.key;
+            return key is ValueKey<String> &&
+                key.value.startsWith('close-workspace-tab-');
+          }),
+        );
+        await _until(
+          tester,
+          () => engine.currentSnapshot.phase == PlaybackPhase.idle,
+        );
+        expect(find.byType(PlaybackPanel, skipOffstage: false), findsNothing);
+        expect(find.text('本地工作区首页'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        navigationMode.value = WorkspaceNavigationMode.dualTabs;
+        final primaryView = PlatformDispatcher.instance.implicitView;
+        final viewCount = PlatformDispatcher.instance.views.length;
+        router.go('/video/BV1abc123456');
+        await _until(
+          tester,
+          () => engine.currentSnapshot.phase == PlaybackPhase.playing,
+        );
+        await session.setVolume(0);
+        await session.seek(const Duration(milliseconds: 1700));
+        await session.setRate(1.5);
+        await session.pause();
+        expect(PlatformDispatcher.instance.views.length, viewCount + 1);
+        expect(find.text('本地工作区首页'), findsOneWidget);
+        expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
+        final playbackView = View.of(
+          tester.element(find.byType(PlaybackPanel)),
+        );
+        final nativeWindow = NativePlaybackWindow(playbackView.viewId);
+        nativeWindow.resize(1000, 700);
+        await tester.pump(const Duration(milliseconds: 150));
+        final userSize = nativeWindow.outerSize;
+        expect(userSize, const Size(1000, 700));
+        expect(playbackView.viewId, isNot(primaryView?.viewId));
         router.go('/video/BV1abc654321');
         await _until(
           tester,
           () =>
               session.detail?.summary.id.value == 'BV1abc654321' &&
-              engine.currentSnapshot.phase == PlaybackPhase.playing,
+              !session.isResolving,
         );
+        expect(find.byType(PlaybackPanel, skipOffstage: false), findsOneWidget);
+        expect(nativeWindow.outerSize, userSize);
+        nativeWindow.maximize();
+        await tester.pump(const Duration(milliseconds: 200));
+        expect(nativeWindow.isMaximized, isTrue);
+        expect(find.byType(VideoSurface, skipOffstage: false), findsOneWidget);
         await session.seek(const Duration(milliseconds: 4000));
         expect(
-          find.byKey(const ValueKey('single-page-header')),
-          findsOneWidget,
+          View.of(tester.element(find.byType(PlaybackPanel))).viewId,
+          playbackView.viewId,
         );
-        expect(find.byType(VideoSurface, skipOffstage: false), findsOneWidget);
-        await tester.tap(find.byKey(const ValueKey('workspace-back')));
+        // Main-window browsing leaves the second window and its session alive.
+        router.go('/');
+        await tester.pump();
+        expect(find.byType(PlaybackPanel), findsOneWidget);
+        expect(PlatformDispatcher.instance.views.length, viewCount + 1);
+        nativeWindow.back();
         await _until(
           tester,
           () =>
@@ -1305,15 +1442,31 @@ void main() {
           closeTo(1700, 150),
         );
         expect(engine.currentSnapshot.rate, 1.5);
-        expect(find.byType(PlaybackPanel, skipOffstage: false), findsOneWidget);
-        expect(find.byType(VideoSurface, skipOffstage: false), findsOneWidget);
-        expect(await router.routerDelegate.popRoute(), isTrue);
+        expect(engine.inspectDiagnostics().hasDecodedAudio, isTrue);
+        expect(engine.inspectDiagnostics().hasDecodedVideo, isTrue);
+        expect(nativeWindow.isMaximized, isTrue);
+        nativeWindow.minimize();
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(nativeWindow.isMinimized, isTrue);
+        router.go('/video/BV1abc654321');
+        await _until(
+          tester,
+          () =>
+              !nativeWindow.isMinimized &&
+              session.detail?.summary.id.value == 'BV1abc654321',
+        );
+        expect(nativeWindow.isMaximized, isTrue);
+        nativeWindow.close();
         await _until(
           tester,
           () => engine.currentSnapshot.phase == PlaybackPhase.idle,
         );
-        expect(find.byType(PlaybackPanel, skipOffstage: false), findsNothing);
         expect(find.text('本地工作区首页'), findsOneWidget);
+        expect(find.byType(PlaybackPanel, skipOffstage: false), findsNothing);
+        expect(PlatformDispatcher.instance.views.length, viewCount);
+        debugPrint(
+          'NATIVE_DUAL_WINDOWS oneSession=true twoViews=true reusedWindow=true restoredPosition=true restoredPause=true restoredRate=true preservesResize=true preservesMaximize=true nativeBack=true closeReturnsToBrowse=true',
+        );
         expect(tester.takeException(), isNull);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());

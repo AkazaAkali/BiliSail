@@ -48,12 +48,14 @@ final class DownloadsScreen extends ConsumerStatefulWidget {
     this.onOpenDirectory,
     this.allowCustomDirectory = false,
     this.coverProvider,
+    this.showHeading = true,
   });
 
   final ValueChanged<DownloadTask>? onPlay;
   final Future<void> Function(String)? onOpenDirectory;
   final bool allowCustomDirectory;
   final ImageProvider<Object>? Function(DownloadTask)? coverProvider;
+  final bool showHeading;
 
   @override
   ConsumerState<DownloadsScreen> createState() => _DownloadsScreenState();
@@ -119,8 +121,10 @@ final class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 72),
       children: [
-        Text('下载', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 6),
+        if (widget.showHeading) ...[
+          Text('下载', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 6),
+        ],
         Text(
           '队列 ${queue.length} 项 · 已完成 ${completed.length} 项 · 已传输 ${downloadByteText(transferred)}',
           style: Theme.of(context).textTheme.bodySmall,

@@ -1,0 +1,191 @@
+#include "../runner/playback_window_geometry_win32.h"
+
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+namespace {
+void Require(bool condition, const char* message) {
+  if (!condition) throw std::runtime_error(message);
+}
+
+// Exercise real ShowWindow/WM_WINDOWPOSCHANGED without displaying test windows
+// on the user's input desktop or starting the production Flutter application.
+class IsolatedDesktop {
+ public:
+  IsolatedDesktop()
+      : previous_(GetThreadDesktop(GetCurrentThreadId())),
+        desktop_(CreateDesktopW(
+            (L"BiliSailGeometryTest-" + std::to_wstring(GetCurrentProcessId()))
+                .c_str(),
+            nullptr, nullptr, 0,
+            DESKTOP_CREATEWINDOW | DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS,
+            nullptr)) {
+    if (!desktop_) throw std::runtime_error("Cannot create isolated test desktop.");
+    if (!SetThreadDesktop(desktop_)) {
+      CloseDesktop(desktop_);
+      throw std::runtime_error("Cannot select isolated test desktop.");
+    }
+  }
+  ~IsolatedDesktop() {
+    SetThreadDesktop(previous_);
+    CloseDesktop(desktop_);
+  }
+  IsolatedDesktop(const IsolatedDesktop&) = delete;
+  IsolatedDesktop& operator=(const IsolatedDesktop&) = delete;
+
+ private:
+  HDESK previous_;  // Borrowed from the test thread.
+  HDESK desktop_;
+};
+
+class TestWindow {
+ public:
+  TestWindow()
+      : window_(CreateWindowExW(0, L"BiliSailGeometryTestWindow", L"Geometry test",
+                                WS_OVERLAPPEDWINDOW, 80, 90, 900, 700, nullptr,
+                                nullptr, GetModuleHandle(nullptr), nullptr)) {
+    Require(window_ != nullptr, "Cannot create native test window.");
+  }
+  ~TestWindow() { DestroyWindow(window_); }
+  TestWindow(const TestWindow&) = delete;
+  TestWindow& operator=(const TestWindow&) = delete;
+  HWND get() const { return window_; }
+
+ private:
+  HWND window_;
+};
+
+void RequireBounds(HWND window, const playback_window::Bounds& expected) {
+  RECT rectangle{};
+  Require(GetWindowRect(window, &rectangle) != FALSE, "Cannot read normal bounds.");
+  const auto actual = playback_window::RectBounds(rectangle);
+  Require(std::abs(actual.left - expected.left) <= 1 &&
+              std::abs(actual.top - expected.top) <= 1 &&
+              std::abs(actual.width - expected.width) <= 1 &&
+              std::abs(actual.height - expected.height) <= 1,
+          "User Restore lost the remembered normal rectangle.");
+}
+
+void RunTests() {
+  // Reproduce the original implementation and the pinned SDK's first-frame
+  // callback. The second call finishes unmaximized despite the earlier zoom.
+  {
+    const TestWindow old_flow;
+    ShowWindow(old_flow.get(), SW_MAXIMIZE);
+    Require(IsZoomed(old_flow.get()) != FALSE, "Original maximize did not run.");
+    ShowWindow(old_flow.get(), SW_SHOWNORMAL);
+    Require(!IsZoomed(old_flow.get()), "SDK first show did not reproduce restore.");
+  }
+
+  playback_window::WindowGeometrySession session;
+  playback_window::Bounds normal{};
+  {
+    const TestWindow first;
+    Require(session.Restore(first.get(), 1, 1), "Initial geometry failed.");
+    ShowWindow(first.get(), SW_SHOWNORMAL);
+    Require(!IsZoomed(first.get()), "First window should keep its normal default.");
+    Require(SetWindowPos(first.get(), nullptr, 120, 140, 780, 540,
+                         SWP_NOZORDER | SWP_NOACTIVATE) != FALSE,
+            "Cannot set a user normal rectangle.");
+    Require(session.Capture(first.get(), 1, 1), "Cannot capture normal size.");
+    normal = *session.saved().normal();
+    ShowWindow(first.get(), SW_MAXIMIZE);
+    Require(session.Capture(first.get(), 1, 1), "Cannot capture maximized state.");
+    Require(session.saved().maximized(), "Maximized memory was not recorded.");
+    session.Retire(1, 1);
+  }
+
+  {
+    const TestWindow reopened;
+    Require(session.Restore(reopened.get(), 2, 2), "Reopen restore failed.");
+    Require(!IsWindowVisible(reopened.get()), "Prepare showed a blank window.");
+    playback_window::ActivateWindow(reopened.get(), reopened.get());
+    Require(!IsWindowVisible(reopened.get()), "Early activation consumed first show.");
+    // This is the engine's actual SW_SHOWNORMAL. Assert only after the whole
+    // Win32 call returns, so remaining native processing cannot undo the fix.
+    ShowWindow(reopened.get(), SW_SHOWNORMAL);
+    Require(IsZoomed(reopened.get()) != FALSE, "SDK first show undid maximization.");
+    Require(session.Capture(reopened.get(), 2, 2), "Reopen capture failed.");
+    playback_window::ActivateWindow(reopened.get(), reopened.get());
+    Require(IsZoomed(reopened.get()) != FALSE, "Activation undid maximization.");
+    ShowWindow(reopened.get(), SW_MINIMIZE);
+    Require(session.Capture(reopened.get(), 2, 2, true), "Minimized capture failed.");
+    Require(session.saved().maximized(), "Minimize erased preceding maximization.");
+    playback_window::ActivateWindow(reopened.get(), reopened.get());
+    Require(IsZoomed(reopened.get()) != FALSE, "Minimized activation lost zoom.");
+    ShowWindow(reopened.get(), SW_RESTORE);
+    Require(!IsZoomed(reopened.get()), "One-shot hook blocked user Restore.");
+    RequireBounds(reopened.get(), normal);
+    Require(session.Capture(reopened.get(), 2, 2), "Restored capture failed.");
+    Require(!session.saved().maximized(), "User Restore did not replace zoom memory.");
+    session.Retire(2, 2);
+  }
+
+  {
+    const TestWindow ordinary;
+    Require(session.Restore(ordinary.get(), 3, 3), "Normal reopen failed.");
+    ShowWindow(ordinary.get(), SW_SHOWNORMAL);
+    Require(!IsZoomed(ordinary.get()), "Normal reopen ignored user's Restore.");
+    RequireBounds(ordinary.get(), normal);
+    ShowWindow(ordinary.get(), SW_MAXIMIZE);
+    Require(session.Capture(ordinary.get(), 3, 3), "Cannot re-maximize memory.");
+    session.Retire(3, 3);
+  }
+
+  {
+    const TestWindow before_frame;
+    Require(session.Restore(before_frame.get(), 4, 4), "Pending restore failed.");
+    Require(session.Capture(before_frame.get(), 4, 4, false), "Pending close capture failed.");
+    Require(session.saved().maximized(), "Close before first frame erased zoom.");
+    session.Retire(4, 4);
+    ShowWindow(before_frame.get(), SW_SHOWNORMAL);
+    Require(!IsZoomed(before_frame.get()), "Retired owner retained first-show hook.");
+  }
+
+  {
+    const TestWindow stale, latest;
+    Require(session.Restore(stale.get(), 5, 5), "Stale prepare failed.");
+    Require(session.Restore(latest.get(), 6, 6), "Latest prepare failed.");
+    Require(session.Capture(stale.get(), 5, 5, false), "Stale capture was not ignored.");
+    session.Retire(5, 5);
+    Require(session.Owns(6, 6), "Stale retire removed latest geometry owner.");
+    ShowWindow(stale.get(), SW_SHOWNORMAL);
+    Require(!IsZoomed(stale.get()), "New owner did not cancel old first-show hook.");
+    ShowWindow(latest.get(), SW_SHOWNORMAL);
+    Require(IsZoomed(latest.get()) != FALSE, "Stale close cancelled latest maximize.");
+    session.Retire(6, 6);
+  }
+
+  {
+    const TestWindow fullscreen;
+    Require(session.Restore(fullscreen.get(), 7, 7), "Fullscreen prepare failed.");
+    const LONG_PTR style = GetWindowLongPtr(fullscreen.get(), GWL_STYLE);
+    SetWindowLongPtr(fullscreen.get(), GWL_STYLE, style & ~WS_CAPTION);
+    ShowWindow(fullscreen.get(), SW_SHOWNORMAL);
+    Require(!IsZoomed(fullscreen.get()), "First-show hook maximized a fullscreen frame.");
+    Require(session.Capture(fullscreen.get(), 7, 7, false), "Fullscreen capture failed.");
+    Require(session.saved().maximized(), "Fullscreen erased ordinary zoom memory.");
+    session.Retire(7, 7);
+  }
+}
+}  // namespace
+
+int main() {
+  try {
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    const IsolatedDesktop desktop;
+    WNDCLASSW window_class{};
+    window_class.lpfnWndProc = DefWindowProcW;
+    window_class.hInstance = GetModuleHandle(nullptr);
+    window_class.lpszClassName = L"BiliSailGeometryTestWindow";
+    Require(RegisterClassW(&window_class) != 0, "Cannot register test window class.");
+    RunTests();
+    UnregisterClassW(window_class.lpszClassName, window_class.hInstance);
+    std::cout << "PASS native first show: SDK restore reproduction, maximized reopen, user Restore, normal bounds, minimize, pending close, stale owner, fullscreen\n";
+    return 0;
+  } catch (const std::exception& error) {
+    std::cerr << "FAIL native first show: " << error.what() << '\n';
+    return 1;
+  }
+}

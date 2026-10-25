@@ -1,6 +1,7 @@
 import 'package:bilisail/app/theme.dart';
 import 'package:bilisail/domain/user.dart';
 import 'package:bilisail/domain/video.dart';
+import 'package:bilisail/shared/ui/responsive_card_grid.dart';
 import 'package:bilisail/shared/ui/video_card.dart';
 import 'package:bilisail/shared/ui/video_grid.dart';
 import 'package:flutter/gestures.dart';
@@ -39,9 +40,49 @@ void main() {
       final second = tester.getRect(cards.at(1));
       final third = tester.getRect(cards.at(2));
       expect(second.top, first.top, reason: 'phone width=$width');
+      expect(second.left - first.right, closeTo(10, .01));
+      expect(first.width, closeTo((extent - 10) / 2, .01));
       expect(second.right, closeTo(extent, .01));
       expect(third.top, greaterThan(first.bottom));
       expect(tester.takeException(), isNull, reason: 'phone width=$width');
+    }
+  });
+
+  testWidgets('sliver card insets follow allocated width inside a wider view', (
+    tester,
+  ) async {
+    _setViewport(tester, 1920);
+    for (final width in [360.0, 390.0, 599.0, 600.0, 640.0, 1000.0]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: BiliTheme.light(),
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: width,
+                child: CustomScrollView(
+                  slivers: [
+                    SliverCardGridPadding(
+                      sliver: SliverVideoGrid(items: _videos, onOpen: (_) {}),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final first = tester.getRect(find.byType(VideoCard).at(0));
+      final second = tester.getRect(find.byType(VideoCard).at(1));
+      final inset = width < 600 ? 12.0 : 20.0;
+      final gap = width - 2 * inset < 600 ? 10.0 : 20.0;
+      expect(first.left, inset);
+      expect(second.top, first.top);
+      expect(second.left - first.right, closeTo(gap, .01));
+      if (width == 390) expect(first.width, 178);
+      expect(tester.takeException(), isNull, reason: 'allocated width=$width');
     }
   });
 

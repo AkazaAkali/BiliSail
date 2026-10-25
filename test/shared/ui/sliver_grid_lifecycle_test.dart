@@ -99,7 +99,10 @@ void main() {
                 builder: (value) {
                   viewportBuilds++;
                   controller = value;
-                  return CustomScrollView(controller: value, slivers: [grid]);
+                  return CustomScrollView(
+                    controller: value,
+                    slivers: [SliverCardGridPadding(sliver: grid)],
+                  );
                 },
               ),
             ),

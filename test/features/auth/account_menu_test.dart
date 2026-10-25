@@ -33,6 +33,65 @@ void main() {
   late AuthFake auth;
   setUp(() => auth = AuthFake());
   tearDown(() async => auth.stream.close());
+  testWidgets(
+    'embedded My page keeps all destinations and remains after login changes',
+    (tester) async {
+      final routes = <String>[];
+      var logins = 0;
+      auth.state = const AuthState();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            authRepositoryProvider.overrideWithValue(auth),
+            accountOverviewProvider.overrideWith(
+              (ref) async => const AccountOverview(level: 6),
+            ),
+            accountMessageIndicatorProvider.overrideWithValue(
+              const AccountMessageIndicator(count: 2),
+            ),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: AccountMenu(
+                embedded: true,
+                onNavigate: routes.add,
+                onLogin: () => logins++,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('登录账号'));
+      expect(logins, 1);
+      expect(find.byType(Drawer), findsNothing);
+      for (final (label, path) in [
+        ('我的消息', '/messages'),
+        ('稍后再看', '/?channel=watchLater'),
+        ('我的收藏', '/?channel=favorites'),
+        ('历史记录', '/history'),
+        ('下载管理', '/downloads'),
+        ('直播中心', '/?channel=live&section=我的关注'),
+      ]) {
+        await tester.ensureVisible(find.text(label));
+        await tester.tap(find.text(label));
+        await tester.pumpAndSettle();
+        expect(routes.last, path);
+        expect(find.byType(AccountMenu), findsOneWidget);
+      }
+      auth.emit(
+        const AuthState(
+          status: AuthStatus.signedIn,
+          mid: '1',
+          userName: '测试账号',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(AccountMenu), findsOneWidget);
+      expect(find.text('个人中心'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
   Future<void> mount(
     WidgetTester tester,
     ValueChanged<String> navigate, {

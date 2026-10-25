@@ -10,6 +10,45 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('another view cannot dispatch into this window input host', (
+    tester,
+  ) async {
+    final calls = <String>[];
+    final input = _dispatcher(calls);
+    addTearDown(input.dispose);
+    await _mount(tester, input);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+    expect(calls, ['W']);
+    calls.clear();
+    tester.binding.handleViewFocusChanged(
+      ViewFocusEvent(
+        viewId: tester.view.viewId + 1,
+        state: ViewFocusState.focused,
+        direction: ViewFocusDirection.undefined,
+      ),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+    expect(calls, isEmpty);
+    _active(tester, true, viewFocus: true);
+    tester.binding.handlePointerEvent(
+      PointerDownEvent(
+        viewId: tester.view.viewId + 1,
+        kind: PointerDeviceKind.mouse,
+        buttons: kBackMouseButton,
+      ),
+    );
+    tester.binding.handlePointerEvent(
+      PointerUpEvent(
+        viewId: tester.view.viewId + 1,
+        kind: PointerDeviceKind.mouse,
+      ),
+    );
+    expect(calls, isEmpty);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+    expect(calls, ['W']);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets(
     'IME host replacement waits for the previous focus tree to detach',
     (tester) async {

@@ -91,7 +91,6 @@ void main() {
             'system',
             'shortcut',
             'mouse',
-            if (platform == TargetPlatform.windows) 'workspace',
           ]) {
             await _openDetail(tester);
             expect(find.text('简介'), findsNothing);
@@ -115,8 +114,6 @@ void main() {
                 await _closeShortcut(tester);
               case 'mouse':
                 await _mouseBack(tester);
-              case 'workspace':
-                await tester.tap(find.byKey(const ValueKey('workspace-back')));
             }
             await tester.pumpAndSettle();
             expect(find.text('评论详情'), findsNothing, reason: action);
@@ -255,7 +252,7 @@ Future<({GoRouter router, _Comments repo})> _mount(
           location: state.uri.toString(),
           shortcuts: shortcuts,
           navigationMode: platform == TargetPlatform.android
-              ? WorkspaceNavigationMode.singlePage
+              ? WorkspaceNavigationMode.dualTabs
               : WorkspaceNavigationMode.multipleTabs,
           pageBuilder: (_, tab) => switch (tab.location.path) {
             '/video/BV1ab411c7mD' => VideoScreen(

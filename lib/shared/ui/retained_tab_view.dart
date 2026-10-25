@@ -339,7 +339,13 @@ final class _RetainedTabPageState<T extends Object>
                 child: AppImagePageViewport(
                   child: _visited
                       ? widget.pageBuilder(context, widget.tab, active)
-                      : const StateView.loading(),
+                      // Unvisited neighbors may be laid out during a partial
+                      // swipe. Keep their placeholder from animating forever;
+                      // active pages are marked visited before this branch.
+                      : const TickerMode(
+                          enabled: false,
+                          child: StateView.loading(),
+                        ),
                 ),
               ),
             ),

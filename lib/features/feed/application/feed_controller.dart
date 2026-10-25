@@ -7,6 +7,7 @@ import '../../../domain/video.dart';
 import '../../video/domain/video_actions_repository.dart';
 import '../domain/feed_repository.dart';
 import '../domain/home_channel.dart';
+import '../domain/popular_feed.dart';
 import 'feed_item_index.dart';
 
 final feedRepositoryProvider = Provider<FeedRepository>(
@@ -42,6 +43,9 @@ final class FeedState {
     this.items = const AsyncLoading(),
     this.categoryId,
     this.channel = HomeChannel.recommended,
+    this.popularSection = PopularSection.all,
+    this.weeklyIssue,
+    this.weeklyIssues = const [],
     this.hasMore = false,
     this.loadingMore = false,
     this.pageError,
@@ -53,6 +57,9 @@ final class FeedState {
   final AsyncValue<List<VideoSummary>> items;
   final String? categoryId;
   final HomeChannel channel;
+  final PopularSection popularSection;
+  final int? weeklyIssue;
+  final List<PopularWeek> weeklyIssues;
   bool get popular => channel == HomeChannel.popular;
   final bool hasMore;
   final bool loadingMore;
@@ -66,6 +73,10 @@ final class FeedState {
     String? categoryId,
     bool clearCategory = false,
     HomeChannel? channel,
+    PopularSection? popularSection,
+    int? weeklyIssue,
+    bool clearWeeklyIssue = false,
+    List<PopularWeek>? weeklyIssues,
     bool? hasMore,
     bool? loadingMore,
     Object? pageError,
@@ -77,6 +88,9 @@ final class FeedState {
     items: items ?? this.items,
     categoryId: clearCategory ? null : categoryId ?? this.categoryId,
     channel: channel ?? this.channel,
+    popularSection: popularSection ?? this.popularSection,
+    weeklyIssue: clearWeeklyIssue ? null : weeklyIssue ?? this.weeklyIssue,
+    weeklyIssues: weeklyIssues ?? this.weeklyIssues,
     hasMore: hasMore ?? this.hasMore,
     loadingMore: loadingMore ?? this.loadingMore,
     pageError: clearPageError ? null : pageError ?? this.pageError,
@@ -89,13 +103,19 @@ final class FeedState {
 final class FeedController extends Notifier<FeedState> {
   // Recommendations can repeat a sample; one overlapping page is not an end.
   static const _maxPagesWithoutNewItems = 2;
+  static const maximumPopularEntries = 500;
+  static const maximumCachedWeeks = 6;
   int _generation = 0;
   int _page = 0;
   int _pagesWithoutNewItems = 0;
   RequestCancellation? _cancellation;
   final Map<HomeChannel, (FeedState, int, int)> _savedChannels = {};
-  final _itemIndices = <HomeChannel, FeedItemIndex>{};
+  final _itemIndices = <Object, FeedItemIndex>{};
   final _unloadedChannels = <HomeChannel, FeedState>{};
+  final _savedPopular = <PopularSection, (FeedState, int, int)>{};
+  final _unloadedPopular = <PopularSection, FeedState>{};
+  final _savedWeeks = <int, (FeedState, int, int)>{};
+  List<PopularWeek> _popularWeeks = const [];
   final _rejectWrites = <VideoId, RequestCancellation>{};
   // Undo uses the exact context that was accepted, even after a refresh.
   final _rejected = <VideoId, RecommendationFeedback>{};
@@ -135,6 +155,50 @@ final class FeedController extends Notifier<FeedState> {
     return updated;
   }
 
+  FeedState stateForPopularSection(
+    PopularSection section, {
+    required FeedState current,
+  }) {
+    if (current.popular && current.popularSection == section) return current;
+    return _savedPopular[section]?.$1 ??
+        _unloadedPopular.putIfAbsent(
+          section,
+          () =>
+              FeedState(channel: HomeChannel.popular, popularSection: section),
+        );
+  }
+
+  Object _indexKey(FeedState value) => value.popular
+      ? (value.channel, value.popularSection, value.weeklyIssue)
+      : value.channel;
+
+  void _saveCurrent() {
+    final snapshot = (
+      state.copyWith(loadingMore: false),
+      _page,
+      _pagesWithoutNewItems,
+    );
+    _savedChannels[state.channel] = snapshot;
+    if (!state.popular) return;
+    _savedPopular[state.popularSection] = snapshot;
+    final week = state.weeklyIssue;
+    if (state.popularSection == PopularSection.weekly &&
+        week != null &&
+        state.items.asData != null) {
+      _savedWeeks.remove(week);
+      _savedWeeks[week] = snapshot;
+      while (_savedWeeks.length > maximumCachedWeeks) {
+        final oldest = _savedWeeks.keys.first;
+        _savedWeeks.remove(oldest);
+        _itemIndices.remove((
+          HomeChannel.popular,
+          PopularSection.weekly,
+          oldest,
+        ));
+      }
+    }
+  }
+
   FeedState _withFeedback(FeedState value) => value.copyWith(
     rejecting: value.channel == HomeChannel.recommended
         ? Set.unmodifiable(_rejectWrites.keys)
@@ -158,6 +222,10 @@ final class FeedController extends Notifier<FeedState> {
       _savedChannels.clear();
       _itemIndices.clear();
       _unloadedChannels.clear();
+      _savedPopular.clear();
+      _unloadedPopular.clear();
+      _savedWeeks.clear();
+      _popularWeeks = const [];
       _rejectWrites.clear();
       _rejected.clear();
       _uncertainRejections.clear();
@@ -269,11 +337,7 @@ final class FeedController extends Notifier<FeedState> {
       if (_page == 0 && state.items.isLoading) await refresh();
       return;
     }
-    _savedChannels[state.channel] = (
-      state.copyWith(loadingMore: false),
-      _page,
-      _pagesWithoutNewItems,
-    );
+    _saveCurrent();
     _generation++;
     _cancellation?.cancel();
     _cancellation = RequestCancellation();
@@ -294,23 +358,82 @@ final class FeedController extends Notifier<FeedState> {
             : null,
       ),
     );
-    await refresh();
+    await refresh(reloadRankingRegions: channel != HomeChannel.ranking);
+  }
+
+  Future<void> selectPopularSection(PopularSection section) async {
+    if (state.popular && state.popularSection == section) {
+      if (_page == 0 && state.items.isLoading) await refresh();
+      return;
+    }
+    _saveCurrent();
+    _generation++;
+    _cancellation?.cancel();
+    _cancellation = RequestCancellation();
+    final saved = _savedPopular[section];
+    if (saved != null && !saved.$1.items.isLoading) {
+      state = saved.$1;
+      _page = saved.$2;
+      _pagesWithoutNewItems = saved.$3;
+      return;
+    }
+    state = FeedState(
+      channel: HomeChannel.popular,
+      popularSection: section,
+      categoryId: section == PopularSection.ranking ? '0' : null,
+    );
+    await refresh(reloadRankingRegions: false);
+  }
+
+  Future<void> selectPopularWeek(int number) async {
+    if (!state.popular ||
+        state.popularSection != PopularSection.weekly ||
+        !_popularWeeks.any((week) => week.number == number)) {
+      return;
+    }
+    if (state.weeklyIssue == number) return;
+    _saveCurrent();
+    _generation++;
+    _cancellation?.cancel();
+    _cancellation = RequestCancellation();
+    final saved = _savedWeeks.remove(number);
+    if (saved != null) {
+      state = saved.$1.copyWith(weeklyIssues: _popularWeeks);
+      _page = saved.$2;
+      _pagesWithoutNewItems = saved.$3;
+      return;
+    }
+    state = FeedState(
+      channel: HomeChannel.popular,
+      popularSection: PopularSection.weekly,
+      weeklyIssue: number,
+      weeklyIssues: _popularWeeks,
+    );
+    await refresh(reloadWeeklyIndex: false);
   }
 
   Future<void> selectCategory(String id) async {
     if (state.categoryId == id) return;
     state = state.copyWith(categoryId: id);
-    await refresh();
+    await refresh(reloadRankingRegions: false);
   }
 
-  Future<void> refresh() async {
+  Future<void> refresh({
+    bool reloadWeeklyIndex = true,
+    bool reloadRankingRegions = true,
+  }) async {
+    if (reloadRankingRegions &&
+        (state.channel == HomeChannel.ranking ||
+            state.popular && state.popularSection == PopularSection.ranking)) {
+      ref.invalidate(rankingCategoriesProvider);
+    }
     final generation = ++_generation;
     _cancellation?.cancel();
     final cancellation = RequestCancellation();
     _cancellation = cancellation;
     _page = 0;
     _pagesWithoutNewItems = 0;
-    _itemIndices.remove(state.channel);
+    _itemIndices.remove(_indexKey(state));
     state = state.copyWith(
       items: const AsyncLoading(),
       hasMore: false,
@@ -322,18 +445,26 @@ final class FeedController extends Notifier<FeedState> {
       return;
     }
     try {
-      final result = await _loadPage(1, cancellation);
+      final result = await _loadPage(
+        1,
+        cancellation,
+        reloadWeeklyIndex: reloadWeeklyIndex,
+      );
       if (!ref.mounted ||
           generation != _generation ||
           cancellation.isCancelled) {
         return;
       }
       final index = FeedItemIndex();
-      final items = index.merge(result.items);
-      _itemIndices[state.channel] = index;
+      final merged = index.merge(result.items);
+      final items = _boundedItems(merged);
+      _itemIndices[_indexKey(state)] = index;
       _page = 1;
       _pagesWithoutNewItems = items.isEmpty ? 1 : 0;
-      state = state.copyWith(items: AsyncData(items), hasMore: result.hasMore);
+      state = state.copyWith(
+        items: AsyncData(items),
+        hasMore: result.hasMore && _underLimit(items),
+      );
     } catch (error, stackTrace) {
       if (!ref.mounted ||
           generation != _generation ||
@@ -362,16 +493,16 @@ final class FeedController extends Notifier<FeedState> {
           cancellation.isCancelled) {
         return;
       }
-      final index = _itemIndices[state.channel];
+      final index = _itemIndices[_indexKey(state)];
       if (index == null) throw StateError('Loaded feed has no item index');
-      final items = index.merge(result.items);
+      final items = _boundedItems(index.merge(result.items));
       _pagesWithoutNewItems = items.length == current.length
           ? _pagesWithoutNewItems + 1
           : 0;
       _page++;
       state = state.copyWith(
         items: AsyncData(items),
-        hasMore: result.hasMore,
+        hasMore: result.hasMore && _underLimit(items),
         loadingMore: false,
         pageError:
             result.hasMore && _pagesWithoutNewItems >= _maxPagesWithoutNewItems
@@ -389,12 +520,26 @@ final class FeedController extends Notifier<FeedState> {
     }
   }
 
+  List<VideoSummary> _boundedItems(List<VideoSummary> items) =>
+      state.popular &&
+          state.popularSection != PopularSection.all &&
+          items.length > maximumPopularEntries
+      ? List.unmodifiable(items.take(maximumPopularEntries))
+      : items;
+
+  bool _underLimit(List<VideoSummary> items) =>
+      !state.popular ||
+      state.popularSection == PopularSection.all ||
+      items.length < maximumPopularEntries;
+
   Future<PageResult<VideoSummary>> _loadPage(
     int page,
-    RequestCancellation cancellation,
-  ) {
+    RequestCancellation cancellation, {
+    bool reloadWeeklyIndex = false,
+  }) async {
     final repository = ref.read(feedRepositoryProvider);
-    if (state.channel == HomeChannel.ranking) {
+    if (state.channel == HomeChannel.ranking ||
+        state.popular && state.popularSection == PopularSection.ranking) {
       if (repository is RankingFeedRepository) {
         return (repository as RankingFeedRepository).loadRanking(
           categoryId: state.categoryId ?? '0',
@@ -402,6 +547,51 @@ final class FeedController extends Notifier<FeedState> {
         );
       }
       throw const AppFailure(AppFailureKind.protocol, '排行榜服务暂不可用');
+    }
+    if (state.popular && state.popularSection != PopularSection.all) {
+      if (repository is! PopularFeedRepository) {
+        throw const AppFailure(AppFailureKind.protocol, '热门精选服务暂不可用');
+      }
+      final selections = repository as PopularFeedRepository;
+      if (state.popularSection == PopularSection.precious) {
+        return selections.loadPrecious(cancellation: cancellation);
+      }
+      if (reloadWeeklyIndex || _popularWeeks.isEmpty) {
+        final weeks = await selections.loadPopularWeeks(
+          cancellation: cancellation,
+        );
+        if (!ref.mounted ||
+            cancellation.isCancelled ||
+            !identical(cancellation, _cancellation)) {
+          throw const AppFailure(AppFailureKind.cancelled, '请求已取消');
+        }
+        _popularWeeks = List.unmodifiable(weeks);
+        final selected = weeks.any((week) => week.number == state.weeklyIssue)
+            ? state.weeklyIssue
+            : weeks.firstOrNull?.number;
+        final obsolete = _savedWeeks.keys
+            .where((number) => !weeks.any((week) => week.number == number))
+            .toList();
+        for (final number in obsolete) {
+          _savedWeeks.remove(number);
+          _itemIndices.remove((
+            HomeChannel.popular,
+            PopularSection.weekly,
+            number,
+          ));
+        }
+        state = state.copyWith(
+          weeklyIssues: _popularWeeks,
+          weeklyIssue: selected,
+          clearWeeklyIssue: selected == null,
+        );
+      }
+      final number = state.weeklyIssue;
+      if (number == null) return const PageResult(items: [], hasMore: false);
+      return selections.loadPopularWeek(
+        number: number,
+        cancellation: cancellation,
+      );
     }
     return state.popular
         ? repository.loadPopular(page: page, cancellation: cancellation)

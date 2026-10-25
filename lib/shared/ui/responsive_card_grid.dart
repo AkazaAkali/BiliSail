@@ -1,21 +1,50 @@
 import 'package:flutter/material.dart';
 
-const _spacing = 20.0;
+const _desktopSpacing = 20.0;
 const _runSpacing = 24.0;
 
-({int columns, double width}) _layout(BuildContext context, double extent) {
+({int columns, double width, double spacing}) _layout(
+  BuildContext context,
+  double extent,
+) {
+  final spacing = extent < 600 ? 10.0 : _desktopSpacing;
   final textScaler = MediaQuery.textScalerOf(context);
   final minimum = textScaler.scale(300).clamp(300, 450);
   // Phone-sized grids can fit two compact cards; wider rows keep desktop sizes.
   final compactMinimum = textScaler.scale(140).clamp(140, 210);
-  final minimumColumns = extent >= compactMinimum * 2 + _spacing ? 2 : 1;
-  final columns = ((extent + _spacing) / (minimum + _spacing)).floor().clamp(
-    minimumColumns,
-    12,
-  );
+  // Keep the existing column thresholds; narrower gutters enlarge the cards.
+  final minimumColumns = extent >= compactMinimum * 2 + _desktopSpacing ? 2 : 1;
+  final columns = ((extent + _desktopSpacing) / (minimum + _desktopSpacing))
+      .floor()
+      .clamp(minimumColumns, 12);
   return (
     columns: columns,
-    width: (extent - (columns - 1) * _spacing) / columns,
+    width: (extent - (columns - 1) * spacing) / columns,
+    spacing: spacing,
+  );
+}
+
+/// Shared list insets measured before padding, including resizable windows.
+final class SliverCardGridPadding extends StatelessWidget {
+  const SliverCardGridPadding({
+    super.key,
+    required this.sliver,
+    this.top = 8,
+    this.bottom = 24,
+  });
+
+  final Widget sliver;
+  final double top, bottom;
+
+  @override
+  Widget build(BuildContext context) => SliverLayoutBuilder(
+    builder: (context, constraints) {
+      final inset = constraints.crossAxisExtent < 600 ? 12.0 : 20.0;
+      return SliverPadding(
+        padding: EdgeInsets.fromLTRB(inset, top, inset, bottom),
+        sliver: sliver,
+      );
+    },
   );
 }
 
@@ -30,7 +59,7 @@ final class ResponsiveCardGrid extends StatelessWidget {
     builder: (context, constraints) {
       final layout = _layout(context, constraints.maxWidth);
       return Wrap(
-        spacing: _spacing,
+        spacing: layout.spacing,
         runSpacing: _runSpacing,
         children: [
           for (final child in children)
@@ -61,7 +90,7 @@ final class SliverResponsiveCardGrid extends StatefulWidget {
 
 final class _SliverResponsiveCardGridState
     extends State<SliverResponsiveCardGrid> {
-  ({int columns, double width})? _previousLayout;
+  ({int columns, double width, double spacing})? _previousLayout;
   Widget? _rows;
 
   @override
@@ -88,7 +117,7 @@ final class _SliverResponsiveCardGridState
           padding: const EdgeInsets.only(bottom: _runSpacing),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
-            spacing: _spacing,
+            spacing: layout.spacing,
             children: [
               for (var column = 0; column < layout.columns; column++)
                 if (row * layout.columns + column < widget.itemCount)

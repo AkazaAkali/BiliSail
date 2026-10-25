@@ -13,7 +13,7 @@
 
 | 任务 | 入口 |
 | --- | --- |
-| 播放、弹幕与标签生命周期 | [播放设计](docs/playback-and-danmaku.md)、[多标签播放](docs/validation/multi-tab-playback.md)、[单标签导航](docs/validation/single-page-navigation.md) |
+| 播放、弹幕与标签生命周期 | [播放设计](docs/playback-and-danmaku.md)、[多标签播放](docs/validation/multi-tab-playback.md)、[旧单标签导航记录](docs/validation/single-page-navigation.md) |
 | 协议、账号与登录 | [API 方案](docs/api-design.md)、[密码/短信登录](docs/validation/password-sms-login.md) |
 | 下载、封装与离线播放 | [下载方案](docs/downloads.md)、[bili_mux](packages/bili_mux/README.md)、[封装验证](docs/validation/download-muxing-results.md) |
 | 评论与动态共享交互 | [动态互动](docs/validation/dynamic-interactions.md) |
@@ -63,7 +63,8 @@
 ## 工作区、设置与共享交互
 
 - 工作区共用页面身份、访问历史和 PageStorage；切换标签或导航模式保留未关闭页面的状态。页面缓存上限 16、访问历史上限 64，不引入无界页面保留。
-- Windows/macOS 默认多标签，Android 默认单标签；平台默认值集中在 `lib/app/platform_defaults.dart` 并注入设置仓储。改变默认值只影响缺失/非法配置，保留用户已保存的有效选择。
+- 首页、动态、直播、我的、消息、下载、设置共用固定根标签，一级切换不新增可关闭标签，已访问分支分别保留状态。双标签返回关闭离开的临时浏览页；播放返回优先媒体历史，历史为空关闭播放窗并释放会话。页内详情与模态返回保持优先，根页面不能关闭。
+- Windows/macOS 默认多标签，Android 默认双标签；平台默认值集中在 `lib/app/platform_defaults.dart` 并注入设置仓储。2026-10-25 按用户要求移除单标签，旧 `singlePage` 配置迁移为 `dualTabs`；保留用户已保存的有效双/多标签选择。其他默认值改变只影响缺失/非法配置。
 - `WorkspaceActivity` 表达页面可见性，不代替播放所有权。隐藏页面停用绘制、媒体 surface 和快捷键；关闭页面取消其拥有的请求并释放对应播放会话。系统后台与应用内切页分别处理。
 - 设置沿用 `AppSettings`、设置控制器和 `SqliteSettingsRepository`；可调项按既有流程保存并立即应用，保存失败保留或回退已保存配置。默认、恢复默认、非法值回退和迁移须一致，不能覆盖有效旧值。
 - 跨视频/PGC/直播、普通/全屏的相同行为优先修改共享会话或组件。视频与动态评论复用 `lib/features/comments` 和 `lib/shared/ui`，以 `CommentTarget(oid, type)` 区分身份；不复制页面专属的协议/交互实现。
@@ -87,7 +88,7 @@
 ## 播放、弹幕与平台
 
 - 遵守 [播放设计](docs/playback-and-danmaku.md)。视频、PGC、直播及离线播放共用契约，每个播放标签只拥有一个 `PlaybackSession` 和 engine；主应用通过 `PlayerEngine`/`VideoSurface` 使用播放器，不直接调用 media_kit。
-- 只有多标签且 `allowConcurrentPlayback` 开启时允许不同标签同时播放；单标签或关闭并发开关时由 `PlaybackManager` 先完成旧会话暂停，再允许目标播放。导航暂停保留源、位置和用户意图，手动暂停不得自动恢复；关闭标签只释放自己的会话，账号变化停止全部会话，退出等待原生释放完成。
+- 只有多标签且 `allowConcurrentPlayback` 开启时允许不同标签同时播放；双标签或关闭并发开关时由 `PlaybackManager` 先完成旧会话暂停，再允许目标播放。导航暂停保留源、位置和用户意图，手动暂停不得自动恢复；关闭标签只释放自己的会话，账号变化停止全部会话，退出等待原生释放完成。
 - 点播必须验证 DASH 音视频分轨；不能把视频 URL 单独可播视作完成。原生播放器请求不经过 Dio，需要独立设置并验证 headers/Range/重定向。
 - seek、换清晰度、换 P、URL 刷新都要隔离旧事件并保留用户播放意图；全屏/布局改变不得产生第二路音频。
 - 点播弹幕按确认的播放位置加载/触发，动画时间独立控制滚动与停留；暂停/缓冲冻结、seek 重建、倍速语义不能混用。直播按单调到达时间调度；沿用当前随刷新率运行的 Ticker，不将已撤回的合帧实验当作现行实现。

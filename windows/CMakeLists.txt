@@ -63,6 +63,9 @@ bilisail_use_pinned_mpv()
 include(patches/media_kit_video/apply.cmake)
 bilisail_patch_video_target()
 
+include(patches/window_manager/apply.cmake)
+bilisail_patch_window_manager_target()
+
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can
 # run in place. This is done instead of making a separate bundle (as on Linux)

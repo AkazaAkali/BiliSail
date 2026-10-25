@@ -9,6 +9,7 @@ export 'src/clients/watch_history_client.dart';
 export 'src/clients/home_client.dart';
 export 'src/clients/ranking_client.dart';
 export 'src/models/ranking_models.dart';
+export 'src/models/popular_models.dart';
 export 'src/clients/collection_subscription_client.dart';
 export 'src/clients/favorite_folder_client.dart';
 export 'src/clients/feed_card_actions_client.dart';

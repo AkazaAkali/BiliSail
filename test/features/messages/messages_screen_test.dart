@@ -137,9 +137,23 @@ void main() {
     ) async {
       repo.counts = {InboxSection.private: 3, section: 2};
       await mountWithAccount(tester);
+      final tabLabel = switch (section) {
+        InboxSection.replies => '回复',
+        InboxSection.mentions => '我的',
+        _ => section.label,
+      };
+      expect(find.text('$tabLabel · 2'), findsOneWidget);
       expect((accountBadge(tester).label as Text).data, '5');
       await tester.tap(find.byKey(ValueKey('message-section-${section.name}')));
       await tester.pumpAndSettle();
+      expect(find.text(tabLabel), findsOneWidget);
+      expect(find.text('$tabLabel · 2'), findsNothing);
+      expect(
+        ProviderScope.containerOf(tester.element(find.byType(MessagesScreen)))
+            .read(messagesControllerProvider)
+            .section,
+        section,
+      );
       expect((accountBadge(tester).label as Text).data, '3');
       expect(repo.unreadReads, 2);
       await tester.tap(find.byKey(const ValueKey('message-section-private')));
@@ -290,6 +304,24 @@ void main() {
         tester.view.resetDevicePixelRatio();
       });
       await mount(tester);
+      expect(find.text('回复'), findsOneWidget);
+      expect(find.text('我的'), findsOneWidget);
+      expect(find.text('回复我的'), findsNothing);
+      expect(find.text('@我的'), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('message-section-replies')),
+          matching: find.byIcon(Icons.reply_rounded),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('message-section-mentions')),
+          matching: find.byIcon(Icons.alternate_email_rounded),
+        ),
+        findsOneWidget,
+      );
       expect(find.text('系统通知'), findsOneWidget);
       await tester.tap(find.text('测试会话'));
       await tester.pumpAndSettle();

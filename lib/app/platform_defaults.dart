@@ -6,7 +6,7 @@ import '../features/settings/domain/app_settings.dart';
 WorkspaceNavigationMode workspaceNavigationModeForPlatform(
   TargetPlatform platform,
 ) => platform == TargetPlatform.android
-    ? WorkspaceNavigationMode.singlePage
+    ? WorkspaceNavigationMode.dualTabs
     : WorkspaceNavigationMode.multipleTabs;
 
 WorkspaceNavigationMode get defaultWorkspaceNavigationMode =>

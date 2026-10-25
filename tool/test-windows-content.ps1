@@ -5,6 +5,8 @@ Push-Location $repoRoot
 try {
   $mediaDirectory = Join-Path $repoRoot '.dart_tool/content_media'
   New-Item -ItemType Directory -Path $mediaDirectory -Force | Out-Null
+  Copy-Item -LiteralPath 'test/fixtures/media/video.mp4' -Destination (Join-Path $mediaDirectory 'video.mp4') -Force
+  Copy-Item -LiteralPath 'test/fixtures/media/audio.m4a' -Destination (Join-Path $mediaDirectory 'audio.m4a') -Force
   & ffmpeg -hide_banner -loglevel error -y -i test/fixtures/media/video.mp4 -i test/fixtures/media/audio.m4a -c copy -hls_time 2 -hls_list_size 0 -hls_segment_filename (Join-Path $mediaDirectory 'segment-%03d.ts') (Join-Path $mediaDirectory 'live.m3u8')
   if ($LASTEXITCODE -ne 0) { throw 'HLS fixture generation failed' }
   & ffmpeg -hide_banner -loglevel error -y -i test/fixtures/media/video.mp4 -i test/fixtures/media/audio.m4a -c copy -f flv (Join-Path $mediaDirectory 'live.flv')

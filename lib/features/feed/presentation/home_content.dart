@@ -17,6 +17,10 @@ import '../../../core/network/api_requests.dart';
 import '../../../domain/app_failure.dart';
 import '../../../domain/video.dart';
 import '../../../core/presentation/workspace_activity.dart';
+import '../../../core/input/input_stroke.dart';
+import '../../../core/input/shortcut_dispatcher.dart';
+import '../../../core/presentation/input_scope.dart';
+import '../../settings/domain/shortcut_settings.dart';
 import '../../../shared/ui/video_card.dart';
 import '../../../shared/ui/video_card_interaction_scope.dart';
 import '../../video/domain/video_card_interactions.dart';
@@ -146,119 +150,137 @@ final class _HomeContentState extends ConsumerState<HomeContent> {
     final watchLaterActions = widget.channel == HomeChannel.watchLater
         ? ref.watch(watchLaterRemovalProvider(scope))
         : null;
-    return PagedScrollViewport(
-      key: ValueKey(query),
-      active: widget.active,
-      canLoadMore:
-          feed.hasMore &&
-          !feed.loadingMore &&
-          feed.items.asData != null &&
-          feed.pageError == null,
-      contentVersion: feed,
-      onLoadMore: controller.loadMore,
-      onRefresh: controller.refresh,
-      builder: (scrollController) => RefreshIndicator(
+    final pageActive = widget.active && WorkspaceActivity.isActive(context);
+    return CommandTargetScope<Object>(
+      scope: CommandScope.page,
+      active: pageActive,
+      merge: const {ShortcutAction.refresh},
+      commands: {
+        if (pageActive)
+          ShortcutAction.refresh: (stroke) async {
+            if (stroke.phase != InputPhase.down) return CommandOutcome.noOp;
+            await controller.refresh();
+            return CommandOutcome.completed;
+          },
+      },
+      child: PagedScrollViewport(
+        key: ValueKey(query),
+        active: widget.active,
+        canLoadMore:
+            feed.hasMore &&
+            !feed.loadingMore &&
+            feed.items.asData != null &&
+            feed.pageError == null,
+        contentVersion: feed,
+        onLoadMore: controller.loadMore,
         onRefresh: controller.refresh,
-        child: CustomScrollView(
-          key: PageStorageKey(
-            'home-${widget.channel.name}-${widget.section}-$scope-${query.folderId}',
-          ),
-          controller: scrollController,
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              sliver: SliverMainAxisGroup(
-                slivers: [
-                  if (liveBrowse && areas != null)
-                    SliverToBoxAdapter(
-                      child: areas.items.when(
-                        loading: () => const LinearProgressIndicator(),
-                        error: (error, _) => StateView.error(
-                          message: _message(error),
-                          onAction: ref
-                              .read(homeControllerProvider(areasQuery).notifier)
-                              .refresh,
+        builder: (scrollController) => RefreshIndicator(
+          onRefresh: controller.refresh,
+          child: CustomScrollView(
+            key: PageStorageKey(
+              'home-${widget.channel.name}-${widget.section}-$scope-${query.folderId}',
+            ),
+            controller: scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverCardGridPadding(
+                sliver: SliverMainAxisGroup(
+                  slivers: [
+                    if (liveBrowse && areas != null)
+                      SliverToBoxAdapter(
+                        child: areas.items.when(
+                          loading: () => const LinearProgressIndicator(),
+                          error: (error, _) => StateView.error(
+                            message: _message(error),
+                            onAction: ref
+                                .read(
+                                  homeControllerProvider(areasQuery).notifier,
+                                )
+                                .refresh,
+                          ),
+                          data: (items) => Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _areaRow(items, parent: true),
+                              if (_liveParent != null)
+                                _areaRow(_liveParent!.children, parent: false),
+                              const SizedBox(height: 12),
+                            ],
+                          ),
                         ),
-                        data: (items) => Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                      ),
+                    if (_folder != null && !liveBrowse)
+                      SliverToBoxAdapter(
+                        child: Row(
                           children: [
-                            _areaRow(items, parent: true),
-                            if (_liveParent != null)
-                              _areaRow(_liveParent!.children, parent: false),
-                            const SizedBox(height: 12),
+                            IconButton(
+                              tooltip: '返回列表',
+                              onPressed: () => setState(() => _folder = null),
+                              icon: const Icon(Icons.arrow_back),
+                            ),
+                            Expanded(child: Text(_folder!.title)),
                           ],
                         ),
                       ),
+                    feed.items.when(
+                      loading: () => const SliverToBoxAdapter(
+                        child: SizedBox(
+                          height: 300,
+                          child: StateView.loading(),
+                        ),
+                      ),
+                      error: (error, _) => SliverToBoxAdapter(
+                        child: StateView.error(
+                          message: _message(error),
+                          onAction: controller.refresh,
+                        ),
+                      ),
+                      data: (items) => items.isEmpty
+                          ? const SliverToBoxAdapter(
+                              child: StateView.empty(message: '这里暂时没有内容'),
+                            )
+                          : _itemsSliver(
+                              items,
+                              query: query,
+                              controller: controller,
+                              feed: feed,
+                              watchLaterActions: watchLaterActions,
+                            ),
                     ),
-                  if (_folder != null && !liveBrowse)
                     SliverToBoxAdapter(
-                      child: Row(
+                      child: Column(
                         children: [
-                          IconButton(
-                            tooltip: '返回列表',
-                            onPressed: () => setState(() => _folder = null),
-                            icon: const Icon(Icons.arrow_back),
-                          ),
-                          Expanded(child: Text(_folder!.title)),
+                          const SizedBox(height: 16),
+                          if (feed.limitReached)
+                            Center(
+                              child: Text(
+                                widget.channel == HomeChannel.favorites
+                                    ? '已显示 ${HomeController.maxFavoriteEntries} 条内容，可刷新重新加载'
+                                    : '已显示 ${HomeController.maxDynamicEntries} 条动态，可刷新查看最新内容',
+                              ),
+                            ),
+                          if (feed.loadingMore)
+                            const Center(child: CircularProgressIndicator())
+                          else if (feed.pageError != null)
+                            StateView.error(
+                              message: _message(feed.pageError),
+                              onAction: controller.loadMore,
+                            )
+                          else if (feed.hasMore)
+                            Center(
+                              child: OutlinedButton(
+                                onPressed: controller.loadMore,
+                                child: const Text('加载更多'),
+                              ),
+                            ),
                         ],
                       ),
                     ),
-                  feed.items.when(
-                    loading: () => const SliverToBoxAdapter(
-                      child: SizedBox(height: 300, child: StateView.loading()),
-                    ),
-                    error: (error, _) => SliverToBoxAdapter(
-                      child: StateView.error(
-                        message: _message(error),
-                        onAction: controller.refresh,
-                      ),
-                    ),
-                    data: (items) => items.isEmpty
-                        ? const SliverToBoxAdapter(
-                            child: StateView.empty(message: '这里暂时没有内容'),
-                          )
-                        : _itemsSliver(
-                            items,
-                            query: query,
-                            controller: controller,
-                            feed: feed,
-                            watchLaterActions: watchLaterActions,
-                          ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Column(
-                      children: [
-                        const SizedBox(height: 16),
-                        if (feed.limitReached)
-                          Center(
-                            child: Text(
-                              widget.channel == HomeChannel.favorites
-                                  ? '已显示 ${HomeController.maxFavoriteEntries} 条内容，可刷新重新加载'
-                                  : '已显示 ${HomeController.maxDynamicEntries} 条动态，可刷新查看最新内容',
-                            ),
-                          ),
-                        if (feed.loadingMore)
-                          const Center(child: CircularProgressIndicator())
-                        else if (feed.pageError != null)
-                          StateView.error(
-                            message: _message(feed.pageError),
-                            onAction: controller.loadMore,
-                          )
-                        else if (feed.hasMore)
-                          Center(
-                            child: OutlinedButton(
-                              onPressed: controller.loadMore,
-                              child: const Text('加载更多'),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -227,7 +227,13 @@ void main() {
   ) async {
     category.value = SettingsCategory.playback;
     await mount(tester, platform: TargetPlatform.windows);
-    expect(find.byType(Scrollbar), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const PageStorageKey('settings-playback')),
+        matching: find.byType(Scrollbar),
+      ),
+      findsOneWidget,
+    );
     final position = _position(tester, SettingsCategory.playback);
     await tester.sendEventToBinding(
       PointerScrollEvent(

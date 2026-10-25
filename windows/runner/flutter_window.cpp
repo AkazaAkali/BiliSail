@@ -27,9 +27,19 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   system_fonts_channel_ =
       RegisterSystemFonts(flutter_controller_->engine()->messenger());
+  const auto text_input_registrar =
+      flutter_controller_->engine()->GetRegistrarForPlugin("BiliSailTextInput");
+  const auto resolve_view = [text_input_registrar](int64_t view_id) -> HWND {
+    const auto view = FlutterDesktopPluginRegistrarGetViewById(
+        text_input_registrar, view_id);
+    return view ? FlutterDesktopViewGetHWND(view) : nullptr;
+  };
   text_input_channel_ = std::make_unique<TextInputChannel>(
       flutter_controller_->engine()->messenger(),
-      flutter_controller_->view()->GetNativeWindow());
+      flutter_controller_->view()->GetNativeWindow(),
+      resolve_view);
+  desktop_window_channel_ = std::make_unique<DesktopWindowChannel>(
+      flutter_controller_->engine()->messenger(), resolve_view);
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -45,6 +55,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  desktop_window_channel_.reset();
   text_input_channel_.reset();
   system_fonts_channel_.reset();
   if (flutter_controller_) {

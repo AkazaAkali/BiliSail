@@ -1,6 +1,7 @@
 import '../support/input_test_app.dart';
 
 import 'package:bilisail/app/shell.dart';
+import 'package:bilisail/app/platform_defaults.dart';
 import 'package:bilisail/features/feed/domain/home_channel.dart';
 import 'package:bilisail/features/feed/presentation/home_channel_swipe.dart';
 import 'package:bilisail/shared/ui/app_notice.dart';
@@ -103,6 +104,7 @@ void main() {
         final mobile =
             platform == TargetPlatform.android ||
             platform == TargetPlatform.iOS;
+        final dual = mode == WorkspaceNavigationMode.dualTabs;
         final router = _router(
           (_, tab) =>
               SizedBox.expand(key: ValueKey('body-${tab.location.path}')),
@@ -112,6 +114,7 @@ void main() {
         );
         addTearDown(router.dispose);
         await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+        var playbackCreated = false;
         for (final width in [420.0, 1280.0]) {
           tester.view.physicalSize = Size(width, 850);
           for (final location in [
@@ -124,27 +127,42 @@ void main() {
           ]) {
             router.go(location);
             await tester.pumpAndSettle();
-            expect(
-              find.byKey(const ValueKey('single-page-header')),
-              !mobile && mode == WorkspaceNavigationMode.singlePage
-                  ? findsOneWidget
-                  : findsNothing,
-            );
+            final playback = location.startsWith('/video/');
+            final profile = location.startsWith('/user/');
+            playbackCreated |= playback;
             expect(
               find.byKey(const ValueKey('workspace-tab-strip')),
-              !mobile && mode == WorkspaceNavigationMode.multipleTabs
+              mode == WorkspaceNavigationMode.multipleTabs
                   ? findsOneWidget
                   : findsNothing,
             );
             expect(
+              find.byKey(const ValueKey('dual-window-caption')),
+              dual && !mobile ? findsOneWidget : findsNothing,
+            );
+            if (dual && !mobile) {
+              expect(
+                tester
+                    .getSize(find.byKey(const ValueKey('dual-window-caption')))
+                    .height,
+                32,
+              );
+            }
+            final hasBack =
+                dual &&
+                !const ['/', '/settings'].contains(location) &&
+                (!mobile || !playback);
+            expect(
               find.byKey(const ValueKey('workspace-back')),
-              mobile ? findsNothing : findsOneWidget,
+              hasBack ? findsOneWidget : findsNothing,
             );
             expect(
-              find.byKey(const ValueKey('workspace-home')),
-              !mobile &&
-                      mode == WorkspaceNavigationMode.singlePage &&
-                      location != '/'
+              find.byTooltip('返回上一视频'),
+              dual && mobile && playback ? findsOneWidget : findsNothing,
+            );
+            expect(
+              find.byTooltip('返回播放'),
+              dual && playbackCreated && !playback
                   ? findsOneWidget
                   : findsNothing,
             );
@@ -156,7 +174,19 @@ void main() {
                 location.startsWith('/user/')) {
               expect(
                 tester.getTopLeft(find.byKey(ValueKey('body-$location'))).dy,
-                mobile ? 0 : 42,
+                (dual
+                        ? mobile
+                              ? (playback
+                                    ? 44
+                                    : profile
+                                    ? 42
+                                    : 0)
+                              : 32
+                        : !mobile ||
+                              mode == WorkspaceNavigationMode.multipleTabs
+                        ? 42
+                        : 0) +
+                    (width >= 600 ? 12 : 0),
               );
             }
             expect(tester.takeException(), isNull);
@@ -170,91 +200,205 @@ void main() {
         await tester.pumpAndSettle();
         expect(
           router.routeInformationProvider.value.uri.path,
-          '/video/BV1234567890',
+          dual ? '/history' : '/video/BV1234567890',
         );
       }, variant: TargetPlatformVariant.only(platform));
     }
   }
 
-  for (final width in [420.0, 1280.0]) {
-    for (final location in [
-      '/',
-      '/search?q=test',
-      '/settings',
-      '/history',
-      '/video/BV1234567890',
-      '/user/123',
+  for (final mode in WorkspaceNavigationMode.values) {
+    for (final (initial, entryWidth) in [
+      ('/', 390.0),
+      ('/', 1280.0),
+      ('/?channel=dynamic', 390.0),
+      ('/?channel=dynamic', 1280.0),
     ]) {
       _workspaceTestWidgets(
-        'single page retains window controls at $width on $location',
+        'dynamic entry preserves explicit and chosen channels from $initial at $entryWidth in $mode',
         (tester) async {
           tester.view.devicePixelRatio = 1;
-          tester.view.physicalSize = Size(width, 850);
+          tester.view.physicalSize = Size(entryWidth, 844);
           addTearDown(tester.view.resetDevicePixelRatio);
           addTearDown(tester.view.resetPhysicalSize);
-          var windowDrags = 0;
+          final disposed = <String>[];
+          final navigationPrefix = entryWidth < 600
+              ? 'workspace-bottom'
+              : 'workspace-nav';
           final router = _router(
-            (_, tab) => SizedBox.expand(key: ValueKey('page-${tab.id}')),
-            navigationMode: WorkspaceNavigationMode.singlePage,
-            initialLocation: location,
+            (_, tab) => _CounterPage(tab: tab, onDispose: disposed.add),
+            navigationMode: mode,
+            initialLocation: initial,
             customCaption: true,
-            onWindowDrag: () => windowDrags++,
-            accountBuilder: (_) => const SizedBox(width: 34, height: 34),
+            accountBuilder: (_) => const Icon(Icons.account_circle),
           );
           addTearDown(router.dispose);
           await tester.pumpWidget(InputTestApp.router(routerConfig: router));
           await tester.pumpAndSettle();
+          final root = tester.element(find.byType(_CounterPage));
+          await tester.tap(find.text('count 0'));
+          await tester.pump();
+          if (initial != '/') {
+            expect(
+              router
+                  .routeInformationProvider
+                  .value
+                  .uri
+                  .queryParameters['channel'],
+              'dynamic',
+            );
+            await tester.tap(find.byKey(ValueKey('$navigationPrefix-home')));
+            await tester.pumpAndSettle();
+          }
+          await tester.tap(find.byKey(ValueKey('$navigationPrefix-dynamic')));
+          await tester.pumpAndSettle();
           expect(
-            find.byKey(const ValueKey('single-page-header')),
+            router
+                .routeInformationProvider
+                .value
+                .uri
+                .queryParameters['channel'],
+            initial == '/' ? 'videoDynamic' : 'dynamic',
+          );
+          await tester.tap(find.byKey(const ValueKey('channel-dynamic')));
+          await tester.pumpAndSettle();
+          expect(
+            router
+                .routeInformationProvider
+                .value
+                .uri
+                .queryParameters['channel'],
+            'dynamic',
+          );
+          await tester.tap(find.byKey(ValueKey('$navigationPrefix-home')));
+          await tester.pumpAndSettle();
+          tester.view.physicalSize = const Size(390, 844);
+          await tester.pumpAndSettle();
+          await tester.tap(
+            find.byKey(const ValueKey('workspace-bottom-dynamic')),
+          );
+          await tester.pumpAndSettle();
+          expect(
+            router
+                .routeInformationProvider
+                .value
+                .uri
+                .queryParameters['channel'],
+            'dynamic',
+          );
+          expect(find.byIcon(Icons.account_circle), findsOneWidget);
+          expect(
+            find.byKey(const ValueKey('workspace-search')),
             findsOneWidget,
           );
+          expect(tester.element(find.byType(_CounterPage)), same(root));
+          expect(find.text('count 1'), findsOneWidget);
           expect(
-            find.byKey(const ValueKey('workspace-tab-strip')),
+            find.byKey(const ValueKey('workspace-tab-tab-1')),
             findsNothing,
           );
+          expect(disposed, isEmpty);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+    _workspaceTestWidgets(
+      '$mode retains caption controls and drag navigation after resizing',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        var windowDrags = 0;
+        final router = _router(
+          (_, tab) => SizedBox.expand(key: ValueKey('page-${tab.id}')),
+          navigationMode: mode,
+          customCaption: true,
+          onWindowDrag: () => windowDrags++,
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+        await tester.pumpAndSettle();
+        final home = tester.element(find.byKey(const ValueKey('page-home')));
+        for (final width in [420.0, 1280.0]) {
+          tester.view.physicalSize = Size(width, 850);
+          router.go('/history');
+          await tester.pumpAndSettle();
           expect(
             find.byKey(const ValueKey('caption-controls')),
             findsOneWidget,
           );
-          expect(
-            find.byKey(const ValueKey('caption-drag-region')),
-            findsOneWidget,
-          );
-          await tester.drag(
-            find.byKey(const ValueKey('caption-drag-region')),
-            const Offset(40, 0),
-          );
-          await tester.pumpAndSettle();
-          expect(windowDrags, 1);
           expect(
             tester
                 .getTopRight(find.byKey(const ValueKey('caption-controls')))
                 .dx,
             width,
           );
-          if (location.startsWith('/video/') || location.startsWith('/user/')) {
-            expect(
-              tester.getTopLeft(find.byKey(const ValueKey('page-tab-1'))).dy,
-              42,
-            );
-          } else {
-            expect(
-              tester
-                  .getTopLeft(find.byKey(const ValueKey('workspace-search')))
-                  .dy,
-              42 + 9 + (width >= 760 ? 3 : 0),
-            );
-          }
-          if (location != '/') {
-            await tester.tap(find.byKey(const ValueKey('workspace-home')));
-            await tester.pumpAndSettle();
-            expect(find.byKey(const ValueKey('page-home')), findsOneWidget);
-          }
+          await tester.drag(
+            find.byKey(const ValueKey('caption-drag-region')),
+            const Offset(40, 0),
+          );
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const ValueKey('workspace-common-tools')),
+            findsNothing,
+          );
+          await _back(tester);
+          await tester.pumpAndSettle();
+          expect(
+            tester.element(find.byKey(const ValueKey('page-home'))),
+            same(home),
+          );
           expect(tester.takeException(), isNull);
-        },
-      );
-    }
+        }
+        expect(windowDrags, 2);
+      },
+    );
   }
+
+  _workspaceTestWidgets(
+    'mobile dual returns to the retained playback page and closes it without tabs',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 844);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final disposed = <String>[];
+      final router = _router(
+        (_, tab) => _CounterPage(tab: tab, onDispose: disposed.add),
+        navigationMode: WorkspaceNavigationMode.dualTabs,
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('count 0'));
+      await tester.pump();
+      final browse = tester.element(find.byType(_CounterPage));
+      router.go('/video/BV1234567890');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
+      expect(find.byTooltip('返回上一视频'), findsOneWidget);
+      expect(find.byTooltip('关闭播放'), findsOneWidget);
+      await tester.tap(find.text('count 0'));
+      await tester.pump();
+      final playback = tester.element(find.byType(_CounterPage));
+      router.go('/');
+      await tester.pumpAndSettle();
+      expect(tester.element(find.byType(_CounterPage)), same(browse));
+      expect(find.text('count 1'), findsOneWidget);
+      expect(find.byTooltip('返回上一视频'), findsNothing);
+      await tester.tap(find.byTooltip('返回播放'));
+      await tester.pumpAndSettle();
+      expect(tester.element(find.byType(_CounterPage)), same(playback));
+      expect(find.text('count 1'), findsOneWidget);
+      await tester.tap(find.byTooltip('关闭播放'));
+      await tester.pumpAndSettle();
+      expect(tester.element(find.byType(_CounterPage)), same(browse));
+      expect(disposed, ['tab-1']);
+      expect(find.byTooltip('返回播放'), findsNothing);
+      expect(find.byTooltip('关闭播放'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
 
   _workspaceTestWidgets(
     'window deactivation cancels repeats and requires fresh modifiers',
@@ -343,7 +487,7 @@ void main() {
         'still-reading',
       );
       expect(find.byKey(const ValueKey('workspace-tab-tab-3')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('workspace-back')));
+      await _back(tester);
       await tester.pumpAndSettle();
       expect(find.text('page tab-1 /video/BV0987654321'), findsOneWidget);
       expect(
@@ -362,23 +506,22 @@ void main() {
   );
 
   _workspaceTestWidgets(
-    'single page back restores state, releases popped pages and handles system back',
+    'workspace back restores state without closing pages and handles system back',
     (tester) async {
       final disposed = <String>[];
       final router = _router(
         (context, tab) => _CounterPage(tab: tab, onDispose: disposed.add),
-        navigationMode: WorkspaceNavigationMode.singlePage,
+        navigationMode: WorkspaceNavigationMode.multipleTabs,
       );
       addTearDown(router.dispose);
       await tester.pumpWidget(InputTestApp.router(routerConfig: router));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('single-page-header')), findsOneWidget);
-      expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
+      expect(find.byKey(const ValueKey('workspace-tab-strip')), findsOneWidget);
       expect(
         tester.getTopLeft(find.byKey(const ValueKey('workspace-search'))).dy,
-        54,
+        63,
       );
-      expect(find.byKey(const ValueKey('new-workspace-tab')), findsNothing);
+      expect(find.byKey(const ValueKey('new-workspace-tab')), findsOneWidget);
       await tester.tap(find.text('count 0'));
       router.go('/search?q=test');
       await tester.pumpAndSettle();
@@ -387,32 +530,27 @@ void main() {
       await tester.tap(find.text('count 1'));
       router.go('/video/BV1234567890');
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('workspace-back')));
+      await _back(tester);
       await tester.pumpAndSettle();
       expect(find.text('count 2'), findsOneWidget);
-      expect(disposed, ['tab-2']);
+      expect(disposed, isEmpty);
       expect(router.routeInformationProvider.value.uri.path, '/search');
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(find.text('count 1'), findsOneWidget);
-      expect(disposed, ['tab-2', 'tab-1']);
-      expect(
-        tester
-            .widget<IconButton>(find.byKey(const ValueKey('workspace-back')))
-            .onPressed,
-        isNull,
-      );
+      expect(disposed, isEmpty);
+      expect(find.byKey(const ValueKey('workspace-back')), findsNothing);
       expect(await router.routerDelegate.popRoute(), isFalse);
       expect(tester.takeException(), isNull);
     },
   );
 
   _workspaceTestWidgets(
-    'a single-page deep link can return home and modal back stays in the page',
+    'a dual deep link can close playback and modal back stays in the page',
     (tester) async {
       final router = _router(
         (_, tab) => Text('page ${tab.id}'),
-        navigationMode: WorkspaceNavigationMode.singlePage,
+        navigationMode: WorkspaceNavigationMode.dualTabs,
         initialLocation: '/video/BV1234567890',
       );
       addTearDown(router.dispose);
@@ -429,7 +567,6 @@ void main() {
       await dialog;
       expect(find.text('page tab-1'), findsOneWidget);
       await _shortcut(tester, LogicalKeyboardKey.keyT);
-      await _shortcut(tester, LogicalKeyboardKey.tab);
       expect(find.text('page tab-1'), findsOneWidget);
       await _shortcut(tester, LogicalKeyboardKey.keyW);
       expect(find.text('page home'), findsOneWidget);
@@ -447,7 +584,7 @@ void main() {
       (tester) async {
         tester.view.devicePixelRatio = 1;
         tester.view.physicalSize = const Size(420, 850);
-        final singlePage = platform == TargetPlatform.android;
+        final dual = platform == TargetPlatform.android;
         addTearDown(tester.view.resetDevicePixelRatio);
         addTearDown(tester.view.resetPhysicalSize);
         final disposed = <String>[];
@@ -466,33 +603,115 @@ void main() {
         await tester.pump();
         expect(
           find.byKey(const ValueKey('workspace-tab-strip')),
-          singlePage ? findsNothing : findsOneWidget,
+          dual ? findsNothing : findsOneWidget,
         );
         tester.view.physicalSize = const Size(1280, 850);
         await tester.pumpAndSettle();
         expect(
           find.byKey(const ValueKey('workspace-tab-strip')),
-          singlePage ? findsNothing : findsOneWidget,
+          dual ? findsNothing : findsOneWidget,
         );
         expect(find.text('count 1'), findsOneWidget);
         tester.view.physicalSize = const Size(420, 850);
         await tester.pumpAndSettle();
         expect(
           find.byKey(const ValueKey('workspace-tab-strip')),
-          singlePage ? findsNothing : findsOneWidget,
+          dual ? findsNothing : findsOneWidget,
         );
         expect(find.text('count 1'), findsOneWidget);
         expect(disposed, isEmpty);
-        if (singlePage) {
+        if (dual) {
           await tester.binding.handlePopRoute();
         } else {
-          await tester.tap(find.byKey(const ValueKey('workspace-back')));
+          await _back(tester);
         }
         await tester.pumpAndSettle();
         expect(find.text('count 1'), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
       variant: TargetPlatformVariant.only(platform),
+    );
+  }
+
+  for (final mode in WorkspaceNavigationMode.values) {
+    _workspaceTestWidgets(
+      'live section header preserves the root and last section in $mode',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1280, 844);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        final disposed = <String>[];
+        final router = _router(
+          (_, tab) => _CounterPage(tab: tab, onDispose: disposed.add),
+          navigationMode: mode,
+          initialLocation: '/?channel=live&section=我的关注',
+          customCaption: true,
+          accountBuilder: (_) => const Icon(Icons.account_circle),
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+        await tester.pumpAndSettle();
+        final root = tester.element(find.byType(_CounterPage));
+        await tester.tap(find.text('count 0'));
+        await tester.pump();
+        await tester.tap(
+          find.byKey(const ValueKey('workspace-live-section-观看记录')),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          router.routeInformationProvider.value.uri.queryParameters['section'],
+          '观看记录',
+        );
+        expect(
+          router.routeInformationProvider.value.uri.queryParameters['tab'],
+          'home',
+        );
+        expect(tester.element(find.byType(_CounterPage)), same(root));
+        expect(find.byKey(const ValueKey('workspace-back')), findsNothing);
+        await tester.tap(find.byKey(const ValueKey('workspace-nav-home')));
+        await tester.pumpAndSettle();
+        tester.view.physicalSize = const Size(390, 844);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('channel-live')));
+        await tester.pumpAndSettle();
+        expect(
+          router.routeInformationProvider.value.uri.queryParameters['section'],
+          '观看记录',
+        );
+        tester.view.physicalSize = const Size(1280, 844);
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('workspace-live-section-观看记录')),
+          findsOneWidget,
+        );
+        expect(tester.element(find.byType(_CounterPage)), same(root));
+        expect(find.text('count 1'), findsOneWidget);
+        expect(disposed, isEmpty);
+        router.go('/?channel=live');
+        await tester.pumpAndSettle();
+        final recommended = find.byKey(
+          const ValueKey('workspace-live-section-推荐直播'),
+        );
+        expect(
+          tester
+              .widget<TextButton>(recommended)
+              .style
+              ?.foregroundColor
+              ?.resolve({}),
+          Theme.of(tester.element(recommended)).colorScheme.primary,
+        );
+        await tester.tap(find.byKey(const ValueKey('workspace-nav-home')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('workspace-nav-live')));
+        await tester.pumpAndSettle();
+        expect(
+          router.routeInformationProvider.value.uri.queryParameters['section'],
+          '推荐直播',
+        );
+        expect(tester.element(find.byType(_CounterPage)), same(root));
+        expect(tester.takeException(), isNull);
+      },
     );
   }
 
@@ -509,10 +728,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('workspace-tab-home')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('workspace-back')));
+      await _back(tester);
       await tester.pumpAndSettle();
       expect(find.text('page tab-2'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('workspace-back')));
+      await _back(tester);
       await tester.pumpAndSettle();
       expect(find.text('page tab-1'), findsOneWidget);
       expect(find.byKey(const ValueKey('workspace-tab-tab-2')), findsOneWidget);
@@ -537,6 +756,11 @@ void main() {
         await tester.pumpWidget(
           InputTestApp.router(
             theme: ThemeData(platform: TargetPlatform.windows),
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context)
+                  .copyWith(textScaler: const TextScaler.linear(2)),
+              child: child ?? const SizedBox.shrink(),
+            ),
             routerConfig: router,
           ),
         );
@@ -555,11 +779,11 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(scrollable.position.pixels, scrollable.position.maxScrollExtent);
-        final favorites = find.byKey(const ValueKey('channel-favorites'));
+        final favorites = find.byKey(const ValueKey('channel-categories'));
         expect(favorites.hitTestable(), findsOneWidget);
         await tester.tap(favorites);
         await tester.pumpAndSettle();
-        expect(find.text('channel favorites'), findsOneWidget);
+        expect(find.text('channel categories'), findsOneWidget);
         await tester.sendEventToBinding(
           PointerScrollEvent(
             kind: PointerDeviceKind.mouse,
@@ -757,7 +981,7 @@ void main() {
           find.byKey(const ValueKey('composer-tab-1')),
           'retained draft',
         );
-        router.go('/settings');
+        router.go('/history');
         await tester.pumpAndSettle();
         final composer = find.byKey(const ValueKey('composer-tab-2'));
         await tester.enterText(composer, 'current draft');
@@ -773,6 +997,23 @@ void main() {
         );
         await pointer.down(tester.getCenter(composer));
         await tester.pumpAndSettle();
+        if (mode == WorkspaceNavigationMode.dualTabs) {
+          // Closing the browsing slot is a no-op; explicit playback remains
+          // closable using the same custom side-button binding.
+          expect(find.text('page tab-2'), findsOneWidget);
+          await pointer.up();
+          router.go('/video/BV1234567890');
+          await tester.pumpAndSettle();
+          final playbackComposer = find.byKey(const ValueKey('composer-tab-3'));
+          await tester.enterText(playbackComposer, 'video draft');
+          await pointer.down(tester.getCenter(playbackComposer));
+          await pointer.up();
+          await tester.pumpAndSettle();
+          expect(find.text('page tab-2'), findsOneWidget);
+          expect(find.text('current draft'), findsOneWidget);
+          expect(find.byKey(const ValueKey('composer-tab-3')), findsNothing);
+          return;
+        }
         expect(find.text('page tab-1'), findsOneWidget);
         expect(find.text('page tab-2'), findsNothing);
         expect(find.text('retained draft'), findsOneWidget);
@@ -882,34 +1123,154 @@ void main() {
     );
   }
 
-  _workspaceTestWidgets(
-    'settings categories replace home channels and keep the same tab',
-    (tester) async {
-      final router = _router(
-        (context, tab) =>
-            Text('page ${tab.id} ${tab.location.queryParameters['section']}'),
-      );
-      addTearDown(router.dispose);
-      await tester.pumpWidget(InputTestApp.router(routerConfig: router));
-      await tester.pumpAndSettle();
-      router.go('/settings');
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('channel-recommended')), findsNothing);
-      expect(find.byKey(const ValueKey('channel-popular')), findsNothing);
-      await tester.tap(
-        find.byKey(const ValueKey('settings-category-shortcuts')),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('page tab-1 shortcuts'), findsOneWidget);
-      expect(find.byKey(const ValueKey('workspace-tab-tab-2')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('workspace-tab-home')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('channel-recommended')), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('workspace-tab-tab-1')));
-      await tester.pumpAndSettle();
-      expect(find.text('page tab-1 shortcuts'), findsOneWidget);
-    },
-  );
+  for (final mode in WorkspaceNavigationMode.values) {
+    _workspaceTestWidgets(
+      'settings keep their category without tools or an extra tab in $mode',
+      (tester) async {
+        final router = _router(
+          (context, tab) => Text(
+            'page ${tab.id} ${tab.location.queryParameters['section'] ?? 'none'}',
+          ),
+          navigationMode: mode,
+          accountBuilder: (_) => const Icon(Icons.account_circle),
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+        await tester.pumpAndSettle();
+        router.go('/settings');
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('channel-recommended')), findsNothing);
+        expect(
+          find.byKey(const ValueKey('workspace-common-tools')),
+          findsNothing,
+        );
+        expect(find.byIcon(Icons.account_circle), findsNothing);
+        expect(
+          find.byKey(const ValueKey('settings-category-strip')),
+          findsNothing,
+        );
+        router.go('/settings?section=shortcuts');
+        await tester.pumpAndSettle();
+        expect(find.text('page home shortcuts'), findsOneWidget);
+        expect(find.byKey(const ValueKey('workspace-tab-tab-1')), findsNothing);
+        await tester.tap(find.byKey(const ValueKey('workspace-nav-home')));
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('channel-recommended')),
+          findsOneWidget,
+        );
+        await tester.tap(find.byKey(const ValueKey('workspace-nav-settings')));
+        await tester.pumpAndSettle();
+        expect(find.text('page home shortcuts'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('workspace-common-tools')),
+          findsNothing,
+        );
+        expect(find.byKey(const ValueKey('workspace-tab-tab-1')), findsNothing);
+        router.go('/search?q=category-memory');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('workspace-nav-settings')));
+        await tester.pumpAndSettle();
+        expect(find.text('page home shortcuts'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('workspace-common-tools')),
+          findsNothing,
+        );
+        expect(find.byKey(const ValueKey('workspace-tab-tab-2')), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+    _workspaceTestWidgets(
+      'root destinations select only their own entry and keep four compact links in $mode',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1280, 844);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        final disposed = <String>[];
+        final router = _router(
+          (_, tab) => _CounterPage(tab: tab, onDispose: disposed.add),
+          navigationMode: mode,
+          customCaption: true,
+          accountBuilder: (_) => const Icon(Icons.account_circle),
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+        await tester.pumpAndSettle();
+        final root = tester.element(find.byType(_CounterPage));
+        await tester.tap(find.text('count 0'));
+        await tester.pump();
+        for (final (path, selected) in [
+          ('/messages', 'messages'),
+          ('/downloads', 'downloads'),
+          ('/settings', 'settings'),
+          ('/me', 'mine'),
+        ]) {
+          tester.view.physicalSize = const Size(1280, 844);
+          router.go(path);
+          await tester.pumpAndSettle();
+          for (final entry in [
+            'home',
+            'dynamic',
+            'live',
+            'mine',
+            'messages',
+            'downloads',
+            'settings',
+          ]) {
+            final semantics = find.descendant(
+              of: find.byKey(ValueKey('workspace-nav-$entry')),
+              matching: find.byType(Semantics),
+            );
+            expect(
+              tester
+                  .widgetList<Semantics>(semantics)
+                  .map((widget) => widget.properties.selected)
+                  .whereType<bool>(),
+              [entry == selected],
+            );
+          }
+          expect(
+            find.byKey(const ValueKey('workspace-common-tools')),
+            findsNothing,
+          );
+          expect(find.byIcon(Icons.account_circle), findsNothing);
+          expect(
+            find.byKey(const ValueKey('workspace-tab-tab-1')),
+            findsNothing,
+          );
+          expect(tester.element(find.byType(_CounterPage)), same(root));
+          tester.view.physicalSize = const Size(390, 844);
+          await tester.pumpAndSettle();
+          final bottom = find.byKey(
+            const ValueKey('workspace-bottom-navigation'),
+          );
+          expect(tester.getSize(bottom).height, 64);
+          if (selected == 'messages' || selected == 'downloads') {
+            expect(find.byType(NavigationBar), findsNothing);
+            final flags = tester
+                .widgetList<Semantics>(
+                  find.descendant(of: bottom, matching: find.byType(Semantics)),
+                )
+                .map((widget) => widget.properties.selected)
+                .whereType<bool>();
+            expect(flags, [false, false, false, false]);
+          } else {
+            expect(find.byType(NavigationBar), findsOneWidget);
+          }
+          for (final entry in ['home', 'dynamic', 'mine', 'settings']) {
+            expect(
+              find.byKey(ValueKey('workspace-bottom-$entry')).hitTestable(),
+              findsOneWidget,
+            );
+          }
+          expect(find.text('count 1'), findsOneWidget);
+          expect(tester.takeException(), isNull, reason: path);
+        }
+        expect(disposed, isEmpty);
+      },
+    );
+  }
   _workspaceTestWidgets(
     'browse tabs preserve page state and dispose closed pages',
     (tester) async {
@@ -1095,14 +1456,14 @@ GoRouter _router(
                 ),
               )
             : builder(context, tab),
-        windowControlsBuilder: customCaption
+        windowControlsBuilder: customCaption && workspaceHeaderVisible
             ? (_) => const SizedBox(
                 key: ValueKey('caption-controls'),
                 width: 138,
                 height: 42,
               )
             : null,
-        dragRegionBuilder: customCaption
+        dragRegionBuilder: customCaption && workspaceHeaderVisible
             ? (_, child) => GestureDetector(
                 key: const ValueKey('caption-drag-region'),
                 behavior: HitTestBehavior.translucent,
@@ -1120,6 +1481,9 @@ GoRouter _router(
           '/search',
           '/settings',
           '/history',
+          '/messages',
+          '/downloads',
+          '/me',
         ])
           GoRoute(path: path, builder: (_, state) => const SizedBox.shrink()),
       ],
@@ -1138,6 +1502,15 @@ final class _ShellSearchRepository implements SearchRepository {
     required SearchUserType userType,
     required RequestCancellation cancellation,
   }) async => SearchPage(items: [], hasMore: false);
+}
+
+Future<void> _back(WidgetTester tester) async {
+  final button = find.byKey(const ValueKey('workspace-back'));
+  if (button.evaluate().isNotEmpty) {
+    await tester.tap(button);
+  } else {
+    await tester.binding.handlePopRoute();
+  }
 }
 
 Future<void> _shortcut(

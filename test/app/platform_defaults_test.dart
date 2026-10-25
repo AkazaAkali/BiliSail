@@ -47,21 +47,18 @@ void main() {
       }
     },
   );
-  test(
-    'Windows/macOS default to multiple tabs and Android to a single page',
-    () {
-      expect(
-        workspaceNavigationModeForPlatform(TargetPlatform.windows),
-        WorkspaceNavigationMode.multipleTabs,
-      );
-      expect(
-        workspaceNavigationModeForPlatform(TargetPlatform.macOS),
-        WorkspaceNavigationMode.multipleTabs,
-      );
-      expect(
-        workspaceNavigationModeForPlatform(TargetPlatform.android),
-        WorkspaceNavigationMode.singlePage,
-      );
-    },
-  );
+  test('Windows/macOS default to multiple tabs and Android to dual tabs', () {
+    expect(
+      workspaceNavigationModeForPlatform(TargetPlatform.windows),
+      WorkspaceNavigationMode.multipleTabs,
+    );
+    expect(
+      workspaceNavigationModeForPlatform(TargetPlatform.macOS),
+      WorkspaceNavigationMode.multipleTabs,
+    );
+    expect(
+      workspaceNavigationModeForPlatform(TargetPlatform.android),
+      WorkspaceNavigationMode.dualTabs,
+    );
+  });
 }

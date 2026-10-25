@@ -1,5 +1,7 @@
 # API、鉴权与数据边界
 
+2026-10-25 热门收敛为综合热门、每周必看、入站必刷、排行榜四子标签。新增 Web 期数目录、单期与入站单份列表；排行榜沿用动态官网 UGC 分区及 WBI，综合热门保留原分页。官方脚本、三个参考仓库精确提交、端点/容量/取消规则和游客单期 `-352` 未验证边界见[热门四子标签](validation/popular-tabs.md)。
+
 2026-10-11 普通视频与影视播放请求加入 `voice_balance=1`，解析可选 `volume` 响度元数据；鉴权、选流与权益边界不变。请求 profile、字段校验及在线抽样限制见 [播放器音量均衡](validation/audio-normalization.md)。
 
 2026-10-10 UGC 充电专属／付费权益沿用详情与 WBI 播放链路接入；缺少完整轨道时区分观看权限，列表保留明确分类并显示共用角标。字段、端点、试看边界和真实账号未测项见 [充电专属与付费视频](validation/video-access.md)。
@@ -82,7 +84,7 @@ ApiPage<T> { items, nextCursor, hasMore }
 | TV 登录（后续） | `/x/passport-tv-login/qrcode/auth_code`、`/poll` | K `Authorizers/Authorizers.Tv/Core/TvAuthorizeClient.cs` | 独立 TV profile，不作为 Web 登录的隐式副作用 |
 | 会话与 WBI M0/M2 | `/x/web-interface/nav`、cookie info/refresh/confirm | K `BiliKernel.Abstractions/Bili/BiliApis.cs`、Core Authenticator；U AccountApi | SessionStore；刷新要取得所需 refresh 数据，缺失则重新登录 |
 | 推荐 M2 | `/x/web-interface/index/top/feed/rcmd`；App `/x/v2/feed/index` | K `Services/Services.Media/Core/VideoDiscoveryClient.cs` | CatalogClient；优先验证 Web，不能把 App token 参数搬过来 |
-| 热门/排行 M2 | `GetHotVideoListAsync`、`/x/web-interface/ranking/v2` | K VideoDiscoveryClient | 区分 gRPC 热门与 REST 排行；MVP 首页可先用已验证推荐/排行 |
+| 热门/排行 | `/x/web-interface/popular`、`popular/series/list`、`popular/series/one`、`popular/precious`、`ranking/v2` | 官网热门脚本；PiliPlus VideoHttp；U RankAPI；K VideoDiscoveryClient | Web 综合热门分页、每周期数选择、入站及榜单单份列表；不混用 App gRPC 或旧 newlist 分区，见[协议记录](validation/popular-tabs.md) |
 | 搜索 M2 | `/x/web-interface/wbi/search/type`、`/all/v2` | K `Services/Services.Search/Core/SearchClient.cs` | SearchClient；WBI、Cookie、排序及分页 |
 | 视频详情 M0/M2 | `/x/web-interface/view/detail`、`GetVideoPageDetailWithRestAsync` | K `Services/Services.Media/Core/PlayerClient.cs` | VideoRepository；bvid/aid 解析、cid、分 P、合集 |
 | 评论视频链接 M2 | `GET https://b23.tv/<path>`；`GET https://api.bilibili.com/x/web-interface/view?aid=…` | U `MessageCenter.HandelUrl`、`BiliExtensions.GetShortLinkLocation` | Comments application → CommentVideoLinkRepository；短链无鉴权/签名，读取 Location，不解析正文、不重试；AV 转 BV 为 Web JSON、可选 Cookie、无签名，复用 API 有界读重试（最多 3 次）；均无分页、总解析期限 8 秒，见 [评论验证](validation/video-comments.md) |

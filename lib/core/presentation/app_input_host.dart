@@ -345,6 +345,13 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
 
   @override
   void didChangeViewFocus(ViewFocusEvent event) {
+    final ownView = View.maybeOf(context)?.viewId;
+    if (ownView != null && event.viewId != ownView) {
+      if (event.state != ViewFocusState.focused) return;
+      _viewFocused = false;
+      _windowActivityChanged();
+      return;
+    }
     _viewFocused = event.state == ViewFocusState.focused;
     _windowActivityChanged();
   }
@@ -385,6 +392,11 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
 
   KeyEventResult _key(KeyEvent event) {
     if (!_active) return KeyEventResult.ignored;
+    final focusedContext = FocusManager.instance.primaryFocus?.context;
+    if (focusedContext != null &&
+        View.maybeOf(focusedContext)?.viewId != View.maybeOf(context)?.viewId) {
+      return KeyEventResult.ignored;
+    }
     return widget.dispatcher
             .dispatch(
               _normalizer.key(event, viewId: View.maybeOf(context)?.viewId),
@@ -396,7 +408,7 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
   }
 
   void _pointer(PointerEvent event) {
-    if (!_active) return;
+    if (!_active || event.viewId != View.maybeOf(context)?.viewId) return;
     for (final stroke in _normalizer.pointer(event)) {
       widget.dispatcher.dispatch(stroke, _context());
     }

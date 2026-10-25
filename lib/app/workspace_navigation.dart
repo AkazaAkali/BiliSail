@@ -1,0 +1,51 @@
+import '../features/feed/domain/home_channel.dart';
+
+/// Product navigation groups are independent of the retained feed pages.
+enum WorkspaceSection {
+  home('首页'),
+  dynamic('动态'),
+  live('直播'),
+  mine('我的'),
+  messages('消息'),
+  downloads('下载'),
+  settings('设置');
+
+  const WorkspaceSection(this.label);
+  final String label;
+}
+
+WorkspaceSection sectionForLocation(Uri location, {required bool compact}) {
+  if (location.path == '/settings') return WorkspaceSection.settings;
+  if (location.path == '/messages') return WorkspaceSection.messages;
+  if (location.path == '/downloads') return WorkspaceSection.downloads;
+  if (const ['/me', '/history'].contains(location.path)) {
+    return WorkspaceSection.mine;
+  }
+  return switch (location.queryParameters['channel']) {
+    'dynamic' || 'videoDynamic' => WorkspaceSection.dynamic,
+    'live' when !compact => WorkspaceSection.live,
+    'watchLater' || 'favorites' => WorkspaceSection.mine,
+    _ => WorkspaceSection.home,
+  };
+}
+
+List<HomeChannel> channelsForSection(
+  WorkspaceSection section, {
+  required bool compact,
+}) => switch (section) {
+  WorkspaceSection.home => [
+    HomeChannel.recommended,
+    HomeChannel.popular,
+    if (compact) HomeChannel.live,
+    HomeChannel.bangumi,
+    HomeChannel.guochuang,
+    HomeChannel.cinema,
+    HomeChannel.categories,
+  ],
+  WorkspaceSection.dynamic => [HomeChannel.dynamic, HomeChannel.videoDynamic],
+  WorkspaceSection.live => [HomeChannel.live],
+  WorkspaceSection.mine => [HomeChannel.watchLater, HomeChannel.favorites],
+  WorkspaceSection.messages ||
+  WorkspaceSection.downloads ||
+  WorkspaceSection.settings => [],
+};

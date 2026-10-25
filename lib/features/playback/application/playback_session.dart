@@ -135,6 +135,10 @@ class PlaybackSession extends ChangeNotifier {
   final _subscriptions = <StreamSubscription<Object?>>[];
   final _owners = <Object>{};
   final _checkpoints = <Object, _PlaybackCheckpoint>{};
+  // Only media identity and local playback preferences are retained, never
+  // resolved URLs. Closing the session or changing accounts clears this cache.
+  final _navigationCheckpoints =
+      <(VideoId?, String?, ContentPlaybackTarget?), _PlaybackCheckpoint>{};
   Object? _activeOwner;
   bool _ownerVisible = true;
   Duration? _openingPosition;
@@ -379,11 +383,12 @@ class PlaybackSession extends ChangeNotifier {
     // A failed preparation has no confirmed source: native idle snapshots
     // must not replace the position/preferences we were trying to restore.
     final preparing = media == null;
-    _checkpoints[owner] = _PlaybackCheckpoint(
+    final checkpoint = _PlaybackCheckpoint(
       videoId: video?.summary.id,
       cid: selected?.cid,
       target: contentTarget,
       scope: _scope,
+      epoch: _epoch,
       position: preparing
           ? _openingPosition ?? previous?.position
           : snapshot.position,
@@ -396,6 +401,16 @@ class PlaybackSession extends ChangeNotifier {
       subtitleLabel: _subtitlePreference,
       voice: _voice,
     );
+    _checkpoints[owner] = checkpoint;
+    if (_settings.navigationMode == WorkspaceNavigationMode.dualTabs) {
+      final key = (video?.summary.id, selected?.cid, contentTarget);
+      _navigationCheckpoints.remove(key);
+      _navigationCheckpoints[key] = checkpoint;
+      // Sixteen back entries plus the current source while capturing a pop.
+      while (_navigationCheckpoints.length > 17) {
+        _navigationCheckpoints.remove(_navigationCheckpoints.keys.first);
+      }
+    }
   }
 
   Future<void> activate(
@@ -412,6 +427,7 @@ class PlaybackSession extends ChangeNotifier {
         part?.cid == selected?.cid &&
         contentTarget == target &&
         _scope == accountScope() &&
+        _epoch == sessionEpoch() &&
         (media != null || _resolving)) {
       final wasVisible = _ownerVisible;
       _ownerVisible = visible;
@@ -424,10 +440,17 @@ class PlaybackSession extends ChangeNotifier {
     final sameOwner = identical(_activeOwner, owner);
     final sameKind = contentTarget.runtimeType == target.runtimeType;
     _captureOwner();
-    final saved = _checkpoints[owner];
+    final owned = _checkpoints[owner];
+    final saved =
+        owned?.videoId == video?.summary.id &&
+            owned?.cid == selected?.cid &&
+            owned?.target == target
+        ? owned
+        : _navigationCheckpoints[(video?.summary.id, selected?.cid, target)];
     final restored =
         saved != null &&
             saved.scope == accountScope() &&
+            saved.epoch == sessionEpoch() &&
             saved.videoId == video?.summary.id &&
             saved.cid == selected?.cid &&
             saved.target == target
@@ -502,12 +525,13 @@ class PlaybackSession extends ChangeNotifier {
   }
 
   void detach(Object owner) {
+    if (identical(_activeOwner, owner)) _captureOwner();
     _owners.remove(owner);
     _checkpoints.remove(owner);
     if (_activeOwner == null) {
       scheduleMicrotask(() {
         if (!_disposed && _activeOwner == null && _owners.isEmpty) {
-          unawaited(stop());
+          unawaited(stop(clearCheckpoints: false));
         }
       });
       return;
@@ -1274,6 +1298,9 @@ class PlaybackSession extends ChangeNotifier {
   void configureSettings(AppSettings settings) {
     final previous = _settings;
     _settings = settings.normalized();
+    if (_settings.navigationMode != WorkspaceNavigationMode.dualTabs) {
+      _navigationCheckpoints.clear();
+    }
     if (!_settings.highEnergyProgressEnabled) {
       _cancelHighEnergy();
       highEnergy.value = null;
@@ -2249,7 +2276,10 @@ class PlaybackSession extends ChangeNotifier {
   Future<void> stop({bool clearCheckpoints = true}) async {
     _audioRecovery = null;
     _nextSourceIntent = null;
-    if (clearCheckpoints) _checkpoints.clear();
+    if (clearCheckpoints) {
+      _checkpoints.clear();
+      _navigationCheckpoints.clear();
+    }
     _activeOwner = null;
     _openingPosition = null;
     _temporaryRateOriginal = null;
@@ -2374,6 +2404,7 @@ final class _PlaybackCheckpoint {
     required this.videoId,
     required this.cid,
     required this.scope,
+    required this.epoch,
     required this.position,
     required this.rate,
     required this.volume,
@@ -2388,6 +2419,7 @@ final class _PlaybackCheckpoint {
   final String? cid;
   final ContentPlaybackTarget? target;
   final String scope;
+  final int epoch;
   final Duration? position;
   final double rate;
   final double volume;

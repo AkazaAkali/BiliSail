@@ -1,0 +1,469 @@
+import 'dart:ui' show ViewFocusDirection, ViewFocusEvent, ViewFocusState;
+
+import 'package:bilisail/app/shell.dart';
+import 'package:bilisail/app/workspace_tabs.dart';
+import 'package:bilisail/core/platform/detached_playback_window.dart';
+import 'package:bilisail/core/presentation/workspace_activity.dart';
+import 'package:bilisail/features/settings/domain/app_settings.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+
+import '../support/detached_window_fake.dart';
+
+void main() {
+  testWidgets(
+    'macOS dual profile retains a back entry without a custom caption',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 844);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final fixture = _WindowedWorkspace(tester, customCaption: false);
+      addTearDown(fixture.dispose);
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      final browser = tester.element(_page('home'));
+      fixture.router.go('/video/BV1234567890');
+      await tester.pumpAndSettle();
+      final playback = tester.element(_page('tab-1'));
+      final window = fixture.windows.lastWindow!;
+      for (final width in [390.0, 1280.0]) {
+        tester.view.physicalSize = Size(width, 844);
+        fixture.router.go('/user/123');
+        await tester.pumpAndSettle();
+        final header = find.byKey(
+          const ValueKey('workspace-profile-back-header'),
+        );
+        expect(header, findsOneWidget);
+        expect(View.of(tester.element(header)).viewId, tester.view.viewId);
+        expect(tester.getSize(header).height, 42);
+        expect(
+          find.byKey(const ValueKey('workspace-back')).hitTestable(),
+          findsOneWidget,
+        );
+        expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
+        expect(
+          find.byKey(const ValueKey('workspace-common-tools')),
+          findsNothing,
+        );
+        _expectViews(tester, [tester.view.viewId, window.viewId]);
+        await tester.tap(find.byKey(const ValueKey('workspace-back')));
+        await tester.pumpAndSettle();
+        expect(tester.element(_page('home')), same(browser));
+        expect(tester.element(_page('tab-1')), same(playback));
+        expect(fixture.router.routeInformationProvider.value.uri.path, '/');
+        expect(fixture.windows.creationCount, 1);
+        expect(tester.takeException(), isNull);
+      }
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(Duration.zero);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
+  testWidgets(
+    'desktop dual keeps browsing visible while every media kind reuses one view',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1280, 844);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final fixture = _WindowedWorkspace(tester);
+      addTearDown(fixture.dispose);
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+
+      final browser = tester.element(_page('home'));
+      final browserScope = _scope(browser);
+      await tester.tap(find.byKey(const ValueKey('increment-home')));
+      await tester.pump();
+      expect(browserScope.read(_counterProvider), 1);
+      expect(
+        fixture.tab(tester, 'home').location.queryParameters['channel'],
+        'popular',
+      );
+      expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('dual-window-caption')))
+            .height,
+        32,
+      );
+      expect(find.byType(View), findsOneWidget);
+
+      fixture.router.go('/video/BV1234567890');
+      await tester.pumpAndSettle();
+      final playback = tester.element(_page('tab-1'));
+      final playbackScope = _scope(playback);
+      final window = fixture.windows.lastWindow!;
+      _expectViews(tester, [tester.view.viewId, window.viewId]);
+      expect(View.of(browser).viewId, tester.view.viewId);
+      expect(View.of(playback).viewId, window.viewId);
+      expect(WorkspaceActivity.isActive(browser), isTrue);
+      expect(WorkspaceActivity.isActive(playback), isTrue);
+      expect(WorkspacePlaybackSelection.of(browser), 'tab-1');
+      expect(tester.element(_page('home')), same(browser));
+      expect(_scope(browser), same(browserScope));
+      expect(
+        fixture.tab(tester, 'home').location.queryParameters['channel'],
+        'popular',
+      );
+
+      tester.binding.handleViewFocusChanged(
+        ViewFocusEvent(
+          viewId: window.viewId,
+          state: ViewFocusState.focused,
+          direction: ViewFocusDirection.undefined,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        fixture.router.routeInformationProvider.value.uri.path,
+        '/video/BV1234567890',
+      );
+      tester.binding.handleViewFocusChanged(
+        ViewFocusEvent(
+          viewId: tester.view.viewId,
+          state: ViewFocusState.focused,
+          direction: ViewFocusDirection.undefined,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(fixture.router.routeInformationProvider.value.uri.path, '/');
+      expect(tester.element(_page('tab-1')), same(playback));
+      final activations = window.activationCount;
+      fixture.router.go('/video/BV1234567890');
+      await tester.pumpAndSettle();
+      expect(window.activationCount, activations + 1);
+      expect(fixture.windows.creationCount, 1);
+      expect(tester.element(_page('tab-1')), same(playback));
+
+      fixture.router.go('/history');
+      await tester.pumpAndSettle();
+      expect(fixture.tab(tester, 'tab-2').location.path, '/history');
+      expect(
+        View.of(tester.element(_page('tab-2'))).viewId,
+        tester.view.viewId,
+      );
+      expect(fixture.tab(tester, 'tab-1').location.path, '/video/BV1234567890');
+      expect(tester.element(_page('tab-1')), same(playback));
+      await tester.tap(find.byKey(const ValueKey('workspace-nav-dynamic')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('channel-videoDynamic')));
+      await tester.pumpAndSettle();
+      expect(tester.element(_page('home')), same(browser));
+      expect(_scope(browser), same(browserScope));
+      expect(browserScope.read(_counterProvider), 1);
+      expect(
+        fixture.tab(tester, 'home').location.queryParameters['channel'],
+        'videoDynamic',
+      );
+      expect(
+        find.byKey(const ValueKey('workspace-common-tools')),
+        findsOneWidget,
+      );
+      expect(fixture.tab(tester, 'tab-1').location.path, '/video/BV1234567890');
+
+      for (final location in ['/pgc/ep42', '/live/200', '/offline/task-1']) {
+        fixture.router.go(location);
+        await tester.pumpAndSettle();
+        expect(fixture.windows.creationCount, 1);
+        expect(fixture.windows.lastWindow, same(window));
+        expect(window.disposed, isFalse);
+        _expectViews(tester, [tester.view.viewId, window.viewId]);
+        expect(tester.element(_page('tab-1')), same(playback));
+        expect(_scope(playback), same(playbackScope));
+        expect(fixture.tab(tester, 'tab-1').location.path, location);
+        expect(tester.element(_page('home')), same(browser));
+        expect(
+          fixture.tab(tester, 'home').location.queryParameters['channel'],
+          'videoDynamic',
+        );
+        expect(WorkspaceActivity.isActive(browser), isTrue);
+        expect(tester.takeException(), isNull);
+      }
+
+      for (final previous in [
+        '/live/200',
+        '/pgc/ep42',
+        '/video/BV1234567890',
+      ]) {
+        await tester.tap(find.byKey(const ValueKey('test-window-back')));
+        await tester.pumpAndSettle();
+        expect(fixture.tab(tester, 'tab-1').location.path, previous);
+        expect(tester.element(_page('tab-1')), same(playback));
+        expect(tester.element(_page('home')), same(browser));
+        expect(fixture.windows.creationCount, 1);
+      }
+      await tester.tap(find.byKey(const ValueKey('test-window-back')));
+      await tester.pumpAndSettle();
+      expect(fixture.browserActivations, 1);
+      expect(fixture.router.routeInformationProvider.value.uri.path, '/');
+      expect(window.disposed, isTrue);
+      expect(fixture.disposedPages, contains('tab-1'));
+      expect(_page('tab-1', skipOffstage: false), findsNothing);
+      _expectViews(tester, [tester.view.viewId]);
+      expect(tester.element(_page('home')), same(browser));
+      expect(_scope(browser), same(browserScope));
+      expect(browserScope.read(_counterProvider), 1);
+      expect(
+        fixture.tab(tester, 'home').location.queryParameters['channel'],
+        'videoDynamic',
+      );
+      expect(fixture.errors, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
+  testWidgets(
+    'mode switches move playback between views without replacing pages or provider scopes',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1280, 844);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final fixture = _WindowedWorkspace(tester);
+      addTearDown(fixture.dispose);
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('increment-home')));
+      await tester.pump();
+      final browser = tester.element(_page('home'));
+      final browserScope = _scope(browser);
+      fixture.router.go('/video/BV1234567890');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('increment-tab-1')));
+      await tester.pump();
+      final playback = tester.element(_page('tab-1'));
+      final playbackScope = _scope(playback);
+
+      for (final mode in [
+        WorkspaceNavigationMode.multipleTabs,
+        WorkspaceNavigationMode.dualTabs,
+        WorkspaceNavigationMode.multipleTabs,
+        WorkspaceNavigationMode.dualTabs,
+      ]) {
+        final previousWindow = fixture.windows.lastWindow!;
+        fixture.mode.value = mode;
+        await tester.pumpAndSettle();
+        expect(
+          tester.element(_page('home', skipOffstage: false)),
+          same(browser),
+        );
+        expect(tester.element(_page('tab-1')), same(playback));
+        expect(_scope(browser), same(browserScope));
+        expect(_scope(playback), same(playbackScope));
+        expect(browserScope.read(_counterProvider), 1);
+        expect(playbackScope.read(_counterProvider), 1);
+        expect(fixture.disposedPages, isEmpty);
+        if (mode == WorkspaceNavigationMode.dualTabs) {
+          final window = fixture.windows.lastWindow!;
+          expect(window.disposed, isFalse);
+          _expectViews(tester, [tester.view.viewId, window.viewId]);
+          expect(View.of(playback).viewId, window.viewId);
+          expect(_page('home'), findsOneWidget);
+          expect(
+            find.byKey(const ValueKey('workspace-tab-strip')),
+            findsNothing,
+          );
+          expect(
+            find.byKey(const ValueKey('dual-window-caption')),
+            findsOneWidget,
+          );
+        } else {
+          expect(previousWindow.disposed, isTrue);
+          _expectViews(tester, [tester.view.viewId]);
+          expect(View.of(playback).viewId, tester.view.viewId);
+          expect(_page('home'), findsNothing);
+          expect(
+            find.byKey(const ValueKey('workspace-tab-strip')),
+            mode == WorkspaceNavigationMode.multipleTabs
+                ? findsOneWidget
+                : findsNothing,
+          );
+        }
+        expect(tester.takeException(), isNull, reason: '$mode');
+      }
+      expect(fixture.windows.creationCount, 3);
+      expect(fixture.errors, isEmpty);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(Duration.zero);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+}
+
+Finder _page(String id, {bool skipOffstage = true}) =>
+    find.byKey(ValueKey('probe-$id'), skipOffstage: skipOffstage);
+
+ProviderContainer _scope(Element element) =>
+    ProviderScope.containerOf(element, listen: false);
+
+void _expectViews(WidgetTester tester, List<int> ids) => expect(
+  tester.widgetList<View>(find.byType(View)).map((view) => view.view.viewId),
+  unorderedEquals(ids),
+);
+
+final _counterProvider = NotifierProvider<_ProbeCounter, int>(
+  _ProbeCounter.new,
+);
+
+class _ProbeCounter extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void increment() => state++;
+}
+
+class _WindowedWorkspace {
+  _WindowedWorkspace(WidgetTester tester, {this.customCaption = true})
+    : windows = FakeDetachedWindowFactory(tester.view);
+
+  final bool customCaption;
+  final FakeDetachedWindowFactory windows;
+  final mode = ValueNotifier(WorkspaceNavigationMode.dualTabs);
+  final disposedPages = <String>[];
+  final errors = <Object>[];
+  int browserActivations = 0;
+
+  late final router = GoRouter(
+    initialLocation: '/?channel=popular',
+    routes: [
+      ShellRoute(
+        builder: (context, state, child) => ValueListenableBuilder(
+          valueListenable: mode,
+          builder: (context, navigationMode, _) => BiliAppShell(
+            location: state.uri.toString(),
+            navigationMode: navigationMode,
+            onActivateBrowser: () => browserActivations++,
+            windowControlsBuilder: customCaption
+                ? (_) => const SizedBox(
+                    key: ValueKey('main-window-controls'),
+                    width: 120,
+                  )
+                : null,
+            pageBuilder: (_, tab) => ProviderScope(
+              key: ValueKey('scope-${tab.id}'),
+              overrides: [_counterProvider.overrideWith(_ProbeCounter.new)],
+              child: _PageProbe(
+                key: ValueKey('probe-${tab.id}'),
+                tab: tab,
+                onDispose: disposedPages.add,
+              ),
+            ),
+            playbackWindowBuilder:
+                (
+                  context, {
+                  required child,
+                  required playback,
+                  required activationToken,
+                  required onClose,
+                  required onBack,
+                  required onError,
+                }) => DesktopPlaybackWindow(
+                  windowFactory: windows.call,
+                  activationToken: activationToken,
+                  onCloseRequested: onClose,
+                  onError: (error) {
+                    errors.add(error);
+                    onError(error);
+                  },
+                  playback: playback == null
+                      ? null
+                      : MaterialApp(
+                          theme: Theme.of(context),
+                          home: Scaffold(
+                            body: Column(
+                              children: [
+                                Row(
+                                  children: [
+                                    IconButton(
+                                      key: const ValueKey('test-window-back'),
+                                      onPressed: onBack,
+                                      icon: const Icon(Icons.arrow_back),
+                                    ),
+                                    IconButton(
+                                      key: const ValueKey('test-window-close'),
+                                      onPressed: onClose,
+                                      icon: const Icon(Icons.close),
+                                    ),
+                                  ],
+                                ),
+                                Expanded(child: playback),
+                              ],
+                            ),
+                          ),
+                        ),
+                  child: child,
+                ),
+            child: child,
+          ),
+        ),
+        routes: [
+          for (final path in [
+            '/',
+            '/history',
+            '/user/:id',
+            '/video/:id',
+            '/pgc/:id',
+            '/live/:id',
+            '/offline/:id',
+          ])
+            GoRoute(path: path, builder: (_, state) => const SizedBox.shrink()),
+        ],
+      ),
+    ],
+  );
+
+  Widget get app => ProviderScope(
+    child: MaterialApp.router(
+      theme: ThemeData(platform: TargetPlatform.windows),
+      routerConfig: router,
+    ),
+  );
+
+  WorkspaceTab tab(WidgetTester tester, String id) =>
+      tester.widget<_PageProbe>(_page(id, skipOffstage: false)).tab;
+
+  void dispose() {
+    router.dispose();
+    mode.dispose();
+  }
+}
+
+class _PageProbe extends ConsumerStatefulWidget {
+  const _PageProbe({super.key, required this.tab, required this.onDispose});
+
+  final WorkspaceTab tab;
+  final ValueChanged<String> onDispose;
+
+  @override
+  ConsumerState<_PageProbe> createState() => _PageProbeState();
+}
+
+class _PageProbeState extends ConsumerState<_PageProbe> {
+  @override
+  void dispose() {
+    widget.onDispose(widget.tab.id);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('${widget.tab.id} ${widget.tab.location}'),
+        Text('count ${ref.watch(_counterProvider)}'),
+        ElevatedButton(
+          key: ValueKey('increment-${widget.tab.id}'),
+          onPressed: () => ref.read(_counterProvider.notifier).increment(),
+          child: const Text('increment'),
+        ),
+      ],
+    ),
+  );
+}

@@ -4,12 +4,15 @@ import 'package:go_router/go_router.dart';
 
 import '../../../domain/app_failure.dart';
 import '../../../shared/ui/paged_scroll_viewport.dart';
+import '../../../shared/ui/responsive_card_grid.dart';
 import '../../../shared/ui/state_view.dart';
 import '../../../shared/ui/video_grid.dart';
 import '../application/library_controller.dart';
 
 final class HistoryScreen extends ConsumerWidget {
-  const HistoryScreen({super.key});
+  const HistoryScreen({super.key, this.showHeading = true});
+
+  final bool showHeading;
 
   static String _watchedAt(DateTime value) {
     final date = value.toLocal();
@@ -44,31 +47,33 @@ final class HistoryScreen extends ConsumerWidget {
           controller: scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 84),
+            SliverCardGridPadding(
+              top: 16,
+              bottom: 84,
               sliver: SliverMainAxisGroup(
                 slivers: [
-                  SliverToBoxAdapter(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          '观看历史',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 7),
-                        Text(
-                          '当前账号的云端观看记录',
-                          style: TextStyle(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant,
+                  if (showHeading)
+                    SliverToBoxAdapter(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            '观看历史',
+                            style: Theme.of(context).textTheme.titleLarge,
                           ),
-                        ),
-                        const SizedBox(height: 18),
-                      ],
+                          const SizedBox(height: 7),
+                          Text(
+                            '当前账号的云端观看记录',
+                            style: TextStyle(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                        ],
+                      ),
                     ),
-                  ),
                   const _HistoryEntriesSliver(),
                   SliverToBoxAdapter(
                     child: Column(

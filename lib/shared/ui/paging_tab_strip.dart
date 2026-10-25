@@ -15,6 +15,7 @@ final class PagingTabStrip<T extends Object> extends StatefulWidget {
     required this.labelBuilder,
     required this.buttonStyle,
     this.progress,
+    this.progressTabs,
     this.itemKey,
     this.spacing = 3,
     this.fullWidthIndicator = false,
@@ -28,6 +29,9 @@ final class PagingTabStrip<T extends Object> extends StatefulWidget {
   final Widget Function(BuildContext, T) labelBuilder;
   final ButtonStyle buttonStyle;
   final TabPagingProgress? progress;
+
+  /// Full pager order when this strip shows only one navigation group.
+  final List<T>? progressTabs;
   final Key Function(T)? itemKey;
   final double spacing, indicatorHeight;
   final bool fullWidthIndicator;
@@ -51,9 +55,19 @@ final class _PagingTabStripState<T extends Object>
     value: _indexOf(widget.value).toDouble(),
   );
 
-  double get _position => widget.progress?.isAttached == true
-      ? widget.progress?.value ?? _fallback.value
-      : _fallback.value;
+  double get _position {
+    if (widget.progress?.isAttached != true) return _fallback.value;
+    final value = widget.progress?.value ?? _fallback.value;
+    final order = widget.progressTabs;
+    if (order == null) return value;
+    final start = value.floor().clamp(0, order.length - 1);
+    final end = value.ceil().clamp(0, order.length - 1);
+    final from = widget.tabs.indexOf(order[start]);
+    final to = widget.tabs.indexOf(order[end]);
+    // Crossing a navigation group must not sweep through unrelated labels.
+    if (from < 0 || to < 0) return _indexOf(widget.value).toDouble();
+    return from + (to - from) * (value - start);
+  }
 
   @override
   void initState() {

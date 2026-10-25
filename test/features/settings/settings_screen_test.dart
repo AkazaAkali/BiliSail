@@ -6,11 +6,114 @@ import 'package:bilisail/features/settings/domain/settings_category.dart';
 import 'package:bilisail/features/settings/domain/settings_repository.dart';
 import 'package:bilisail/features/settings/presentation/settings_screen.dart';
 import 'package:bilisail/shared/ui/app_notice.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('title and category strip stay above the scrolling settings', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(_SettingsRepository()),
+        ],
+        child: const MaterialApp(
+          home: Scaffold(
+            body: SettingsScreen(category: SettingsCategory.shortcuts),
+          ),
+        ),
+      ),
+    );
+    final title = find.byKey(const ValueKey('settings-page-title'));
+    final strip = find.byKey(const ValueKey('settings-category-strip'));
+    final content = find.byKey(const PageStorageKey('settings-shortcuts'));
+    for (final width in [320.0, 600.0, 1280.0]) {
+      tester.view.physicalSize = Size(width, 800);
+      await tester.pumpAndSettle();
+      expect(find.text('设置'), findsOneWidget);
+      expect(tester.getTopLeft(title).dx, 20);
+      expect(
+        tester.getTopLeft(strip).dy,
+        greaterThan(tester.getBottomLeft(title).dy),
+      );
+      expect(
+        tester.getTopLeft(content).dy,
+        greaterThan(tester.getBottomLeft(strip).dy),
+      );
+      final headerRect = tester.getRect(title);
+      final stripRect = tester.getRect(strip);
+      final position = tester
+          .state<ScrollableState>(
+            find
+                .descendant(of: content, matching: find.byType(Scrollable))
+                .first,
+          )
+          .position;
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(title), headerRect);
+      expect(tester.getRect(strip), stripRect);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets(
+    'desktop category strip keeps horizontal wheel and local selection',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(_SettingsRepository()),
+          ],
+          child: MaterialApp(
+            theme: ThemeData(platform: TargetPlatform.windows),
+            home: const Scaffold(body: SettingsScreen()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final strip = find.byKey(const ValueKey('settings-category-strip'));
+      final position = tester
+          .state<ScrollableState>(
+            find.descendant(of: strip, matching: find.byType(Scrollable)).first,
+          )
+          .position;
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: tester.getCenter(strip),
+          scrollDelta: const Offset(0, 160),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(position.pixels, greaterThan(0));
+      expect(
+        find.byKey(const PageStorageKey('settings-appearance')),
+        findsOneWidget,
+      );
+      final category = find.byKey(const ValueKey('settings-category-cache'));
+      await tester.ensureVisible(category);
+      await tester.pumpAndSettle();
+      await tester.tap(category);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const PageStorageKey('settings-cache')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('settings-page-title')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets(
     'appearance wheel damping saves, reloads and restores the default',
     (tester) async {
@@ -380,8 +483,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.widgetWithText(ChoiceChip, '自动'), findsNothing);
+    expect(find.widgetWithText(ChoiceChip, '单标签页'), findsNothing);
     for (final (label, mode) in [
-      ('单标签页', WorkspaceNavigationMode.singlePage),
+      ('双标签页', WorkspaceNavigationMode.dualTabs),
       ('多标签页', WorkspaceNavigationMode.multipleTabs),
     ]) {
       await tester.tap(find.widgetWithText(ChoiceChip, label));
@@ -427,7 +531,7 @@ void main() {
           listen: false,
         );
         final controller = container.read(settingsControllerProvider.notifier);
-        if (mode == WorkspaceNavigationMode.singlePage) {
+        if (mode != WorkspaceNavigationMode.multipleTabs) {
           await tester.tap(toggle);
           await tester.pumpAndSettle();
           expect(repository.settings.allowConcurrentPlayback, isFalse);
@@ -439,7 +543,7 @@ void main() {
         await tester.tap(toggle);
         await tester.pumpAndSettle();
         expect(repository.settings.allowConcurrentPlayback, isTrue);
-        await controller.setNavigationMode(WorkspaceNavigationMode.singlePage);
+        await controller.setNavigationMode(WorkspaceNavigationMode.dualTabs);
         await tester.pumpAndSettle();
         expect(tester.widget<SwitchListTile>(toggle).onChanged, isNull);
         expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
@@ -787,6 +891,14 @@ void main() {
     expect(tester.takeException(), isNull);
     final darkChoice = find.widgetWithText(ChoiceChip, '深色');
     await tester.ensureVisible(darkChoice);
+    await tester.pumpAndSettle();
+    expect(darkChoice.hitTestable(), findsOneWidget);
+    final viewport = tester.getRect(
+      find.byKey(const PageStorageKey('settings-appearance')),
+    );
+    final choice = tester.getRect(darkChoice);
+    expect(choice.top, greaterThanOrEqualTo(viewport.top));
+    expect(choice.bottom, lessThanOrEqualTo(viewport.bottom));
     await tester.tap(darkChoice);
     await tester.pumpAndSettle();
     expect(repository.settings.theme, AppThemePreference.dark);

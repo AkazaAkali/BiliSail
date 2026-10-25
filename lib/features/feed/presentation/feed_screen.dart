@@ -10,13 +10,15 @@ import '../../../shared/ui/video_card.dart';
 import '../../video/domain/video_actions_repository.dart';
 import '../../../core/presentation/workspace_activity.dart';
 import '../../../shared/ui/paged_scroll_viewport.dart';
+import '../../../shared/ui/responsive_card_grid.dart';
 import '../../../shared/ui/state_view.dart';
 import '../../../shared/ui/video_grid.dart';
-import '../../../shared/ui/smooth_scroll_behavior.dart';
+import '../../../shared/ui/content_section_tabs.dart';
 import '../application/feed_controller.dart';
 import '../domain/home_channel.dart';
 import 'home_content.dart';
 import 'home_channel_swipe.dart';
+import 'popular_feed.dart';
 
 final class FeedScreen extends ConsumerStatefulWidget {
   const FeedScreen({
@@ -26,12 +28,16 @@ final class FeedScreen extends ConsumerStatefulWidget {
     this.onLogin,
     this.initialSection,
     this.onChannelChanged,
+    this.showLiveSectionTabs = true,
+    this.onSectionChanged,
   });
   final HomeChannel channel;
   final bool isSignedIn;
   final VoidCallback? onLogin;
   final String? initialSection;
   final ValueChanged<HomeChannel>? onChannelChanged;
+  final bool showLiveSectionTabs;
+  final ValueChanged<String>? onSectionChanged;
   @override
   ConsumerState<FeedScreen> createState() => _FeedScreenState();
 }
@@ -52,21 +58,43 @@ final class _FeedScreenState extends ConsumerState<FeedScreen> {
   void _selectChannel() {
     Future<void>.microtask(() {
       if (mounted) {
-        ref.read(feedControllerProvider.notifier).selectChannel(widget.channel);
+        if (widget.channel != HomeChannel.popular &&
+            widget.channel != HomeChannel.ranking) {
+          ref
+              .read(feedControllerProvider.notifier)
+              .selectChannel(widget.channel);
+        }
       }
     });
   }
 
-  Widget _page(BuildContext context, HomeChannel channel, bool active) =>
-      _HomeChannelPage(
-        channel: channel,
+  Widget _page(BuildContext context, HomeChannel channel, bool active) {
+    if (channel == HomeChannel.popular || channel == HomeChannel.ranking) {
+      return PopularFeed(
         active: active,
-        initialSection: channel == widget.channel
+        swipeEnabled: widget.onChannelChanged == null,
+        initialSection: widget.channel == HomeChannel.ranking
+            ? '排行榜'
+            : channel == widget.channel
             ? widget.initialSection
             : null,
-        isSignedIn: widget.isSignedIn,
-        onLogin: widget.onLogin,
+        onSectionChanged: channel == widget.channel
+            ? widget.onSectionChanged
+            : null,
       );
+    }
+    return _HomeChannelPage(
+      channel: channel,
+      active: active,
+      initialSection: channel == widget.channel ? widget.initialSection : null,
+      isSignedIn: widget.isSignedIn,
+      onLogin: widget.onLogin,
+      showLiveSectionTabs: widget.showLiveSectionTabs,
+      onSectionChanged: channel == widget.channel
+          ? widget.onSectionChanged
+          : null,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -88,6 +116,8 @@ final class _HomeChannelPage extends ConsumerStatefulWidget {
     required this.isSignedIn,
     this.onLogin,
     this.initialSection,
+    this.showLiveSectionTabs = true,
+    this.onSectionChanged,
   });
 
   final HomeChannel channel;
@@ -95,6 +125,8 @@ final class _HomeChannelPage extends ConsumerStatefulWidget {
   final bool isSignedIn;
   final VoidCallback? onLogin;
   final String? initialSection;
+  final bool showLiveSectionTabs;
+  final ValueChanged<String>? onSectionChanged;
 
   @override
   ConsumerState<_HomeChannelPage> createState() => _HomeChannelPageState();
@@ -251,7 +283,13 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
   }
 
   void _selectInitialSection() {
-    final section = widget.initialSection;
+    final section =
+        widget.channel == HomeChannel.live &&
+            (widget.initialSection == '全部分区' ||
+                widget.onSectionChanged != null &&
+                    widget.initialSection == null)
+        ? '推荐直播'
+        : widget.initialSection;
     if (section != null && widget.channel.sections.contains(section)) {
       _sections[widget.channel] = section;
     }
@@ -352,65 +390,23 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
       children: [
         Column(
           children: [
-            if (entries.isNotEmpty)
-              Container(
-                height: 44,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: ScrollConfiguration(
-                        behavior: const SmoothScrollBehavior(
-                          horizontalMouseWheel: true,
-                        ),
-                        child: SingleChildScrollView(
-                          key: ValueKey('home-section-strip-${channel.name}'),
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              for (final entry in entries)
-                                Padding(
-                                  padding: const EdgeInsets.only(right: 4),
-                                  child: TextButton(
-                                    key: ValueKey('home-section-${entry.$1}'),
-                                    style: TextButton.styleFrom(
-                                      foregroundColor:
-                                          (categories != null
-                                              ? feed.categoryId == entry.$1
-                                              : section == entry.$1)
-                                          ? Theme.of(context)
-                                                .colorScheme
-                                                .primary
-                                          : Theme.of(context)
-                                                .colorScheme
-                                                .onSurfaceVariant,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                      ),
-                                      textStyle: Theme.of(context)
-                                          .textTheme
-                                          .labelLarge
-                                          ?.copyWith(fontSize: 13),
-                                    ),
-                                    onPressed: () {
-                                      if (categories != null) {
-                                        controller.selectCategory(entry.$1);
-                                      } else {
-                                        setState(
-                                          () => _sections[channel] = entry.$1,
-                                        );
-                                      }
-                                    },
-                                    child: Text(entry.$2),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+            if (entries.isNotEmpty &&
+                (channel != HomeChannel.live || widget.showLiveSectionTabs))
+              ContentSectionTabs<String>(
+                entries: entries,
+                value: categories != null ? feed.categoryId : section,
+                scrollKey: ValueKey('home-section-strip-${channel.name}'),
+                itemKey: (id) => ValueKey('home-section-$id'),
+                onSelected: (id) {
+                  if (categories != null) {
+                    controller.selectCategory(id);
+                  } else {
+                    setState(() => _sections[channel] = id);
+                    if (widget.active && WorkspaceActivity.isActive(context)) {
+                      widget.onSectionChanged?.call(id);
+                    }
+                  }
+                },
               ),
             Expanded(
               child: _content(
@@ -457,8 +453,7 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
                               },
                             ),
                           ),
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                        SliverCardGridPadding(
                           sliver: _videoItemsSliver(feed, channel),
                         ),
                       ],

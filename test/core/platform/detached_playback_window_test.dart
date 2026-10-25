@@ -1,0 +1,588 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
+import 'package:bilisail/core/platform/detached_playback_window.dart';
+import 'package:bilisail/core/platform/window_service.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  testWidgets('pending playback moves to its view without disposing state', (
+    tester,
+  ) async {
+    var disposals = 0;
+    final probe = _DisposeProbe(onDispose: () => disposals++);
+    await tester.pumpWidget(
+      DesktopPlaybackWindow(
+        playback: probe,
+        onCloseRequested: () {},
+        onError: (error) => fail('$error'),
+        windowFactory: ({required title, required onCloseRequested}) =>
+            _FakeWindow(tester.view, onCloseRequested),
+        child: const SizedBox(),
+      ),
+    );
+    final pending = tester.element(
+      find.byType(_DisposeProbe, skipOffstage: false),
+    );
+    expect(View.of(pending).viewId, tester.view.viewId);
+    expect(disposals, 0);
+    await tester.pump(Duration.zero);
+    expect(tester.element(find.byType(_DisposeProbe)), same(pending));
+    expect(View.of(pending).viewId, 100);
+    expect(disposals, 0);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(Duration.zero);
+    expect(disposals, 1);
+  });
+
+  testWidgets('media updates reuse the window without stealing focus', (
+    tester,
+  ) async {
+    late _FakeWindow window;
+    var creations = 0;
+    Widget build(Object token) => DesktopPlaybackWindow(
+      playback: const SizedBox(),
+      activationToken: token,
+      onCloseRequested: () {},
+      onError: (error) => fail('$error'),
+      windowFactory: ({required title, required onCloseRequested}) {
+        expect(SchedulerBinding.instance.schedulerPhase, SchedulerPhase.idle);
+        creations++;
+        return window = _FakeWindow(tester.view, onCloseRequested);
+      },
+      child: const SizedBox(),
+    );
+    await tester.pumpWidget(build('video'));
+    await tester.pumpWidget(build('video'));
+    await tester.pump(Duration.zero);
+    expect(creations, 1);
+    expect(window.activations, 0);
+    await tester.pumpWidget(build('live'));
+    await tester.pump(Duration.zero);
+    expect(creations, 1);
+    expect(window.activations, 1);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(Duration.zero);
+    expect(window.disposed, isTrue);
+  });
+
+  testWidgets(
+    'close waits for playback to unmount before destroying its view',
+    (tester) async {
+      late _FakeWindow window;
+      var closeRequests = 0;
+      var playbackUnmounted = false;
+      Widget build(bool open) => DesktopPlaybackWindow(
+        playback: open
+            ? _DisposeProbe(onDispose: () => playbackUnmounted = true)
+            : null,
+        onCloseRequested: () => closeRequests++,
+        onError: (error) => fail('$error'),
+        windowFactory: ({required title, required onCloseRequested}) {
+          return window = _FakeWindow(
+            tester.view,
+            onCloseRequested,
+            onDispose: () => expect(playbackUnmounted, isTrue),
+          );
+        },
+        child: const SizedBox(),
+      );
+      await tester.pumpWidget(build(true));
+      await tester.pump(Duration.zero);
+      window.requestClose();
+      window.requestClose();
+      expect(closeRequests, 1);
+      expect(window.disposed, isFalse);
+      expect(playbackUnmounted, isFalse);
+      await tester.pumpWidget(build(false));
+      await tester.pump(Duration.zero);
+      expect(window.disposed, isTrue);
+      expect(playbackUnmounted, isTrue);
+    },
+  );
+
+  testWidgets('closing before the next frame cancels pending creation', (
+    tester,
+  ) async {
+    var creations = 0;
+    Widget build(bool open) => DesktopPlaybackWindow(
+      playback: open ? const SizedBox() : null,
+      onCloseRequested: () {},
+      onError: (error) => fail('$error'),
+      windowFactory: ({required title, required onCloseRequested}) {
+        creations++;
+        return _FakeWindow(tester.view, onCloseRequested);
+      },
+      child: const SizedBox(),
+    );
+    await tester.pumpWidget(build(false));
+    final element = tester.element(find.byType(DesktopPlaybackWindow));
+    tester.binding.buildOwner!.buildScope(element, () {
+      element.update(build(true));
+    });
+    expect(creations, 0);
+    await tester.pumpWidget(build(false));
+    expect(creations, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('unmounting before the next frame cancels pending creation', (
+    tester,
+  ) async {
+    var creations = 0;
+    Widget build(bool open) => DesktopPlaybackWindow(
+      playback: open ? const SizedBox() : null,
+      onCloseRequested: () {},
+      onError: (error) => fail('$error'),
+      windowFactory: ({required title, required onCloseRequested}) {
+        creations++;
+        return _FakeWindow(tester.view, onCloseRequested);
+      },
+      child: const SizedBox(),
+    );
+    await tester.pumpWidget(build(false));
+    final element = tester.element(find.byType(DesktopPlaybackWindow));
+    tester.binding.buildOwner!.buildScope(element, () {
+      element.update(build(true));
+    });
+    expect(creations, 0);
+    await tester.pumpWidget(const SizedBox());
+    expect(creations, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a rapid reopen creates one window for the latest request', (
+    tester,
+  ) async {
+    var creations = 0;
+    final titles = <String>[];
+    Widget build(String? title) => DesktopPlaybackWindow(
+      title: title ?? 'closed',
+      activationToken: title,
+      playback: title == null ? null : const SizedBox(),
+      onCloseRequested: () {},
+      onError: (error) => fail('$error'),
+      windowFactory: ({required title, required onCloseRequested}) {
+        creations++;
+        titles.add(title);
+        return _FakeWindow(tester.view, onCloseRequested);
+      },
+      child: const SizedBox(),
+    );
+    await tester.pumpWidget(build(null));
+    final element = tester.element(find.byType(DesktopPlaybackWindow));
+    tester.binding.buildOwner!.buildScope(element, () {
+      element.update(build('first'));
+      element.update(build(null));
+      element.update(build('latest'));
+    });
+    expect(creations, 0);
+    await tester.pump();
+    await tester.pump(Duration.zero);
+    expect(creations, 1);
+    expect(titles, ['latest']);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(Duration.zero);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('closing after the frame cancels the queued native event', (
+    tester,
+  ) async {
+    var creations = 0;
+    Widget build(bool open) => DesktopPlaybackWindow(
+      playback: open ? const SizedBox() : null,
+      onCloseRequested: () {},
+      onError: (error) => fail('$error'),
+      windowFactory: ({required title, required onCloseRequested}) {
+        creations++;
+        return _FakeWindow(tester.view, onCloseRequested);
+      },
+      child: const SizedBox(),
+    );
+    await tester.pumpWidget(build(true));
+    expect(creations, 0);
+    final element = tester.element(find.byType(DesktopPlaybackWindow));
+    tester.binding.buildOwner!.buildScope(element, () {
+      element.update(build(false));
+    });
+    await tester.pump(Duration.zero);
+    expect(creations, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'creation failures are reported once and leave browsing mounted',
+    (tester) async {
+      final errors = <Object>[];
+      final error = StateError('native view unavailable');
+      var creations = 0;
+      Widget build() => DesktopPlaybackWindow(
+        playback: const SizedBox(),
+        onCloseRequested: () {},
+        onError: errors.add,
+        windowFactory: ({required title, required onCloseRequested}) {
+          creations++;
+          throw error;
+        },
+        child: const SizedBox(key: ValueKey('browser')),
+      );
+      await tester.pumpWidget(build());
+      await tester.pumpWidget(build());
+      await tester.pump(Duration.zero);
+      expect(creations, 1);
+      expect(errors, [same(error)]);
+      expect(find.byKey(const ValueKey('browser')), findsOneWidget);
+    },
+  );
+  testWidgets(
+    'prepare restores before mounting and coalesces latest media/title',
+    (tester) async {
+      final ready = Completer<void>();
+      final titles = <String>[];
+      late _FakeWindow window;
+      var creations = 0;
+      Widget build(String title, String token) => DesktopPlaybackWindow(
+        title: title,
+        activationToken: token,
+        playback: const SizedBox(key: ValueKey('player')),
+        onCloseRequested: () {},
+        onError: (error) => fail('$error'),
+        windowFactory: ({required title, required onCloseRequested}) {
+          creations++;
+          return window = _FakeWindow(
+            tester.view,
+            onCloseRequested,
+            onPrepare: () => ready.future,
+            onSetTitle: titles.add,
+          );
+        },
+        child: const SizedBox(),
+      );
+      await tester.pumpWidget(build('first', 'video'));
+      await tester.pump(Duration.zero);
+      final pending = tester.element(
+        find.byKey(const ValueKey('player'), skipOffstage: false),
+      );
+      expect(View.of(pending).viewId, tester.view.viewId);
+      await tester.pumpWidget(build('latest', 'live'));
+      await tester.pump(Duration.zero);
+      expect(creations, 1);
+      ready.complete();
+      await tester.pumpAndSettle();
+      expect(
+        View.of(tester.element(find.byKey(const ValueKey('player')))).viewId,
+        100,
+      );
+      expect(titles, ['latest']);
+      expect(window.activations, 1);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      expect(window.disposed, isTrue);
+    },
+  );
+
+  for (final removeHost in [false, true]) {
+    testWidgets(
+      'pending restore safely retires after close/host removal=$removeHost',
+      (tester) async {
+        final ready = Completer<void>();
+        final errors = <Object>[];
+        late _FakeWindow window;
+        Widget build(bool open) => DesktopPlaybackWindow(
+          playback: open ? const SizedBox() : null,
+          onCloseRequested: () {},
+          onError: errors.add,
+          windowFactory: ({required title, required onCloseRequested}) =>
+              window = _FakeWindow(
+                tester.view,
+                onCloseRequested,
+                onPrepare: () => ready.future,
+              ),
+          child: const SizedBox(),
+        );
+        await tester.pumpWidget(build(true));
+        await tester.pump(Duration.zero);
+        await tester.pumpWidget(removeHost ? const SizedBox() : build(false));
+        ready.complete();
+        await tester.pumpAndSettle();
+        expect(window.disposed, isTrue);
+        expect(errors, isEmpty);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets(
+    'restore failure destroys its native window and reports the real error',
+    (tester) async {
+      final errors = <Object>[];
+      final failure = StateError('restore failed');
+      late _FakeWindow window;
+      await tester.pumpWidget(
+        DesktopPlaybackWindow(
+          playback: const SizedBox(),
+          onCloseRequested: () {},
+          onError: errors.add,
+          windowFactory: ({required title, required onCloseRequested}) =>
+              window = _FakeWindow(
+                tester.view,
+                onCloseRequested,
+                onPrepare: () => Future.error(failure),
+              ),
+          child: const SizedBox(key: ValueKey('browser')),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(window.disposed, isTrue);
+      expect(errors, [same(failure)]);
+      expect(find.byKey(const ValueKey('browser')), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'late close from old preparing/retiring window cannot close the new media',
+    (tester) async {
+      final ready = Completer<void>(), saved = Completer<void>();
+      final windows = <_FakeWindow>[];
+      var closes = 0;
+      Widget build(bool open) => DesktopPlaybackWindow(
+        playback: open ? const SizedBox() : null,
+        onCloseRequested: () => closes++,
+        onError: (error) => fail('$error'),
+        windowFactory: ({required title, required onCloseRequested}) {
+          final old = windows.isEmpty;
+          final window = _FakeWindow(
+            tester.view,
+            onCloseRequested,
+            viewId: 100 + windows.length,
+            onPrepare: old ? () => ready.future : null,
+            onSave: old ? () => saved.future : null,
+          );
+          windows.add(window);
+          return window;
+        },
+        child: const SizedBox(),
+      );
+      await tester.pumpWidget(build(true));
+      await tester.pump(Duration.zero);
+      await tester.pumpWidget(build(false));
+      await tester.pumpWidget(build(true));
+      await tester.pump(Duration.zero);
+      windows.first.requestClose();
+      expect(closes, 0);
+      ready.complete();
+      await tester.pump(Duration.zero);
+      await tester.pump(Duration.zero);
+      windows.first.requestClose();
+      expect(closes, 0);
+      expect(windows.first.disposed, isFalse);
+      windows.last.requestClose();
+      expect(closes, 1);
+      saved.complete();
+      await tester.pumpAndSettle();
+      expect(windows.first.disposed, isTrue);
+      expect(windows.last.disposed, isFalse);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'external destruction disposes after its notifier stack unwinds',
+    (tester) async {
+      late _FakeWindow window;
+      var closes = 0;
+      await tester.pumpWidget(
+        DesktopPlaybackWindow(
+          playback: const SizedBox(),
+          onCloseRequested: () => closes++,
+          onError: (error) => fail('$error'),
+          windowFactory: ({required title, required onCloseRequested}) =>
+              window = _FakeWindow(tester.view, onCloseRequested),
+          child: const SizedBox(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      window.destroyNative();
+      expect(window.disposed, isFalse);
+      expect(closes, 1);
+      await tester.pumpAndSettle();
+      expect(window.disposed, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'native title failure while preparing reports before retiring the request',
+    (tester) async {
+      final ready = Completer<void>();
+      final errors = <Object>[];
+      final failure = StateError('native title failed');
+      late _FakeWindow window;
+      Widget build(String title) => DesktopPlaybackWindow(
+        title: title,
+        playback: const SizedBox(),
+        onCloseRequested: () {},
+        onError: errors.add,
+        windowFactory: ({required title, required onCloseRequested}) =>
+            window = _FakeWindow(
+              tester.view,
+              onCloseRequested,
+              onPrepare: () => ready.future,
+              onSetTitle: (_) => throw failure,
+            ),
+        child: const SizedBox(),
+      );
+      await tester.pumpWidget(build('old'));
+      await tester.pump(Duration.zero);
+      await tester.pumpWidget(build('new'));
+      ready.complete();
+      await tester.pumpAndSettle();
+      expect(errors, [same(failure)]);
+      expect(window.disposed, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('destruction while preparing never mounts a dead view', (
+    tester,
+  ) async {
+    final ready = Completer<void>();
+    final errors = <Object>[];
+    late _FakeWindow window;
+    await tester.pumpWidget(
+      DesktopPlaybackWindow(
+        playback: const SizedBox(),
+        onCloseRequested: () {},
+        onError: errors.add,
+        windowFactory: ({required title, required onCloseRequested}) =>
+            window = _FakeWindow(
+              tester.view,
+              onCloseRequested,
+              onPrepare: () => ready.future,
+            ),
+        child: const SizedBox(),
+      ),
+    );
+    await tester.pump(Duration.zero);
+    window.destroyNative();
+    ready.complete();
+    await tester.pumpAndSettle();
+    expect(window.disposed, isTrue);
+    expect(errors.single, isStateError);
+    expect(find.byType(View), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+}
+
+class _FakeWindow extends DetachedPlaybackWindow {
+  _FakeWindow(
+    ui.FlutterView mainView,
+    this.requestClose, {
+    this.onDispose,
+    this.onPrepare,
+    this.onSave,
+    this.onSetTitle,
+    int viewId = 100,
+  }) : view = _SecondaryView(mainView, viewId: viewId);
+
+  final _SecondaryView view;
+  final VoidCallback requestClose;
+  final VoidCallback? onDispose;
+  final Future<void> Function()? onPrepare;
+  final Future<void> Function()? onSave;
+  final ValueChanged<String>? onSetTitle;
+  bool nativeClosed = false;
+  var disposed = false;
+  var activations = 0;
+
+  @override
+  int get viewId => view.viewId;
+
+  @override
+  bool get isOpen => !disposed && !nativeClosed;
+
+  void destroyNative() {
+    nativeClosed = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> prepare() => onPrepare?.call() ?? Future.value();
+
+  @override
+  Future<void> saveGeometry() => onSave?.call() ?? Future.value();
+
+  @override
+  late final windowService = WindowService.forView(
+    viewId: viewId,
+    setFullScreen: (_) async {},
+    activate: () async => activate(),
+  );
+
+  @override
+  Widget buildView(Widget child) => View(view: view, child: child);
+
+  @override
+  void activate() {
+    expect(SchedulerBinding.instance.schedulerPhase, SchedulerPhase.idle);
+    activations++;
+  }
+
+  @override
+  void setTitle(String title) {
+    expect(SchedulerBinding.instance.schedulerPhase, SchedulerPhase.idle);
+    onSetTitle?.call(title);
+  }
+
+  @override
+  void dispose() {
+    expect(SchedulerBinding.instance.schedulerPhase, SchedulerPhase.idle);
+    onDispose?.call();
+    disposed = true;
+    super.dispose();
+  }
+}
+
+// Additional views follow Flutter's BSD-licensed multi_view_testing.dart
+// harness: each fake view owns a render tree without sending it to the engine.
+class _SecondaryView extends TestFlutterView {
+  _SecondaryView(ui.FlutterView view, {this.viewId = 100})
+    : super(
+        view: view,
+        platformDispatcher: view.platformDispatcher as TestPlatformDispatcher,
+        display: view.display as TestDisplay,
+      );
+
+  @override
+  final int viewId;
+
+  @override
+  void render(ui.Scene scene, {ui.Size? size}) {}
+
+  @override
+  void updateSemantics(ui.SemanticsUpdate update) {}
+}
+
+class _DisposeProbe extends StatefulWidget {
+  const _DisposeProbe({required this.onDispose});
+
+  final VoidCallback onDispose;
+
+  @override
+  State<_DisposeProbe> createState() => _DisposeProbeState();
+}
+
+class _DisposeProbeState extends State<_DisposeProbe> {
+  @override
+  void dispose() {
+    widget.onDispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox();
+}

@@ -41,7 +41,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      for (final entry in HomeChannel.values.skip(1)) {
+      for (final entry in HomeChannel.primaryValues.skip(1)) {
         channel.value = entry;
         await tester.pumpAndSettle();
       }
@@ -51,7 +51,14 @@ void main() {
         (w) => w.runtimeType.toString() == '_HomeChannelPage',
         skipOffstage: false,
       );
-      expect(allPages, findsNWidgets(12));
+      expect(allPages, findsNWidgets(HomeChannel.primaryValues.length - 1));
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget.runtimeType.toString() == 'PopularFeed',
+          skipOffstage: false,
+        ),
+        findsOneWidget,
+      );
       final container = ProviderScope.containerOf(
         tester.element(find.byType(FeedScreen)),
       );

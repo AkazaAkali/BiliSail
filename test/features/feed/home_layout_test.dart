@@ -106,7 +106,9 @@ void main() {
           expect(find.text('测试UP'), findsNWidgets(mountedCards));
           expect(find.text('今天投稿'), findsNWidgets(mountedCards));
           final first = tester.getRect(find.byType(VideoCard).first);
-          expect(first.width, lessThanOrEqualTo(width - 40));
+          final inset = width < 600 ? 12.0 : 20.0;
+          expect(first.left, inset);
+          expect(first.width, lessThanOrEqualTo(width - inset * 2));
           await tester.scrollUntilVisible(
             find.text('这是第5条视频或直播标题'),
             300,

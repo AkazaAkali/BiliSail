@@ -11,7 +11,7 @@ export '../../../domain/media_cdn.dart' show MediaCdnPreference;
 
 enum AppThemePreference { system, light, dark }
 
-enum WorkspaceNavigationMode { singlePage, multipleTabs }
+enum WorkspaceNavigationMode { multipleTabs, dualTabs }
 
 enum PlayerControlsMode { click, dynamic }
 
