@@ -472,6 +472,95 @@ void main() {
     }
   });
 
+  for (final mode in WorkspaceNavigationMode.values) {
+    for (final location in ['/', '/search?q=cat']) {
+      for (final width in [320.0, 390.0, 800.0]) {
+        testWidgets(
+          'keyboard hides only bottom navigation at $location in $mode at $width',
+          (tester) async {
+            tester.view.devicePixelRatio = 1;
+            tester.view.physicalSize = Size(width, 844);
+            addTearDown(tester.view.resetPhysicalSize);
+            addTearDown(tester.view.resetDevicePixelRatio);
+            addTearDown(tester.view.resetViewInsets);
+            var builds = 0;
+            await tester.pumpWidget(
+              ProviderScope(
+                child: MaterialApp(
+                  home: BiliAppShell(
+                    location: location,
+                    navigationMode: mode,
+                    pageBuilder: (_, tab) {
+                      builds++;
+                      final page = SizedBox.expand(
+                        key: ValueKey('page-${tab.location.path}'),
+                      );
+                      return tab.location.path == '/search'
+                          ? Builder(
+                              builder: (context) =>
+                                  WorkspacePageHeader.wrap(context, page),
+                            )
+                          : page;
+                    },
+                    child: const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+            final compact = width < 600;
+            final navigation = find.byKey(
+              const ValueKey('workspace-bottom-navigation'),
+            );
+            final search = find.byKey(const ValueKey('workspace-search'));
+            final content = find.byKey(
+              ValueKey('page-${Uri.parse(location).path}'),
+            );
+            final element = tester.element(content);
+            final before = tester.getSize(content);
+            final navigationHeight = compact
+                ? tester.getSize(navigation).height
+                : 0.0;
+            await tester.enterText(search, '测试草稿');
+            await tester.pumpAndSettle();
+            builds = 0;
+            for (final inset in [1.0, 100.0, 240.0, 320.0, 160.0, 0.0]) {
+              tester.view.viewInsets = FakeViewPadding(bottom: inset);
+              await tester.pumpAndSettle();
+              expect(
+                navigation,
+                compact && inset == 0 ? findsOneWidget : findsNothing,
+              );
+              if (!compact) {
+                expect(
+                  find.byKey(const ValueKey('workspace-side-navigation')),
+                  findsOneWidget,
+                );
+              }
+              expect(builds, 0);
+              expect(tester.element(content), same(element));
+              expect(
+                tester.getSize(content).height,
+                before.height - inset + (inset > 0 ? navigationHeight : 0),
+              );
+              final field = tester.widget<TextField>(search);
+              expect(field.controller?.text, '测试草稿');
+              expect(
+                tester
+                    .widget<EditableText>(find.byType(EditableText))
+                    .focusNode
+                    .hasFocus,
+                isTrue,
+              );
+              expect(tester.takeException(), isNull);
+            }
+          },
+          variant: TargetPlatformVariant.only(TargetPlatform.android),
+        );
+      }
+    }
+  }
+
   testWidgets('keyboard height changes retain active and hidden page widgets', (
     tester,
   ) async {

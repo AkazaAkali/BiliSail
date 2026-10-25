@@ -58,3 +58,13 @@
 直播探针用不含 SC 的聊天 fixture 隔离键盘路径。前期带 SC 的横屏极小可用高度探针发现原有溢出，本次没有修改该布局边界；常规 SC 功能测试仍通过。真实设备复测应包含 SC、表情和较大字体。
 
 手动构建后，建议在 profile/release 中对普通视频、影视、直播的横竖屏及全屏各反复弹出/收起键盘，观察输入框跟随、草稿、焦点、弹幕连续性和播放状态；同时比较 UI/raster 帧耗时与超过设备刷新预算的帧数。真实输入法动画、视频纹理缩放及系统合成仍需以设备测量为准。
+
+## 2026-10-25：搜索输入时隐藏窄屏底部导航
+
+窄屏的首页／动态／我的／设置导航位于 `Scaffold.body` 的纵向布局底部；软键盘弹出时，整个 body 缩高，原来四个入口随之被顶到键盘上方。
+
+工作区现在在当前 Flutter View 的底部键盘 inset 非零时隐藏底栏，inset 回到零后恢复。读取当前 View 是因为 `Scaffold` 会清除传给 body 的 `MediaQuery.viewInsets`。判断留在局部 `LayoutBuilder` 内，内容区继续避让键盘，键盘动画不重新调用缓存页面工厂；宽屏侧栏保持显示。
+
+- `test/app/shell_layout_test.dart` 共 29 项通过；新增 12 项 Android Widget 回归覆盖首页／搜索页、双／多标签及 320／390／800 逻辑像素宽度，检查多个键盘高度和收起后的恢复、内容区高度、草稿、焦点和页面实例保留。修复前窄屏 8 项均因底栏仍显示而失败。
+- `tool/check.ps1 -SkipPub` 通过：根应用 2301、bili_api 456、bili_player 81、bili_danmaku 93、bili_mux 2，共 2933 项通过；五处格式、静态分析及打包边界检查通过。mux 的 10 项原生测试因未配置 `BILI_MUX_LIBRARY` 跳过，不算原生封装通过。日志：`build/android-search-keyboard-check.log`。
+- 当前未连接 Android 设备，也没有运行中的调试应用；未完成 Android 实机输入法动画、构建或热重载验收。以上为 Widget 布局验证，不是设备或性能测量。

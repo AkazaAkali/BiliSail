@@ -654,7 +654,10 @@ final class _BiliAppShellState extends State<BiliAppShell>
                           ],
                         ),
                       ),
+                      // Scaffold clears MediaQuery's body insets. Read this
+                      // view's inset so navigation can hide during IME resizing.
                       if (compact &&
+                          View.of(context).viewInsets.bottom == 0 &&
                           !_displayTab.isPlayback &&
                           !_displayTab.isProfile)
                         _bottomNavigation(context),
