@@ -391,6 +391,7 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
         Column(
           children: [
             if (entries.isNotEmpty &&
+                channel != HomeChannel.videoDynamic &&
                 (channel != HomeChannel.live || widget.showLiveSectionTabs))
               ContentSectionTabs<String>(
                 entries: entries,
