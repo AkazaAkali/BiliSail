@@ -100,7 +100,9 @@ class MessagesController extends Notifier<MessagesState> {
   RequestCancellation? _inboxRead, _threadRead;
   final Set<RequestCancellation> _writes = {};
   MessageListState<InboxEntry>? _systemReadAttempt;
+  MessageListState<PrivateMessage>? _threadReadAttempt;
   (String, int)? _inboxAccount;
+  (String, int)? _threadAccount;
   final Map<InboxSection, Map<InboxSection, int>> _readUnreadSnapshots = {};
 
   @override
@@ -124,7 +126,9 @@ class MessagesController extends Notifier<MessagesState> {
 
   void _cancel() {
     _systemReadAttempt = null;
+    _threadReadAttempt = null;
     _inboxAccount = null;
+    _threadAccount = null;
     _readUnreadSnapshots.clear();
     _inboxRead?.cancel();
     _threadRead?.cancel();
@@ -193,6 +197,7 @@ class MessagesController extends Notifier<MessagesState> {
     _inboxRead?.cancel();
     _threadRead?.cancel();
     ++_threadVersion;
+    _threadAccount = null;
     state = state.copy(
       section: section,
       inbox: const MessageListState(),
@@ -293,6 +298,7 @@ class MessagesController extends Notifier<MessagesState> {
     if (entry.sessionType == null || entry.id == state.selected?.id) return;
     _threadRead?.cancel();
     ++_threadVersion;
+    _threadAccount = null;
     state = state.copy(
       selected: entry,
       thread: const MessageListState(),
@@ -301,7 +307,7 @@ class MessagesController extends Notifier<MessagesState> {
     unawaited(loadThread());
   }
 
-  /// Opening a profile starts a local conversation; only Send writes remotely.
+  /// Opening a profile reuses a conversation or creates a local empty one.
   bool openUserConversation(UserId id, {String? name, Uri? avatarUrl}) {
     final auth = ref.read(authControllerProvider);
     final repository = ref.read(messageRepositoryProvider);
@@ -333,6 +339,7 @@ class MessagesController extends Notifier<MessagesState> {
   void closeConversation() {
     _threadRead?.cancel();
     ++_threadVersion;
+    _threadAccount = null;
     state = state.copy(
       clearSelection: true,
       thread: const MessageListState(),
@@ -381,6 +388,7 @@ class MessagesController extends Notifier<MessagesState> {
       final bounded = sorted.length > 500
           ? sorted.sublist(sorted.length - 500)
           : sorted;
+      _threadAccount = (scope, epoch);
       state = state.copy(
         thread: MessageListState(
           items: List.unmodifiable(bounded),
@@ -424,20 +432,30 @@ class MessagesController extends Notifier<MessagesState> {
     );
   }
 
-  Future<bool> markRead() async {
+  Future<bool> markRead({bool automatic = false}) async {
     final entry = state.selected;
+    final thread = state.thread;
+    final repository = ref.read(messageRepositoryProvider);
     if (entry == null ||
+        state.section != InboxSection.private ||
         state.markingRead ||
         state.sending ||
-        state.thread.loading) {
+        thread.loading ||
+        thread.error != null ||
+        _threadAccount != (repository.accountScope, repository.sessionEpoch) ||
+        (automatic &&
+            (entry.unread <= 0 || identical(thread, _threadReadAttempt)))) {
       return false;
     }
     // Acknowledge only a sequence that was actually displayed, not the session's unseen latest one.
-    final sequence = state.thread.items.lastOrNull?.sequence;
+    final sequence = thread.items.lastOrNull?.sequence;
     if (sequence == null) return false;
+    // Rebuilds must not replay a failed or uncertain automatic write.
+    _threadReadAttempt = thread;
     return _write(
       entry,
       send: false,
+      notifySuccess: !automatic,
       action: (repository, cancellation) =>
           repository.markRead(entry, sequence, cancellation: cancellation),
     );
@@ -510,6 +528,7 @@ class MessagesController extends Notifier<MessagesState> {
   Future<bool> _write(
     InboxEntry entry, {
     required bool send,
+    bool notifySuccess = true,
     required Future<void> Function(MessageRepository, RequestCancellation)
     action,
   }) async {
@@ -530,12 +549,12 @@ class MessagesController extends Notifier<MessagesState> {
       state = state.copy(
         sending: false,
         markingRead: false,
-        writeMessage: state.selected?.id == entry.id
+        writeMessage: state.selected?.id == entry.id && notifySuccess
             ? send
                   ? '已发送'
                   : '已标为已读'
             : null,
-        clearWriteMessage: state.selected?.id != entry.id,
+        clearWriteMessage: state.selected?.id != entry.id || !notifySuccess,
       );
       if (!send && entry.unread > 0) {
         ref.invalidate(unreadMessagesProvider);

@@ -35,7 +35,7 @@ void main() {
     container.dispose();
     await auth.stream.close();
   });
-  test('opening inbox/thread performs no writes', () async {
+  test('loading inbox/thread waits for visible-page acknowledgement', () async {
     expect(state().inbox.items, hasLength(2));
     controller.selectConversation(conversation);
     await flush();
@@ -197,6 +197,95 @@ void main() {
     expect(await controller.markRead(), true);
     expect(repo.lastAck, '1');
     expect(repo.marks, 1);
+  });
+  test(
+    'automatic acknowledgement waits for a loaded thread and runs once',
+    () async {
+      final pending = repo.threadPending =
+          Completer<MessagePage<PrivateMessage>>();
+      controller.selectConversation(conversation);
+      expect(await controller.markRead(automatic: true), isFalse);
+      pending.complete(const MessagePage([privateMessage], hasMore: false));
+      await flush();
+      expect(await controller.markRead(automatic: true), isTrue);
+      await flush();
+      expect(repo.lastAck, privateMessage.sequence);
+      expect(repo.marks, 1);
+      expect(state().writeMessage, isNull);
+      expect(await controller.markRead(automatic: true), isFalse);
+      expect(repo.marks, 1);
+    },
+  );
+  test(
+    'already-read conversations do not submit automatic acknowledgements',
+    () async {
+      container.listen(unreadMessagesProvider, (_, _) {});
+      await container.read(unreadMessagesProvider.future);
+      controller.selectConversation(otherConversation);
+      await flush();
+      expect(await controller.markRead(automatic: true), isFalse);
+      expect(repo.marks, 0);
+      expect(repo.unreadReads, 1);
+    },
+  );
+  test(
+    'empty and failed threads preserve unread state without acknowledgements',
+    () async {
+      repo.threadFailure = const AppFailure(AppFailureKind.network, 'offline');
+      controller.selectConversation(conversation);
+      await flush();
+      expect(state().thread.error, 'offline');
+      expect(await controller.markRead(automatic: true), isFalse);
+      repo.threadFailure = null;
+      repo.messages = [];
+      await controller.loadThread(refresh: true);
+      expect(await controller.markRead(automatic: true), isFalse);
+      expect(repo.marks, 0);
+      expect(repo.counts[InboxSection.private], 3);
+    },
+  );
+  test('uncertain automatic acknowledgements wait for a new thread load before retrying', () async {
+    controller.selectConversation(conversation);
+    await flush();
+    repo.writeFailure = const AppFailure(AppFailureKind.timeout, 'timeout');
+    expect(await controller.markRead(automatic: true), isFalse);
+    expect(state().writeMessage, contains('尚未确认'));
+    expect(await controller.markRead(automatic: true), isFalse);
+    expect(repo.marks, 1);
+    expect(repo.counts[InboxSection.private], 3);
+    repo.writeFailure = null;
+    await controller.loadThread(refresh: true);
+    expect(await controller.markRead(automatic: true), isTrue);
+    expect(repo.marks, 2);
+  });
+  test(
+    'a loaded thread from an earlier epoch cannot be acknowledged',
+    () async {
+      controller.selectConversation(conversation);
+      await flush();
+      repo.sessionEpoch++;
+      expect(await controller.markRead(automatic: true), isFalse);
+      expect(await controller.markRead(), isFalse);
+      expect(repo.marks, 0);
+    },
+  );
+  test('account changes cancel automatic acknowledgements and reject late completion', () async {
+    controller.selectConversation(conversation);
+    await flush();
+    final pending = repo.writePending = Completer<void>();
+    final write = controller.markRead(automatic: true);
+    final cancellation = repo.writeRead;
+    repo.accountScope = 'guest';
+    repo.sessionEpoch++;
+    auth.emit(const AuthState());
+    await flush();
+    final reads = repo.reads;
+    pending.complete();
+    expect(await write, isFalse);
+    expect(cancellation?.isCancelled, isTrue);
+    expect(state().selected, isNull);
+    expect(state().writeMessage, isNull);
+    expect(repo.reads, reads);
   });
   test(
     'read actions refresh the unread provider shared with the root scope',

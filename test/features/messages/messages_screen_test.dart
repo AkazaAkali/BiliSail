@@ -122,7 +122,8 @@ void main() {
       await tester.tap(find.text('测试会话'));
       await tester.pumpAndSettle();
       expect(find.text('返回后保留的草稿'), findsOneWidget);
-      expect(repo.sends + repo.marks, 0);
+      expect(repo.sends, 0);
+      expect(repo.marks, 2);
       expect(tester.takeException(), isNull);
     });
   }
@@ -302,18 +303,150 @@ void main() {
     }
   });
 
-  testWidgets('private acknowledgement updates the avatar from a page scope', (
+  testWidgets(
+    'opening a private conversation automatically updates the avatar from a page scope',
+    (tester) async {
+      await mountWithAccount(tester);
+      expect(accountBadge(tester).isLabelVisible, isTrue);
+      await tester.tap(find.text('测试会话'));
+      await tester.pumpAndSettle();
+      expect(repo.marks, 1);
+      expect(accountBadge(tester).isLabelVisible, isFalse);
+      expect(find.text('私信 · 3'), findsNothing);
+      expect(repo.lastAck, privateMessage.sequence);
+      expect(find.text('已标为已读'), findsNothing);
+      await tester.pump();
+      expect(repo.marks, 1);
+    },
+  );
+
+  testWidgets('a hidden private thread is acknowledged only when shown', (
     tester,
   ) async {
-    await mountWithAccount(tester);
-    expect(accountBadge(tester).isLabelVisible, isTrue);
+    final active = ValueNotifier(true);
+    addTearDown(active.dispose);
+    await mountWithAccount(tester, active: active);
+    final pending = repo.threadPending =
+        Completer<MessagePage<PrivateMessage>>();
     await tester.tap(find.text('测试会话'));
+    await tester.pump();
+    active.value = false;
+    await tester.pump();
+    pending.complete(const MessagePage([privateMessage], hasMore: false));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('标为已读'));
+    expect(repo.marks, 0);
+    active.value = true;
     await tester.pumpAndSettle();
     expect(repo.marks, 1);
-    expect(accountBadge(tester).isLabelVisible, isFalse);
+    active.value = false;
+    await tester.pump();
+    active.value = true;
+    await tester.pumpAndSettle();
+    expect(repo.marks, 1);
   });
+
+  testWidgets(
+    'private badges update only after the automatic receipt succeeds',
+    (tester) async {
+      repo.counts = {InboxSection.private: 3, InboxSection.replies: 2};
+      final pending = repo.writePending = Completer<void>();
+      await mountWithAccount(tester);
+      await tester.tap(find.text('测试会话'));
+      await tester.pumpAndSettle();
+      Badge conversationBadge() => tester.widget<Badge>(
+        find.descendant(
+          of: find.byKey(const ValueKey('1:2')),
+          matching: find.byType(Badge),
+        ),
+      );
+      expect(repo.marks, 1);
+      expect(conversationBadge().isLabelVisible, isTrue);
+      expect((accountBadge(tester).label as Text).data, '5');
+      repo.entries = const [
+        InboxEntry(id: '1:2', title: '测试会话', text: '消息摘要', sessionType: 1),
+        otherConversation,
+      ];
+      pending.complete();
+      await tester.pumpAndSettle();
+      expect(conversationBadge().isLabelVisible, isFalse);
+      expect(find.text('私信 · 3'), findsNothing);
+      expect(find.text('回复 · 2'), findsOneWidget);
+      expect((accountBadge(tester).label as Text).data, '2');
+      expect(repo.marks, 1);
+    },
+  );
+
+  testWidgets(
+    'a newly selected unread conversation waits for an in-flight receipt',
+    (tester) async {
+      repo.entries = const [
+        conversation,
+        InboxEntry(
+          id: '1:3',
+          title: '另一会话',
+          text: '另一摘要',
+          sessionType: 1,
+          unread: 2,
+        ),
+      ];
+      final pending = repo.writePending = Completer<void>();
+      await mount(tester);
+      await tester.tap(find.text('测试会话'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('另一会话'));
+      await tester.pumpAndSettle();
+      expect(repo.marks, 1);
+      repo.writePending = null;
+      pending.complete();
+      await tester.pumpAndSettle();
+      expect(repo.lastThread?.id, '1:3');
+      expect(repo.marks, 2);
+    },
+  );
+
+  testWidgets(
+    'failed private acknowledgement preserves badges without replaying on rebuild',
+    (tester) async {
+      repo.writeFailure = const AppFailure(AppFailureKind.timeout, 'timeout');
+      await mountWithAccount(tester);
+      await tester.tap(find.text('测试会话'));
+      await tester.pumpAndSettle();
+      expect(repo.marks, 1);
+      expect(find.textContaining('尚未确认'), findsOneWidget);
+      expect(find.text('私信 · 3'), findsOneWidget);
+      expect((accountBadge(tester).label as Text).data, '3');
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(MessagesScreen)),
+      );
+      container.invalidate(unreadMessagesProvider);
+      await tester.pumpAndSettle();
+      expect(repo.marks, 1);
+      repo.writeFailure = null;
+      await tester.tap(find.byTooltip('刷新会话'));
+      await tester.pumpAndSettle();
+      expect(repo.marks, 2);
+      expect(accountBadge(tester).isLabelVisible, isFalse);
+    },
+  );
+
+  testWidgets(
+    'switching conversations ignores a late thread before automatic read',
+    (tester) async {
+      final pending = repo.threadPending =
+          Completer<MessagePage<PrivateMessage>>();
+      await mount(tester);
+      await tester.tap(find.text('测试会话'));
+      await tester.pump();
+      repo.threadPending = null;
+      await tester.tap(find.text('另一会话'));
+      await tester.pumpAndSettle();
+      pending.complete(const MessagePage([privateMessage], hasMore: false));
+      await tester.pumpAndSettle();
+      expect(repo.lastThread?.id, otherConversation.id);
+      expect(repo.marks, 0);
+      expect(repo.counts[InboxSection.private], 3);
+    },
+  );
 
   testWidgets('hidden system list waits until visible before acknowledging', (
     tester,
@@ -409,7 +542,7 @@ void main() {
     },
   );
   testWidgets(
-    'wide inbox shows categories and conversation; reading does not acknowledge',
+    'wide inbox acknowledges a displayed conversation automatically',
     (tester) async {
       tester.view.physicalSize = const Size(1100, 760);
       tester.view.devicePixelRatio = 1;
@@ -441,10 +574,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('测试私信正文'), findsOneWidget);
       expect(find.text('另一会话'), findsOneWidget);
-      expect(repo.marks, 0);
+      expect(repo.marks, 1);
       await tester.tap(find.byTooltip('标为已读'));
       await tester.pumpAndSettle();
-      expect(repo.marks, 1);
+      expect(repo.marks, 2);
     },
   );
   testWidgets(

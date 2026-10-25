@@ -357,9 +357,13 @@ void main() {
     );
     expect(find.text('保留根消息草稿'), findsOneWidget);
     final beforeMessagesRefresh = home.queries.length;
+    final beforeMessageMarks = messages.marks;
     await tester.sendKeyEvent(LogicalKeyboardKey.f5);
     await tester.pumpAndSettle();
-    expect(messages.reads, messageReads + 1);
+    // The fake still reports unread messages, so reloading the thread also
+    // acknowledges it and reconciles the inbox once more.
+    expect(messages.marks, beforeMessageMarks + 1);
+    expect(messages.reads, messageReads + 2);
     expect(home.queries.length, beforeMessagesRefresh);
     expect(downloads.refreshes, downloadRefreshes);
     router.go('/downloads');
@@ -369,7 +373,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.f5);
     await tester.pumpAndSettle();
     expect(downloads.refreshes, downloadRefreshes + 1);
-    expect(messages.reads, messageReads + 1);
+    expect(messages.reads, messageReads + 2);
     await tester.tap(find.byKey(const ValueKey('workspace-nav-settings')));
     await tester.pumpAndSettle();
     expect(tester.state(find.byType(SettingsScreen)), same(settingsState));

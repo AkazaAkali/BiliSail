@@ -109,6 +109,22 @@ class _MessagesScreenState extends ConsumerState<MessagesScreen> {
     final controller = ref.read(messagesControllerProvider.notifier);
     final active = WorkspaceActivity.isActive(context);
     if (active &&
+        state.section == InboxSection.private &&
+        (state.selected?.unread ?? 0) > 0 &&
+        !state.thread.loading &&
+        state.thread.error == null &&
+        state.thread.items.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !WorkspaceActivity.isActive(context)) return;
+        final current = ref.read(messagesControllerProvider);
+        if (current.section == InboxSection.private &&
+            current.selected?.id == state.selected?.id &&
+            identical(current.thread, state.thread)) {
+          controller.markRead(automatic: true);
+        }
+      });
+    }
+    if (active &&
         state.section == InboxSection.system &&
         !state.inbox.loading &&
         state.inbox.error == null) {

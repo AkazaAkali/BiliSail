@@ -25,7 +25,7 @@ BiliSail（哔帆）是一个专注观看体验的跨平台 Bilibili 第三方�
 
 ## 2. 技术栈与决策
 
-按用户要求提前实现头像账号菜单与 Web 消息收件箱，见 [账号菜单与消息](validation/account-messages.md)。`auth` 负责账号摘要和菜单，`messages` 的纯 Dart Repository 契约与应用控制器负责读取、私信发送和显式已读；`app` 通过账号消息指示端口注入未读数，避免两个 Feature 循环依赖。账号 scope、session epoch、请求代次共同隔离旧响应；私信与草稿只在有界内存中保留。此项不代表完整 M3/M4 或三端验收。
+按用户要求提前实现头像账号菜单与 Web 消息收件箱，见 [账号菜单与消息](validation/account-messages.md)。`auth` 负责账号摘要和菜单，`messages` 的纯 Dart Repository 契约与应用控制器负责读取、私信发送和已读回执；`app` 通过账号消息指示端口注入未读数，避免两个 Feature 循环依赖。账号 scope、session epoch、请求代次共同隔离旧响应；私信与草稿只在有界内存中保留。此项不代表完整 M3/M4 或三端验收。
 
 | 层面 | 方案 | 理由与限制 |
 | --- | --- | --- |

@@ -77,6 +77,7 @@ class MessageRepositoryFake implements MessageRepository {
   Completer<Map<InboxSection, int>>? unreadPending;
   Object? writeFailure;
   Object? inboxFailure;
+  Object? threadFailure;
   Object? unreadFailure;
   Map<InboxSection, int> counts = {InboxSection.private: 3};
   RequestCancellation? inboxRead, threadRead, writeRead;
@@ -117,6 +118,7 @@ class MessageRepositoryFake implements MessageRepository {
   }) async {
     threadRead = cancellation;
     lastThread = entry;
+    if (threadFailure case final error?) throw error;
     return threadPending == null
         ? MessagePage(messages, hasMore: more, cursor: this.cursor)
         : threadPending!.future;

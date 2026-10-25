@@ -162,7 +162,7 @@ void main() {
             await tester.tap(find.text('取消'));
             await tester.pumpAndSettle();
           }
-          expect(messages.sends + messages.marks, 0);
+          expect(messages.sends, 0);
           expect(tester.takeException(), isNull);
           await tester.pumpWidget(const SizedBox());
         },
@@ -613,7 +613,7 @@ void main() {
           const UserId('2'),
         );
         expect(tester.widget<TextField>(composer).controller?.text, '用户2草稿');
-        expect(messages.sends + messages.marks, 0);
+        expect(messages.sends, 0);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
       },
