@@ -27,6 +27,7 @@ const _overview = AccountOverview(
   followers: 37,
   dynamics: 24,
   coins: 12.5,
+  bCoins: 6.25,
   vipLabel: '年度大会员',
 );
 
@@ -34,6 +35,7 @@ const _maxOverview = AccountOverview(
   level: 6,
   currentExperience: 43597,
   coins: 1029.2,
+  bCoins: 25,
   following: 82,
   followers: 10,
   dynamics: 30,
@@ -177,6 +179,19 @@ void main() {
       expect(find.text('等级 5'), findsOneWidget);
       expect(find.text('经验 20500 / 28800'), findsOneWidget);
       expect(find.text('硬币 12.5'), findsOneWidget);
+      expect(find.text('B币 6.25'), findsOneWidget);
+      final balances = tester.getRect(
+        find.byKey(const ValueKey('account-balances')),
+      );
+      final following = tester.getRect(
+        find.byKey(const ValueKey('account-statistic-关注')),
+      );
+      expect(balances.height, closeTo(following.height, 1));
+      expect(balances.center.dy, closeTo(following.center.dy, 1));
+      expect(
+        tester.getRect(find.text('B币 6.25')).top,
+        greaterThan(tester.getRect(find.text('硬币 12.5')).bottom),
+      );
       for (final label in ['关注', '粉丝', '动态', '82', '37', '24']) {
         expect(find.text(label), findsOneWidget);
       }
@@ -231,6 +246,7 @@ void main() {
         '等级 6',
         '已满级 · 43597',
         '硬币 1029.2',
+        'B币 25',
         '82',
         '10',
         '30',
@@ -267,6 +283,7 @@ void main() {
       expect(find.text('等级 —'), findsOneWidget);
       expect(find.text('经验 — / —'), findsOneWidget);
       expect(find.text('硬币 —'), findsOneWidget);
+      expect(find.text('B币 —'), findsOneWidget);
       expect(find.text('—'), findsNWidgets(3));
       expect(find.byType(LinearProgressIndicator), findsNothing);
       expect(
@@ -294,6 +311,7 @@ void main() {
       levelExperience: 0,
       nextExperience: 100,
       coins: 0,
+      bCoins: 0,
       following: 0,
       followers: 0,
       dynamics: 0,
@@ -302,6 +320,7 @@ void main() {
     expect(find.text('等级 0'), findsOneWidget);
     expect(find.text('经验 0 / 100'), findsOneWidget);
     expect(find.text('硬币 0'), findsOneWidget);
+    expect(find.text('B币 0'), findsOneWidget);
     expect(find.text('0'), findsNWidgets(3));
     expect(
       tester
@@ -396,6 +415,7 @@ void main() {
     await mount(tester, onLogin: () => logins++, observer: observer);
     expect(overview.reads, isEmpty);
     expect(find.text('未登录'), findsOneWidget);
+    expect(find.byKey(const ValueKey('account-balances')), findsNothing);
     await tester.tap(find.text('登录账号'));
     expect(logins, 1);
     await select(tester, AccountContentTab.downloads);
@@ -409,6 +429,7 @@ void main() {
     await tester.tap(find.text('退出登录'));
     await tester.pumpAndSettle();
     expect(auth.current.isSignedIn, isFalse);
+    expect(find.byKey(const ValueKey('account-balances')), findsNothing);
     expect(find.text('登录账号'), findsOneWidget);
     expect(probe(tester, AccountContentTab.downloads), same(downloads));
     expect(find.text('downloads version 1 count 0'), findsOneWidget);
@@ -446,6 +467,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('等级 6'), findsOneWidget);
       expect(find.text('等级 5'), findsNothing);
+      expect(find.text('B币 6.25'), findsNothing);
+      expect(find.text('B币 —'), findsOneWidget);
       final next = Completer<AccountOverview>();
       overview.onLoad = (_) => next.future;
       auth.emit(
@@ -460,6 +483,7 @@ void main() {
       expect(find.text('等级 6'), findsNothing);
       expect(find.text('等级 —'), findsOneWidget);
       expect(find.text('硬币 —'), findsOneWidget);
+      expect(find.text('B币 —'), findsOneWidget);
       expect(find.text('—'), findsNWidgets(3));
       next.complete(const AccountOverview(level: 4));
       await tester.pumpAndSettle();
@@ -522,6 +546,7 @@ void main() {
           '等级 5',
           '经验 20500 / 28800',
           '硬币 12.5',
+          'B币 6.25',
           '关注',
           '粉丝',
           '动态',
@@ -573,6 +598,7 @@ void main() {
         '等级 5',
         '经验 20500 / 28800',
         '硬币 12.5',
+        'B币 6.25',
         '关注',
         '粉丝',
         '动态',

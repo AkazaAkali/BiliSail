@@ -24,6 +24,7 @@ class ApiAccountOverviewRepository implements AccountOverviewRepository {
       dynamics: data.dynamics,
       vipLabel: data.vipLabel,
       coins: data.coins,
+      bCoins: data.bCoins,
     );
   }, cancellation: cancellation);
 }

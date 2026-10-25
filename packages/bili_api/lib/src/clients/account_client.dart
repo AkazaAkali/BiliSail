@@ -31,6 +31,7 @@ final class AccountClient {
         ? level
         : const <String, Object?>{};
     final vip = nav['vip_label'];
+    final wallet = nav['wallet'];
     return ApiAccountOverview(
       mid: mid,
       level: _int(info['current_level']),
@@ -47,6 +48,9 @@ final class AccountClient {
           ? vip['text'] as String?
           : null,
       coins: nav['money'] is num ? nav['money'] as num : null,
+      bCoins: wallet is Map<String, Object?> && wallet['bcoin_balance'] is num
+          ? wallet['bcoin_balance'] as num
+          : null,
     );
   }
 

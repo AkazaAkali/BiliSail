@@ -204,9 +204,22 @@ class _AccountProfileBar extends StatelessWidget {
             : () => onOpenSection?.call('dynamics'),
       ),
     ];
-    final coins = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      child: Text('硬币 ${data?.coins ?? '—'}', style: theme.textTheme.bodySmall),
+    final balances = ConstrainedBox(
+      key: const ValueKey('account-balances'),
+      constraints: const BoxConstraints(minHeight: 48),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('硬币 ${data?.coins ?? '—'}', style: theme.textTheme.bodySmall),
+            const SizedBox(height: 2),
+            Text('B币 ${data?.bCoins ?? '—'}', style: theme.textTheme.bodySmall),
+          ],
+        ),
+      ),
     );
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -251,7 +264,7 @@ class _AccountProfileBar extends StatelessWidget {
                   Expanded(child: identity),
                   if (wide && signedIn) ...[
                     const SizedBox(width: 20),
-                    coins,
+                    balances,
                     const SizedBox(width: 12),
                     ...statistics,
                   ],
@@ -270,7 +283,7 @@ class _AccountProfileBar extends StatelessWidget {
                   spacing: 4,
                   runSpacing: 2,
                   children: [
-                    coins,
+                    balances,
                     ...statistics,
                     if (actionInFooter) ...[?retry, accountAction],
                   ],

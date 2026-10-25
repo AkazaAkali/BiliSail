@@ -26,7 +26,7 @@
 
 | host | method / path | 参数、响应与分页 |
 | --- | --- | --- |
-| `api.bilibili.com` | GET `/x/web-interface/nav`、`/x/web-interface/nav/stat` | 校验 `isLogin` 和当前 MID；读取 `level_info`、`vip_label`、`money` 与三类统计 |
+| `api.bilibili.com` | GET `/x/web-interface/nav`、`/x/web-interface/nav/stat` | 校验 `isLogin` 和当前 MID；读取 `level_info`、`vip_label`、`money`、`wallet.bcoin_balance` 与三类统计 |
 | `api.bilibili.com` | GET `/x/msgfeed/unread` | `chat/reply/at/like/sys_msg`；缺失计数按 0 处理 |
 | `api.vc.bilibili.com` | GET `/session_svr/v1/session_svr/get_sessions` | `session_type=1`、折叠和排序参数；`session_list/has_more`，`end_ts` 为十进制微秒游标 |
 | `api.bilibili.com` | GET `/x/polymer/pc-electron/v1/user/cards` | `uids` 为逗号分隔十进制 ID；读取按 MID 键控的资料对象，兼容列表形态 |
@@ -144,6 +144,20 @@ Android 在当前页面没有可返回层级时显示“退出哔帆？”确认
 `tool/check.ps1 -SkipPub` 全量通过：根应用 2274、API 446、播放器 81、弹幕 93、封装包 2 项离线测试，共 2896 项；格式、静态分析和打包边界检查通过。封装包另有 10 项原生测试因未配置 `BILI_MUX_LIBRARY` 跳过。完整日志为本机忽略文件 `build/message-back-check.log`；文档相对链接与 `git diff --check` 通过。
 
 本轮没有连接的 Android 设备，也没有可连接的 Flutter 调试进程，未做设备返回键／手势、真实账号界面或热重载验收；未构建安装包。没有新增依赖、协议请求或数据库迁移。
+
+## 2026-10-25：我的页 B 币余额
+
+我的页顶部将硬币、B 币余额分为两行，普通字号下与右侧关注统计保持相同的 48 逻辑像素高度；窄屏沿用原有资料分行，大字体允许自然增高。零余额显示 `0`，钱包或余额字段缺失／类型异常时显示 `—`；游客不展示余额，切换账号时清除旧账号余额并丢弃迟到响应。
+
+复用账号摘要现有的 Web Cookie GET `api.bilibili.com/x/web-interface/nav`，以 `money` 读取硬币、`wallet.bcoin_balance` 读取 B 币，不增加请求、不与 `coupon_balance` 相加。JSON 无分页、不需要 WBI，沿用既有取消、账号 epoch、25 秒 deadline 和有界读重试；API DTO、领域模型和 Repository 分别传递可空数值，页面不解析协议。
+
+2026-10-25 从 [B 站首页](https://www.bilibili.com/) 引用的[官方页面脚本](https://s1.hdslb.com/bfs/static/shanks/laputa-home/assets/index-84fb5632.js)核对到 B 币读取 `userInfo.wallet.bcoin_balance`。另只读参考 MIT 许可的 [bili-kernel Mine 模型](../../../bili-kernel/src/Services/Services.User/Core/Models/Mine.cs)中硬币与 B 币分开的语义；仅参考协议与职责，未复制源码或资源。官网游客请求返回 `code=-101`，没有执行真实登录账号余额查询。
+
+账号／消息协议定向回归 27 项、我的页 Widget 回归 25 项通过：覆盖整数、小数、零值、缺失／异常钱包和余额、优惠券独立、MID 不匹配、两行位置、与关注区的高度和垂直对齐、宽窄屏、双倍字体、游客／登出及账号切换隔离。已检查亮／暗色宽屏、窄屏与双倍字体的 Widget 渲染预览，预览使用虚构余额。
+
+`tool/check.ps1 -SkipPub` 已执行，根格式、静态分析与打包边界检查通过；根测试重跑时，工作区同期新增的 8 条 Android 键盘隐藏底栏断言失败（`test/app/shell_layout_test.dart`，期望底栏消失但仍存在），因此不能报告全量通过。四个子包另行完成格式、分析和测试：API 456、播放器 81、弹幕 93、封装 2 项通过；封装另有 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。保留同期修改，没有调整这些无关的导航行为。日志为本机忽略文件 `build/account-bcoin-check-final.log`、`build/account-bcoin-packages-check.log`。
+
+未发现可连接的 DTD／Flutter 调试进程，热重载未执行。本轮未构建安装包，真实账号余额与三端运行界面尚未验收。
 
 ## 未验证或未实现
 

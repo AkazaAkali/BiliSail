@@ -53,6 +53,7 @@ final class ApiAccountOverview {
     this.dynamics,
     this.vipLabel,
     this.coins,
+    this.bCoins,
   });
   final String mid;
   final int? level,
@@ -63,5 +64,5 @@ final class ApiAccountOverview {
       followers,
       dynamics;
   final String? vipLabel;
-  final num? coins;
+  final num? coins, bCoins;
 }

@@ -11,6 +11,7 @@ final class AccountOverview {
     this.dynamics,
     this.vipLabel,
     this.coins,
+    this.bCoins,
   });
   final int? level,
       currentExperience,
@@ -20,7 +21,7 @@ final class AccountOverview {
       followers,
       dynamics;
   final String? vipLabel;
-  final num? coins;
+  final num? coins, bCoins;
   double? get progress {
     if (level case final int value when value >= 6) return 1;
     final current = currentExperience,
