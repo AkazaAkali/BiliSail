@@ -1,16 +1,18 @@
-import 'dart:async';
-
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Future<void> sendNativeWindowBack(WidgetTester tester, int viewId) async {
-  final replied = Completer<void>();
-  tester.binding.channelBuffers.push(
-    'bilisail/desktop_window',
-    const StandardMethodCodec().encodeMethodCall(
-      MethodCall('back', {'viewId': viewId}),
-    ),
-    (_) => replied.complete(),
-  );
-  await replied.future;
+  const codec = StandardMethodCodec();
+  // The test messenger replies with null when there is no handler, whereas
+  // ChannelBuffers queues the message until a listener arrives and can hang.
+  final response = await tester.binding.defaultBinaryMessenger
+      .handlePlatformMessage(
+        'bilisail/desktop_window',
+        codec.encodeMethodCall(MethodCall('back', {'viewId': viewId})),
+        null,
+      );
+  if (response == null) {
+    throw StateError('Native Back handler is not registered for view $viewId.');
+  }
+  codec.decodeEnvelope(response);
 }

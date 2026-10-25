@@ -1,9 +1,10 @@
 import 'dart:ui' as ui;
 
 import 'package:bilisail/core/platform/detached_playback_window.dart';
-import 'package:bilisail/core/platform/window_service.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'window_service_fake.dart';
 
 /// Creates real secondary render trees without asking the engine for a window.
 class FakeDetachedWindowFactory {
@@ -55,7 +56,7 @@ class FakeDetachedWindow extends DetachedPlaybackWindow {
   bool get isOpen => !disposed;
 
   @override
-  late final windowService = WindowService.forView(
+  late final windowService = FakePlaybackWindowService(
     viewId: viewId,
     setFullScreen: (_) async {},
     activate: () async => activate(),

@@ -312,3 +312,11 @@ Flutter 3.47.6 会将 Android 的 `--build-number 0` 归一化为 `1`（[固定 
 现在 CI 不再传入该变量，打包脚本不再接受覆盖，并通过 [身份校验](../../tool/windows-msix-identity.ps1) 检查源模板与实际 MSIX manifest 的三个身份字段及版本；实际读取的字段写入 `build-info.json` 的 `windowsMsixIdentity`。Windows 打包时通过系统 `PackageFamilyNameFromId` 从实际 Name 与 Publisher 派生 PFN，并与目标值比对，记录到 metadata；不向 manifest 添加虚构 PFN 字段。签名后校验包内 PKCS#7/CMS 的数学签名及签名证书与所选证书一致；该校验不声明系统信任链通过，也不修改证书信任区。回归覆盖旧变量隔离、错误 Publisher／Name／显示名／版本拒绝，并接入 `tool/check.ps1`。
 
 已配置签名证书仍须匹配固定 Publisher，不自动替换密钥、不降级签名；需要维护者在 Actions Secrets 安全更新 PFX 及对应密码。身份变化后的 MSIX 不应视为原错误 PFN 侧载包的直接升级。版本号、runFullTrust 与依赖不变；本修改不自动提交 Store，也不替换已有 Release 资产。
+
+## 2026-10-25：桌面原生返回测试在 Ubuntu 上等待回调
+
+[CI #130](https://github.com/CKopoer/BiliSail/actions/runs/40175802170/job/121116147931) 的提交为 `353164f7cf85f74402516f2bc7ceea961ac1a843`。根检查运行于 Ubuntu，`WindowService` 只在 Windows/macOS 注册原生返回消息处理器；播放窗测试却要求 `setBackButton` 已被调用，图片查看器和独立播放窗路由测试也直接等待原生返回回复。`ChannelBuffers.push` 会暂存没有监听器的消息，辅助函数的等待无法结束，日志中的首个图片查看器用例因此耗尽默认 10 分钟超时，后续平台构建仍被检查任务阻塞。
+
+修复仅调整测试：共享假窗口显式提供原生返回能力，在各测试主机通过模拟平台通道验证实际的消息注册、按 view 路由及模态隔离；生产平台判断保持原值。消息辅助函数改用 `TestDefaultBinaryMessenger.handlePlatformMessage`，缺少处理器时立即报出对应 view 的错误，并解码回复以保留平台异常。新增回归覆盖不支持原生返回时的快速失败、无残留排队消息及错误回复；原有两项原生返回服务测试也可在 Ubuntu 执行。
+
+Windows x64 / Flutter 3.47.6 的 61 项定向测试通过；`tool/check.ps1 -SkipPub` 的格式、静态分析、打包边界检查及 2867 项测试通过（根应用 2245、API 446、播放器 81、弹幕 93、封装包 2），10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。按用户要求停止本地 Ubuntu 环境准备，修复推送后的 Ubuntu 检查及三端构建以对应 GitHub CI 为准；本轮没有安装、实机或性能验证，未发现可连接的调试应用，热重载未完成。

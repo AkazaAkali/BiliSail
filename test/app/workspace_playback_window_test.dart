@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/native_window_events.dart';
+import '../support/window_service_fake.dart';
 
 void main() {
   testWidgets(
@@ -34,7 +35,7 @@ void main() {
         );
       }
       var backs = 0;
-      final service = WindowService.forView(
+      final service = FakePlaybackWindowService(
         viewId: 42,
         setFullScreen: (_) async {},
         activate: () async {},

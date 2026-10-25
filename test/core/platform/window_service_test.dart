@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/native_window_events.dart';
+import '../../support/window_service_fake.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -324,7 +325,7 @@ void main() {
       ),
     );
     var available = true;
-    WindowService service(int id) => WindowService.forView(
+    WindowService service(int id) => FakePlaybackWindowService(
       viewId: id,
       setFullScreen: (_) async {},
       activate: () async {},
@@ -363,7 +364,7 @@ void main() {
       calls.where((call) => call.method == 'removeBackButton'),
       hasLength(2),
     );
-  }, skip: !Platform.isWindows && !Platform.isMacOS);
+  });
 
   testWidgets(
     'failed native caption installation is visible and not routable',
@@ -379,7 +380,7 @@ void main() {
           null,
         ),
       );
-      final window = WindowService.forView(
+      final window = FakePlaybackWindowService(
         viewId: 31,
         setFullScreen: (_) async {},
         activate: () async {},
@@ -392,7 +393,6 @@ void main() {
       await sendNativeWindowBack(tester, 31);
       expect(backs, 0);
     },
-    skip: !Platform.isWindows && !Platform.isMacOS,
   );
 
   test('late IME reply is cancelled only after its own view retires', () async {
