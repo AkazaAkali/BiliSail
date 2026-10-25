@@ -14,8 +14,9 @@ body:
     id: checklist
     attributes:
       label: 提交前确认
+      description: 请先搜索[已有 issue（含已关闭）](https://github.com/CKopoer/BiliSail/issues?q=is%3Aissue)。
       options:
-        - label: 我已搜索[已有 issue（含已关闭）](https://github.com/CKopoer/BiliSail/issues?q=is%3Aissue)，未发现相同问题；如有相关记录，会在下方附上链接。
+        - label: 我已搜索已有 issue，未发现相同问题；如有相关记录，会在下方附上链接。
           required: true
 
   - type: input
