@@ -8,6 +8,96 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final dark in [false, true]) {
+    testWidgets(
+      'messages and downloads match normal bottom navigation in dark=$dark',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetPadding);
+        addTearDown(tester.view.resetViewPadding);
+        for (final (width, scale, bottomPadding) in [
+          (320.0, 1.0, 0.0),
+          (390.0, 1.0, 34.0),
+          (599.0, 2.0, 34.0),
+        ]) {
+          tester.view.physicalSize = Size(width, 844);
+          tester.view.padding = FakeViewPadding(bottom: bottomPadding);
+          tester.view.viewPadding = FakeViewPadding(bottom: bottomPadding);
+          Future<void> show(String location) async {
+            await tester.pumpWidget(
+              MaterialApp(
+                theme: dark ? BiliTheme.dark() : BiliTheme.light(),
+                builder: (context, child) => MediaQuery(
+                  data: MediaQuery.of(context)
+                      .copyWith(textScaler: TextScaler.linear(scale)),
+                  child: child!,
+                ),
+                home: BiliAppShell(
+                  location: location,
+                  navigationMode: WorkspaceNavigationMode.dualTabs,
+                  child: const SizedBox.expand(),
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+          }
+
+          final bottom = find.byKey(
+            const ValueKey('workspace-bottom-navigation'),
+          );
+          (Rect, Rect, TextStyle?) metrics(String section) {
+            final destination = find.byKey(
+              ValueKey('workspace-bottom-$section'),
+            );
+            final icon = find.descendant(
+              of: destination,
+              matching: find.byType(Icon),
+            );
+            final label = find.descendant(
+              of: find.descendant(of: destination, matching: find.byType(Text)),
+              matching: find.byType(RichText),
+            );
+            final origin = tester.getTopLeft(bottom);
+            return (
+              tester.getRect(icon).shift(-origin),
+              tester.getRect(label).shift(-origin),
+              tester.renderObject<RenderParagraph>(label).text.style,
+            );
+          }
+
+          await show('/');
+          final normalSize = tester.getSize(bottom);
+          final normal = {
+            for (final section in ['dynamic', 'mine', 'settings'])
+              section: metrics(section),
+          };
+          await show('/settings');
+          normal['home'] = metrics('home');
+          for (final location in ['/messages', '/downloads']) {
+            await show(location);
+            expect(tester.getSize(bottom), normalSize);
+            for (final entry in normal.entries) {
+              final actual = metrics(entry.key);
+              final expected = entry.value;
+              final reason = '$location ${entry.key} width=$width scale=$scale';
+              expect(actual.$1, expected.$1, reason: reason);
+              expect(actual.$2, expected.$2, reason: reason);
+              expect(actual.$3, expected.$3, reason: reason);
+            }
+            expect(tester.takeException(), isNull);
+          }
+        }
+      },
+      variant: TargetPlatformVariant({
+        TargetPlatform.android,
+        TargetPlatform.iOS,
+        TargetPlatform.windows,
+      }),
+    );
+  }
+
   testWidgets(
     'narrow navigation has four destinations and wide keeps live separate',
     (tester) async {

@@ -1438,16 +1438,29 @@ final class _BiliAppShellState extends State<BiliAppShell>
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(
-                                  _sectionIcon(section),
-                                  size: _bottomNavigationIconSize,
-                                  color: colors.onSurfaceVariant,
+                                // Keep NavigationDestination's indicator slot
+                                // even when no primary destination is selected.
+                                Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    const NavigationIndicator(
+                                      animation: kAlwaysDismissedAnimation,
+                                    ),
+                                    Icon(
+                                      _sectionIcon(section),
+                                      size: _bottomNavigationIconSize,
+                                      color: colors.onSurfaceVariant,
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  section.label,
-                                  style: _bottomNavigationLabelStyle.copyWith(
-                                    color: colors.onSurfaceVariant,
+                                MediaQuery.withClampedTextScaling(
+                                  // Match NavigationDestination's label limit.
+                                  maxScaleFactor: 1.3,
+                                  child: Text(
+                                    section.label,
+                                    style: _bottomNavigationLabelStyle.copyWith(
+                                      color: colors.onSurfaceVariant,
+                                    ),
                                   ),
                                 ),
                               ],
