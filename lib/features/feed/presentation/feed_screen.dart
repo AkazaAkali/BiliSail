@@ -12,6 +12,7 @@ import '../../../core/presentation/workspace_activity.dart';
 import '../../../shared/ui/paged_scroll_viewport.dart';
 import '../../../shared/ui/responsive_card_grid.dart';
 import '../../../shared/ui/state_view.dart';
+import '../../../shared/ui/retained_tab_view.dart';
 import '../../../shared/ui/video_grid.dart';
 import '../../../shared/ui/content_section_tabs.dart';
 import '../application/feed_controller.dart';
@@ -28,6 +29,7 @@ final class FeedScreen extends ConsumerStatefulWidget {
     this.onLogin,
     this.initialSection,
     this.onChannelChanged,
+    this.animateChannelSelection,
     this.showLiveSectionTabs = true,
     this.onSectionChanged,
   });
@@ -36,6 +38,7 @@ final class FeedScreen extends ConsumerStatefulWidget {
   final VoidCallback? onLogin;
   final String? initialSection;
   final ValueChanged<HomeChannel>? onChannelChanged;
+  final TabSelectionAnimation<HomeChannel>? animateChannelSelection;
   final bool showLiveSectionTabs;
   final ValueChanged<String>? onSectionChanged;
   @override
@@ -104,6 +107,7 @@ final class _FeedScreenState extends ConsumerState<FeedScreen> {
         : HomeChannelSwipe(
             channel: widget.channel,
             onChanged: onChanged,
+            animateSelection: widget.animateChannelSelection,
             pageBuilder: _page,
           );
   }

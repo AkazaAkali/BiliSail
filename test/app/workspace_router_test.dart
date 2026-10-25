@@ -1036,6 +1036,107 @@ void main() {
   for (final mode in WorkspaceNavigationMode.values) {
     for (final width in [390.0, 1280.0]) {
       _workspaceTestWidgets(
+        'primary navigation jumps without paging and retains feed at $width in $mode',
+        (tester) async {
+          tester.view.physicalSize = Size(width, 850);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final auth = _AuthRepository();
+          final settings = _SettingsRepository()
+            ..settings = const AppSettings.defaults().copyWith(
+              navigationMode: mode,
+            );
+          final router = createBiliRouter(
+            playerBuilder: (_, _, _) => const SizedBox(),
+          );
+          addTearDown(() async {
+            router.dispose();
+            await auth.dispose();
+          });
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                authRepositoryProvider.overrideWithValue(auth),
+                settingsRepositoryProvider.overrideWithValue(settings),
+                feedRepositoryProvider.overrideWithValue(_FeedRepository()),
+                homeRepositoryProvider.overrideWithValue(_HomeRepository()),
+              ],
+              child: InputTestApp.router(routerConfig: router),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final feed = tester.state(find.byType(FeedScreen));
+          final surface = find.byKey(const ValueKey('home-channel-swipe'));
+          final retainedPages = <HomeChannel, Object>{
+            HomeChannel.recommended: tester.state(
+              find.byKey(const ValueKey(HomeChannel.recommended)),
+            ),
+          };
+          ScrollPosition position() => tester
+              .state<ScrollableState>(
+                find
+                    .descendant(of: surface, matching: find.byType(Scrollable))
+                    .first,
+              )
+              .position;
+          final prefix = width < 600 ? 'workspace-bottom' : 'workspace-nav';
+          for (final (section, channel) in [
+            ('dynamic', HomeChannel.videoDynamic),
+            ('home', HomeChannel.recommended),
+            ('dynamic', HomeChannel.videoDynamic),
+            ('mine', null),
+            ('home', HomeChannel.recommended),
+            ('settings', null),
+            ('dynamic', HomeChannel.videoDynamic),
+            ('home', HomeChannel.recommended),
+          ]) {
+            await tester.tap(find.byKey(ValueKey('$prefix-$section')));
+            await tester.pump();
+            await tester.pump();
+            if (channel != null) {
+              expect(tester.state(find.byType(FeedScreen)), same(feed));
+              expect(
+                tester.widget<FeedScreen>(find.byType(FeedScreen)).channel,
+                channel,
+              );
+              expect(
+                tester.getRect(find.byKey(ValueKey(channel))),
+                tester.getRect(surface),
+                reason: 'selected $section fills the pager without sliding',
+              );
+              final page = tester.state(find.byKey(ValueKey(channel)));
+              expect(
+                page,
+                same(retainedPages.putIfAbsent(channel, () => page)),
+              );
+              expect(position().isScrollingNotifier.value, isFalse);
+            } else {
+              expect(surface, findsNothing);
+            }
+            expect(tester.takeException(), isNull);
+          }
+          // An interrupted inner-channel animation must also yield to a root tap.
+          await tester.tap(find.byKey(const ValueKey('channel-popular')));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 50));
+          expect(position().isScrollingNotifier.value, isTrue);
+          await tester.tap(find.byKey(ValueKey('$prefix-dynamic')));
+          await tester.pump();
+          await tester.pump();
+          expect(
+            tester.getRect(
+              find.byKey(const ValueKey(HomeChannel.videoDynamic)),
+            ),
+            tester.getRect(surface),
+          );
+          expect(position().isScrollingNotifier.value, isFalse);
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+        },
+        platform: TargetPlatform.android,
+      );
+      _workspaceTestWidgets(
         'home channel highlights survive retained settings at $width in $mode',
         (tester) async {
           tester.view.physicalSize = Size(width, 850);

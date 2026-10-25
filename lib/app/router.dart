@@ -56,6 +56,7 @@ import '../shared/ui/state_view.dart';
 import 'shell.dart';
 import 'workspace_tabs.dart';
 import 'workspace_root_page.dart';
+import 'workspace_navigation.dart';
 import 'platform_defaults.dart';
 
 GoRouter createBiliRouter({
@@ -250,11 +251,14 @@ final class _WorkspacePage extends ConsumerWidget {
       location: location,
       builder: (context) {
         final channel = _channelFor(location);
+        final compact = MediaQuery.sizeOf(context).width < 600;
         return FeedScreen(
           key: PageStorageKey('feed-${tab.id}'),
           channel: channel,
           initialSection: location.queryParameters['section'],
-          showLiveSectionTabs: MediaQuery.sizeOf(context).width < 600,
+          showLiveSectionTabs: compact,
+          animateChannelSelection: (from, to) =>
+              shouldAnimateChannelSelection(from, to, compact: compact),
           onSectionChanged: (section) => context.go(
             Uri(
               path: '/',

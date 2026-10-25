@@ -49,3 +49,16 @@ List<HomeChannel> channelsForSection(
   WorkspaceSection.downloads ||
   WorkspaceSection.settings => [],
 };
+
+/// Primary destinations switch immediately; their inner channels still page.
+bool shouldAnimateChannelSelection(
+  HomeChannel from,
+  HomeChannel to, {
+  required bool compact,
+}) {
+  WorkspaceSection section(HomeChannel channel) => sectionForLocation(
+    Uri(path: '/', queryParameters: {'channel': channel.name}),
+    compact: compact,
+  );
+  return section(from) == section(to);
+}

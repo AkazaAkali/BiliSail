@@ -3,6 +3,46 @@ import 'package:bilisail/features/feed/domain/home_channel.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('primary channel destinations jump while inner tabs animate', () {
+    for (final compact in [false, true]) {
+      for (final from in [HomeChannel.recommended, HomeChannel.popular]) {
+        for (final to in [HomeChannel.dynamic, HomeChannel.videoDynamic]) {
+          expect(
+            shouldAnimateChannelSelection(from, to, compact: compact),
+            isFalse,
+          );
+          expect(
+            shouldAnimateChannelSelection(to, from, compact: compact),
+            isFalse,
+          );
+        }
+      }
+      expect(
+        shouldAnimateChannelSelection(
+          HomeChannel.recommended,
+          HomeChannel.popular,
+          compact: compact,
+        ),
+        isTrue,
+      );
+      expect(
+        shouldAnimateChannelSelection(
+          HomeChannel.dynamic,
+          HomeChannel.videoDynamic,
+          compact: compact,
+        ),
+        isTrue,
+      );
+      expect(
+        shouldAnimateChannelSelection(
+          HomeChannel.live,
+          HomeChannel.bangumi,
+          compact: compact,
+        ),
+        compact,
+      );
+    }
+  });
   test('utility roots have distinct navigation identities', () {
     for (final (path, section) in [
       ('/messages', WorkspaceSection.messages),

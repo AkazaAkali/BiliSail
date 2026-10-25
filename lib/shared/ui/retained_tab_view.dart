@@ -14,6 +14,8 @@ typedef RetainedTabPageBuilder<T extends Object> = Widget Function(
   bool active,
 );
 
+typedef TabSelectionAnimation<T extends Object> = bool Function(T from, T to);
+
 /// Presentation-only paging progress shared with a tab strip outside the pager.
 final class TabPagingProgress extends ChangeNotifier
     implements ValueListenable<double> {
@@ -85,6 +87,7 @@ final class RetainedTabView<T extends Object> extends StatefulWidget {
     this.progress,
     this.preloadPages = false,
     this.swipeEnabled = true,
+    this.animateSelection,
   });
 
   final List<T> tabs;
@@ -94,6 +97,9 @@ final class RetainedTabView<T extends Object> extends StatefulWidget {
   // Ready local data can appear on the first drag without a loading placeholder.
   final bool preloadPages;
   final bool swipeEnabled;
+
+  /// Controls routed selections; touch drags keep their paging motion.
+  final TabSelectionAnimation<T>? animateSelection;
   final ValueChanged<T> onChanged;
   final RetainedTabPageBuilder<T> pageBuilder;
 
@@ -184,7 +190,12 @@ final class _RetainedTabViewState<T extends Object>
     } else if (oldWidget.value != widget.value) {
       _generation++;
       _selection.value = widget.value;
-      if (_dragging) {
+      if (_dragging ||
+          widget.animateSelection?.call(oldWidget.value, widget.value) ==
+              false) {
+        // TabBarView uses the controller's animationDuration for its own page
+        // motion, even when animateTo receives Duration.zero. Replacing only
+        // the controller jumps the retained pager and cancels ongoing motion.
         _replaceController();
       } else {
         _tabs?.animateTo(widget.tabs.indexOf(widget.value));
