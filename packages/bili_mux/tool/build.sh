@@ -8,7 +8,7 @@ if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == mingw* ]]; then
   [[ -x "$make_tool" ]] || { echo 'Install the MSYS2 make package in this MSYS root' >&2; exit 1; }
 fi
 
-target="${1:?usage: build.sh windows-x64|android-arm64|macos-arm64|linux-x64}"
+target="${1:?usage: build.sh windows-x64|android-arm64|macos-arm64|ios-arm64|linux-x64}"
 package_dir="$(cd "$(dirname "$0")/.." && pwd)"
 repo_dir="$(cd "$package_dir/../.." && pwd)"
 cache="$repo_dir/build/download_mux"
@@ -95,6 +95,21 @@ case "$target" in
     configure_flags+=(--target-os=linux --arch=x86_64)
     link_flags+=("-Wl,--version-script=$package_dir/native/exports.map" -Wl,-Bsymbolic)
     ;;
+  ios-arm64)
+    [[ "$(uname -s)" == Darwin ]] || { echo 'iOS requires an Xcode host' >&2; exit 1; }
+    cc="$(xcrun --sdk iphoneos -f clang)"
+    cxx="$(xcrun --sdk iphoneos -f clang++)"
+    strip_tool="$(xcrun -f strip)"
+    ios_sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
+    configure_flags+=(--target-os=darwin --arch=aarch64 --enable-cross-compile
+      "--cc=$cc" "--sysroot=$ios_sdk"
+      '--extra-cflags=-arch arm64 -miphoneos-version-min=15.0'
+      '--extra-ldflags=-arch arm64 -miphoneos-version-min=15.0')
+    cxx_flags+=(-arch arm64 -miphoneos-version-min=15.0 -isysroot "$ios_sdk")
+    link_flags+=(-Wl,-install_name,@rpath/BiliMux.framework/BiliMux
+      "-Wl,-exported_symbols_list,$package_dir/native/exports.macos")
+    output_name=BiliMux
+    ;;
   *) echo "Unsupported target: $target" >&2; exit 1 ;;
 esac
 
@@ -114,7 +129,9 @@ cd "$cache/$target"
 
 gc_flag=-Wl,--gc-sections
 shared_flag=-shared
-if [[ "$target" == macos-arm64 ]]; then gc_flag=-Wl,-dead_strip; shared_flag=-dynamiclib; fi
+if [[ "$target" == macos-arm64 || "$target" == ios-arm64 ]]; then
+  gc_flag=-Wl,-dead_strip; shared_flag=-dynamiclib
+fi
 "$cxx" -std=c++17 -O2 -fvisibility=hidden -ffunction-sections -fdata-sections \
   -fPIC "$shared_flag" "${cxx_flags[@]}" "$package_dir/native/bili_mux.cpp" \
   -I"$cache/source" -I. \
@@ -123,12 +140,14 @@ if [[ "$target" == macos-arm64 ]]; then gc_flag=-Wl,-dead_strip; shared_flag=-dy
   $(sed -n 's/^EXTRALIBS-avformat=//p;s/^EXTRALIBS-avcodec=//p;s/^EXTRALIBS-avutil=//p' ffbuild/config.mak) \
   > link.log 2>&1
 
-if [[ "$target" == macos-arm64 ]]; then
+framework_info="$package_dir/native/Info.plist"
+if [[ "$target" == ios-arm64 ]]; then framework_info="$package_dir/native/Info.ios.plist"; fi
+if [[ "$target" == macos-arm64 || "$target" == ios-arm64 ]]; then
   "$strip_tool" -x "$output_name"
-  framework="$package_dir/native/prebuilt/macos-arm64/BiliMux.framework"
+  framework="$package_dir/native/prebuilt/$target/BiliMux.framework"
   mkdir -p "$framework"
   cp "$output_name" "$framework/BiliMux"
-  cp "$package_dir/native/Info.plist" "$framework/Info.plist"
+  cp "$framework_info" "$framework/Info.plist"
 else
   "$strip_tool" --strip-unneeded "$output_name"
   cp "$output_name" "$package_dir/native/prebuilt/$target/$output_name"
@@ -141,11 +160,13 @@ if [[ "$target" == windows-x64 ]]; then
   cp "$package_dir/native/prebuilt/$target/source.txt" "$package_dir/native/prebuilt/$target/bili_mux.source.txt"
   cp "$package_dir/native/prebuilt/$target/configure.log" "$package_dir/native/prebuilt/$target/bili_mux.configuration.txt"
 fi
-if [[ "$target" == macos-arm64 ]]; then
-  pod_framework="$package_dir/macos/Frameworks/BiliMux.framework"
+if [[ "$target" == macos-arm64 || "$target" == ios-arm64 ]]; then
+  apple_platform=macos
+  if [[ "$target" == ios-arm64 ]]; then apple_platform=ios; fi
+  pod_framework="$package_dir/$apple_platform/Frameworks/BiliMux.framework"
   mkdir -p "$pod_framework/Resources"
   cp "$output_name" "$pod_framework/BiliMux"
-  cp "$package_dir/native/Info.plist" "$pod_framework/Info.plist"
+  cp "$framework_info" "$pod_framework/Info.plist"
   cp "$package_dir/native/prebuilt/$target/COPYING.LGPLv2.1" "$pod_framework/Resources/"
   cp "$package_dir/native/prebuilt/$target/source.txt" "$pod_framework/Resources/"
   cp "$package_dir/native/prebuilt/$target/configure.log" "$pod_framework/Resources/"

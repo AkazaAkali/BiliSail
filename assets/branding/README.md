@@ -11,7 +11,7 @@
 - [icon_scale_comparison.png](icon_scale_comparison.png)：24、30、36、48、64 px 的放大前后对比，上行原图、下行放大 10%；浅色／深色背景上的图标按实际像素尺寸展示。
 - [第二轮三个方案](candidates-v2/README.md)：A、B、C 原图及并排预览全部保留；放大前图稿保存在 [C 原图](candidates-v2/c-sail-corner.png)，原多尺寸预览保存在 [icon_preview_v2.png](icon_preview_v2.png)。
 - [app_icon_v1.png](app_icon_v1.png) 与 [icon_preview_v1.png](icon_preview_v1.png)：保留第一版帆船图标与预览，生成提示词见下文历史记录。
-- [生成脚本](../../tool/generate_app_icons.py)：Android 五种密度、Windows 七种 ICO 尺寸、macOS 七种 AppIcon 尺寸。
+- [生成脚本](../../tool/generate_app_icons.py)：Android 五种密度、Windows 七种 ICO 尺寸、macOS 七种 AppIcon 尺寸、iOS AppIcon 全尺寸及 Linux 256 px 图标。iOS 在白底合成不透明 RGB，其余平台保留 alpha；新增平台的图标资源未做设备显示验收。
 - [主体缩放脚本](../../tool/scale_app_icon.ps1)：从保留的 C 原图重建当前图稿，固定 1.10 倍，不会重复放大当前文件。
 
 当前图稿 SHA-256：`8bfa0684f99c9a530abf155f480e4ca1ef1c7a57b7c7c463f602980397b5d3e9`。

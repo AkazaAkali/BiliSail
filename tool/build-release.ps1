@@ -1,5 +1,5 @@
 param(
-  [Parameter(Mandatory)][ValidateSet('android-arm64', 'windows-x64', 'macos-arm64')][string]$Target,
+  [Parameter(Mandatory)][ValidateSet('android-arm64', 'windows-x64', 'macos-arm64', 'ios-arm64', 'linux-x64')][string]$Target,
   [Parameter(Mandatory)][string]$Version,
   [switch]$AndroidPreviewSigning
 )
@@ -142,6 +142,12 @@ if ($Target -eq 'windows-x64' -and (!$IsWindows -or [System.Runtime.InteropServi
 if ($Target -eq 'macos-arm64' -and (!$IsMacOS -or [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'Arm64')) {
   throw 'macos-arm64 requires an Apple Silicon macOS host.'
 }
+if ($Target -eq 'ios-arm64' -and !$IsMacOS) {
+  throw 'ios-arm64 requires a macOS host with Xcode.'
+}
+if ($Target -eq 'linux-x64' -and (!$IsLinux -or [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64')) {
+  throw 'linux-x64 requires a Linux x64 host.'
+}
 
 $oldMacSigningIdentity = $env:FLUTTER_XCODE_CODE_SIGN_IDENTITY
 $oldMacSigningStyle = $env:FLUTTER_XCODE_CODE_SIGN_STYLE
@@ -199,6 +205,46 @@ try {
   Compress-Archive -Path (Join-Path $muxSources '*') -DestinationPath (Join-Path $releaseDir "$name.mux-source.zip") -CompressionLevel Optimal
 
   switch ($Target) {
+    'ios-arm64' {
+      Invoke-BuildCommand flutter (@('build', 'ios', '--no-codesign') + $versionArgs)
+      $payload = Join-Path $outputRoot 'Payload'
+      New-Item -ItemType Directory -Path $payload | Out-Null
+      $app = Join-Path $payload 'Runner.app'
+      Invoke-BuildCommand ditto @('build/ios/iphoneos/Runner.app', $app)
+      $info = Join-Path $app 'Info.plist'
+      $iosVersionName = & plutil -extract CFBundleShortVersionString raw -o - $info
+      if ($LASTEXITCODE -ne 0 -or $iosVersionName -cne $buildName) { throw 'iOS bundle version name does not match.' }
+      $iosBuildNumber = & plutil -extract CFBundleVersion raw -o - $info
+      if ($LASTEXITCODE -ne 0 -or $iosBuildNumber -cne $buildNumber) { throw 'iOS bundle build number does not match.' }
+      $iosBundleId = & plutil -extract CFBundleIdentifier raw -o - $info
+      if ($LASTEXITCODE -ne 0 -or $iosBundleId -cne 'dev.bilisail.bilisail') { throw 'iOS bundle identity does not match.' }
+      Invoke-BuildCommand lipo @((Join-Path $app 'Runner'), '-verify_arch', 'arm64')
+      foreach ($required in @('Frameworks/App.framework/App', 'Frameworks/Flutter.framework/Flutter', 'Frameworks/BiliMux.framework/BiliMux')) {
+        $binary = Join-Path $app $required
+        if (!(Test-Path -LiteralPath $binary)) { throw "iOS framework is missing: $required" }
+        Invoke-BuildCommand lipo @($binary, '-verify_arch', 'arm64')
+      }
+      Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md' -Destination $app
+      $package = Join-Path $releaseDir "$name-unsigned.ipa"
+      Invoke-BuildCommand ditto @('-c', '-k', '--keepParent', $payload, $package)
+      $ipa = [System.IO.Compression.ZipFile]::OpenRead($package)
+      try {
+        if (!$ipa.GetEntry('Payload/Runner.app/Info.plist') -or !$ipa.GetEntry('Payload/Runner.app/Frameworks/BiliMux.framework/BiliMux')) {
+          throw 'Unsigned IPA has an invalid Payload layout.'
+        }
+      } finally { $ipa.Dispose() }
+      $signing = 'unsigned-requires-apple-signing'
+    }
+    'linux-x64' {
+      Invoke-BuildCommand flutter @('config', '--enable-linux-desktop')
+      Invoke-BuildCommand flutter (@('build', 'linux', '--target-platform', 'linux-x64') + $versionArgs)
+      Invoke-BuildCommand bash @((Join-Path $PSScriptRoot 'package-linux.sh'), $Version, $releaseDir)
+      $package = Join-Path $releaseDir "$name.AppImage"
+      if (!(Test-Path -LiteralPath $package) -or !(Test-Path -LiteralPath (Join-Path $releaseDir "$name.flatpak"))) {
+        throw 'Linux packaging did not produce both AppImage and Flatpak.'
+      }
+      $signing = 'unsigned-sha256'
+    }
     'android-arm64' {
       Invoke-BuildCommand flutter (@('build', 'apk', '--target-platform', 'android-arm64', '--split-per-abi') + $versionArgs)
       $package = Join-Path $releaseDir "$name.apk"
@@ -289,6 +335,10 @@ try {
     windowsMsixIdentity = if ($Target -eq 'windows-x64') { $script:windowsMsixIdentity } else { $null }
     macosVersionName = if ($Target -eq 'macos-arm64') { $macosVersionName } else { $null }
     macosBuildNumber = if ($Target -eq 'macos-arm64') { $macosBuildNumber } else { $null }
+    iosVersionName = if ($Target -eq 'ios-arm64') { $iosVersionName } else { $null }
+    iosBuildNumber = if ($Target -eq 'ios-arm64') { $iosBuildNumber } else { $null }
+    iosBundleIdentifier = if ($Target -eq 'ios-arm64') { $iosBundleId } else { $null }
+    linuxPackaging = if ($Target -eq 'linux-x64') { Get-Content (Join-Path $outputRoot 'linux-packaging.json') -Raw | ConvertFrom-Json } else { $null }
     windowsInstallerToolVersion = if ($Target -eq 'windows-x64') { $script:WindowsWixVersion } else { $null }
     runnerImage = $env:ImageVersion
     pubspecLockSha256 = $lockHash.ToLowerInvariant()

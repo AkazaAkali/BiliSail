@@ -1,7 +1,7 @@
 # bili_mux
 
 下载完成后的本地 MP4 / MKV 流复制组件，与 `bili_player` 的 libmpv/FFmpeg 隔离。
-首批打包 Windows x64、Android arm64、macOS arm64；Linux x64 仅用于 CI 原生回归。
+打包目标为 Windows x64、Android arm64、macOS arm64、iOS arm64 和 Linux x64；Linux 同时用于 CI 原生回归。新增 iOS／Linux 应用包的首次远端构建及设备验收见[平台记录](../../docs/validation/ios-linux.md)。
 
 ## 原生来源与构建
 
@@ -25,10 +25,16 @@
 
 # macOS：在 Apple Silicon / Xcode 主机执行，最低 macOS 12。
 ./tool/build-download-mux.ps1 -Target macos-arm64
+
+# iOS：Xcode 主机，iPhoneOS arm64，最低 iOS 15；不含 simulator slice。
+./tool/build-download-mux.ps1 -Target ios-arm64
+
+# Linux x64：本机 C/C++ 编译器与 make。
+./tool/build-download-mux.ps1 -Target linux-x64
 ```
 
-macOS 也可直接执行 `bash packages/bili_mux/tool/build.sh macos-arm64`。
-组件构建完成后按通常方式执行 Flutter 构建。Windows CMake、Android Gradle 和 CocoaPods 打包对应 DLL/SO/framework；Windows、Android 随组件保留许可与来源/配置，macOS 保留 framework 与许可资源。
+macOS、iOS、Linux 也可直接执行 `bash packages/bili_mux/tool/build.sh <target>`。
+组件构建完成后按通常方式执行 Flutter 构建。Windows／Linux CMake、Android Gradle 和 Apple CocoaPods 打包对应 DLL/SO/framework；各端随组件保留许可与来源/配置。iOS 与 macOS 使用各自的 framework 构建目录，FFI 按各自的 app bundle 布局加载；Linux 按可执行文件旁的 `lib/libbili_mux.so` 加载，兼容 AppImage 挂载目录与 Flatpak 沙盒。
 `tool/build-release.ps1` 已自动先构建组件，并在安装包旁生成对应的 `.mux-source.zip`，包含 FFmpeg 原始归档、本项目包装源码与构建说明，便于重建与替换动态组件。
 缺失原生资产时 Windows/Android 构建会提示准备命令；非目标 ABI 的运行时能力为不可用。
 

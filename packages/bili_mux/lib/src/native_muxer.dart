@@ -5,6 +5,8 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
+import 'native_library_path.dart';
+
 enum MuxContainer { mp4, mkv }
 
 enum MuxFailure {
@@ -140,18 +142,10 @@ final class NativeMuxer {
     () => _Bindings(path).run(Pointer<Void>.fromAddress(address)),
   );
 
-  static String? _defaultPath() {
-    if (Platform.isWindows) {
-      return '${File(Platform.resolvedExecutable).parent.path}/bili_mux.dll';
-    }
-    if (Platform.isAndroid) return 'libbili_mux.so';
-    if (Platform.isMacOS) {
-      return File(Platform.resolvedExecutable).uri
-          .resolve('../Frameworks/BiliMux.framework/BiliMux')
-          .toFilePath();
-    }
-    return null;
-  }
+  static String? _defaultPath() => nativeMuxLibraryPath(
+    Platform.operatingSystem,
+    File(Platform.resolvedExecutable).uri,
+  );
 }
 
 final class _Bindings {

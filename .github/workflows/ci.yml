@@ -20,6 +20,14 @@ on:
       enable_macos:
         type: boolean
         default: true
+      enable_ios:
+        description: iOS arm64 unsigned IPA
+        type: boolean
+        default: true
+      enable_linux:
+        description: Linux x64 Flatpak / AppImage
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       version:
@@ -34,6 +42,14 @@ on:
         type: boolean
         default: true
       enable_macos:
+        type: boolean
+        default: true
+      enable_ios:
+        description: iOS arm64 unsigned IPA (requires signing before installation).
+        type: boolean
+        default: true
+      enable_linux:
+        description: Linux x64 Flatpak / AppImage.
         type: boolean
         default: true
     secrets:
@@ -81,6 +97,8 @@ jobs:
           ENABLE_ANDROID: ${{ !contains(toJSON(inputs), '"enable_android"') || inputs.enable_android }}
           ENABLE_WINDOWS: ${{ !contains(toJSON(inputs), '"enable_windows"') || inputs.enable_windows }}
           ENABLE_MACOS: ${{ !contains(toJSON(inputs), '"enable_macos"') || inputs.enable_macos }}
+          ENABLE_IOS: ${{ !contains(toJSON(inputs), '"enable_ios"') || inputs.enable_ios }}
+          ENABLE_LINUX: ${{ !contains(toJSON(inputs), '"enable_linux"') || inputs.enable_linux }}
         run: |
           $version = $env:REQUESTED_VERSION.Trim()
           if (!$version) {
@@ -99,6 +117,8 @@ jobs:
             if ($env:ENABLE_ANDROID -eq 'true') { @{ target = 'android-arm64'; runner = 'ubuntu-24.04'; arch = 'x64' } }
             if ($env:ENABLE_WINDOWS -eq 'true') { @{ target = 'windows-x64'; runner = 'windows-2022'; arch = 'x64' } }
             if ($env:ENABLE_MACOS -eq 'true') { @{ target = 'macos-arm64'; runner = 'macos-15'; arch = 'arm64' } }
+            if ($env:ENABLE_IOS -eq 'true') { @{ target = 'ios-arm64'; runner = 'macos-15'; arch = 'arm64' } }
+            if ($env:ENABLE_LINUX -eq 'true') { @{ target = 'linux-x64'; runner = 'ubuntu-24.04'; arch = 'x64' } }
           )
           if (!$platforms.Count) { throw 'Select at least one platform.' }
           if ($env:ENABLE_WINDOWS -eq 'true' -and @(($version -split '[.+]') | Where-Object { [long]$_ -gt 65535 }).Count) {
@@ -198,7 +218,7 @@ jobs:
     name: Build ${{ matrix.target }}
     needs: [prepare, check, native-mux]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
@@ -240,6 +260,23 @@ jobs:
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;28.2.13676358'
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - name: Set up Linux build and packaging dependencies
+        if: matrix.target == 'linux-x64'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libmpv-dev \
+            gobject-introspection libgirepository1.0-dev librsvg2-common glib-networking \
+            patchelf desktop-file-utils flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --assumeyes --noninteractive flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+      - name: Check Apple toolchain
+        if: matrix.target == 'ios-arm64'
+        shell: bash
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          pod --version
       - name: Build and package preview
         shell: pwsh
         env:

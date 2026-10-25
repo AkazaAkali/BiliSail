@@ -1,0 +1,66 @@
+# iOS 与 Linux 工程、CI 和预览包
+
+日期：2026-10-26。按用户要求增加平台工程及 GitHub Actions，本地不构建 iOS／Linux 应用或安装包。新流程尚未在远端执行，不能将本节视作 CI 构建通过或设备验收。
+
+## 平台与产物
+
+| 目标 | 主机 | 最低范围 | 产物 |
+| --- | --- | --- | --- |
+| `ios-arm64` | `macos-15` / Apple Silicon / Xcode / CocoaPods | iOS 15，iPhoneOS arm64 | `BiliSail-<version>-ios-arm64-unsigned.ipa` |
+| `linux-x64` | `ubuntu-24.04` / GTK 3 / libsecret / libmpv | AppImage 基线 Ubuntu 24.04；Flatpak Freedesktop 25.08；X11／XWayland | `BiliSail-<version>-linux-x64.AppImage` 与 `.flatpak` |
+
+两个平台均复用 [CI](../../.github/workflows/ci.yml) 的并行检查、原生 mux 回归及 [build-release.ps1](../../tool/build-release.ps1)。push／PR 默认构建全部五个平台，手动 CI 和 [Release preview](../../.github/workflows/release.yml) 通过 `enable_ios`、`enable_linux` 分别选择。构建在检查成功后启动，所选目标全部成功才创建 Release 草稿；继续使用 `github.token`，无需增加 GitHub secret。原有 Android、Windows 和 macOS 签名方式沿用现有配置。
+
+每个目标保留 `.build-info.json`、SHA-256 文件和 `.mux-source.zip`；Actions artifact 保留 14 天。Release 不自动公开，旧 Release 不会自动补上新增包。
+
+## iOS
+
+- [工程](../../ios/Runner.xcodeproj/project.pbxproj) 与 Linux runner 均由固定 Flutter 3.47.6 模板生成。iOS bundle ID 为 `dev.bilisail.bilisail`，显示名 BiliSail；Swift 入口注册原生插件，使用 CocoaPods，与根配置的禁用 SwiftPM 保持一致。
+- `flutter build ios --release --no-codesign` 构建真实设备 arm64 应用，再将 `Runner.app` 按 `Payload/Runner.app` 布局压缩。脚本核对版本名、构建号、bundle ID、主程序和必需 framework 的 arm64 架构，以及压缩包内的实际布局。
+- [bili_mux](../../packages/bili_mux/README.md) 从已有固定 FFmpeg 源码构建独立的 iOS 动态 framework；通过 CocoaPods 嵌入，不借用播放器 FFmpeg。最低 iOS 15，暂不提供 simulator slice。媒体/CDN 可能提供 HTTP 地址，Info.plist 允许 ATS 非 HTTPS 请求，仍保留系统 TLS 证书校验。
+- 安全存储继续使用系统 Keychain；[entitlements](../../ios/Runner/Runner.entitlements) 声明空的 Keychain access groups，不添加团队或共享组标识。后续安装签名须结合实际 provisioning profile 重新生成应用及 framework 签名和最终 entitlement。
+- **GitHub Actions token 不能替代 Apple 开发者证书或 provisioning profile**。未签名 IPA 需自行签署才能安装；本轮没有配置 Apple 账号、上传 App Store 或承诺商店审核。[Flutter iOS 发布说明](https://docs.flutter.dev/deployment/ios)
+
+## Linux
+
+[GTK runner](../../linux/runner/my_application.cc) 使用系统原生标题栏。桌面窗口、全屏、快捷键、音视频和弹幕沿用共享能力；独立播放窗口目前仅在 Windows／macOS 开放，Linux 双标签在同一应用窗口中显示。
+
+[package-linux.sh](../../tool/package-linux.sh) 处理 Flutter 已生成的完整 bundle：
+
+1. 保留可执行文件相邻的 `lib/` 和 `data/`，显式添加由播放器 `dlopen` 的 `libmpv.so.2`；linuxdeploy 收集动态依赖，GTK hook 收集其资源及加载器。不把宿主 GPU 驱动目录作为应用资产。
+2. linuxdeploy 固定 `1-alpha-20251107-1`，GTK 部署脚本固定提交 `7a3fbc31a9e5075073ff8790f26effbac5f84453`；两者下载后校验 SHA-256 才执行。`APPIMAGE_EXTRACT_AND_RUN=1` 使 CI 不依赖 FUSE 挂载。
+3. [校验脚本](../../tool/linux-package-validation.py) 核对应用版本、`libmpv.so.2` 和动态依赖，并保留 Ubuntu binary／source 包版本及版权文本。再从同一 AppDir 生成 AppImage 和 Flatpak，在临时 CI runner 安装导出的 Flatpak 后，使用实际 Runtime 另运行一遍动态依赖校验，缺库即失败，避免 SDK 的额外库掩盖问题。该检查不等于真实播放或启动通过。
+4. [Flatpak manifest](../../linux/packaging/dev.bilisail.bilisail.json) 使用 Freedesktop 25.08 Runtime／SDK。只开放网络、X11、IPC、PulseAudio、DRI 和 Secret Service，不授予宿主文件目录权限。Linux 默认离线目录为应用支持目录下的 `offline/`，数据库、缓存与下载均可在沙盒内持久保存；其他平台的默认下载位置沿用原值。
+
+AppImage 的宿主要求由 Ubuntu 24.04 构建基线决定，不能保证旧发行版运行。图形暂按 X11／XWayland 打包，未承诺纯 Wayland、Linux arm64 或所有 GPU 的硬件解码。[linuxdeploy 文档](https://docs.appimage.org/packaging-guide/from-source/linuxdeploy-user-guide.html)
+
+Flatpak 单文件不携带 Runtime。本地需先安装 Flatpak，并确保存在 Flathub remote；包内指定 runtime 仓库供解析依赖：[Flatpak 单文件说明](https://docs.flatpak.org/en/latest/single-file-bundles.html)。
+
+```sh
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user ./BiliSail-<version>-linux-x64.flatpak
+flatpak run dev.bilisail.bilisail
+
+chmod +x ./BiliSail-<version>-linux-x64.AppImage
+./BiliSail-<version>-linux-x64.AppImage
+# 缺少 FUSE 时可用 --appimage-extract 后运行 squashfs-root/AppRun。
+```
+
+登录持久化要求桌面具有已解锁的 `org.freedesktop.secrets` 服务，例如 GNOME Keyring 或兼容的 KWallet。服务不可用或保存失败不能退回明文。Flatpak 与 AppImage 的数据目录可能不同，不自动迁移账号或下载文件。
+
+## Linux 网页登录的明确降级
+
+当前锁定 `flutter_inappwebview_linux 0.1.0-beta.1` 的上游实验实现依赖 WPE WebKit 和相应 backend，不是只安装 GTK 即可分发。本轮不引入该浏览器引擎及独立的 helper 进程打包链。
+
+根应用使用显式的 [Dart 平台适配](../../linux/plugins/flutter_inappwebview_linux/lib/flutter_inappwebview_linux.dart) 覆盖该实现，没有复制上游代码或修改 Pub 缓存；Flutter 的生成器因此不注册其原生 CMake 插件。登录页面通过平台能力隐藏密码／短信入口，保留扫码和既有会话验证。其他平台继续使用上游 WebView；恢复 Linux 网页登录前须一起验证引擎、TLS、Cookie 元数据、账号隔离、helper 路径与沙盒权限。
+
+## 验证边界
+
+Windows x64／Flutter 3.47.6 本轮验证：
+
+- `tool/check.ps1 -EnforceLockfile` 完整通过格式、统一分析、打包边界检查及 3357 项离线测试（根应用 2718、API 460、播放器 81、弹幕 93、mux 5）；10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。
+- 随后调整 Linux 默认下载位置并增加平台适配检查后，`tool/check.ps1 -Stage Lint -EnforceLockfile` 及登录／下载目录的 24 项定向测试通过。下载目录测试在 Windows 验证原位置，在 Ubuntu CI 会检查应用支持目录分支。
+- actionlint 1.7.12、PowerShell／Bash 解析、Python 编译检查、全部 32 种平台选择组合、两个新目标的错误主机拒绝、19 条 iOS 图标尺寸／RGB 配置、plist／entitlement／生成插件选择、Flatpak 权限、文档链接与 `git diff --check` 通过。根锁文件只替换 Linux WebView 平台适配来源，依赖版本及其他四份锁文件保持。
+- 没有可连接的 DTD／调试应用，未执行热重载。
+
+未执行 iOS／Linux 本地构建、远端新工作流、签名安装、图形启动、DASH 双轨、PGC／直播、下载封装、账号恢复、退出释放、硬解或性能验收。两个新平台的工程／CI 接入不代表这些设备能力已通过。

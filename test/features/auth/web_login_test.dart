@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:bili_api/bili_api.dart';
 import 'package:bilisail/core/network/api_requests.dart';
+import 'package:bilisail/core/platform/passport_web_login.dart';
 import 'package:bilisail/core/storage/credential_store.dart';
 import 'package:bilisail/features/auth/application/auth_controller.dart';
 import 'package:bilisail/features/auth/data/session_repository.dart';
@@ -274,6 +275,30 @@ void main() {
     );
   }
 
+  test('web login capability matches the installed native plugins', () {
+    expect(passportWebLoginSupportedForPlatform(TargetPlatform.linux), isFalse);
+    expect(passportWebLoginSupportedForPlatform(TargetPlatform.iOS), isTrue);
+  });
+
+  testWidgets('unsupported web login retains the QR login entry', (
+    tester,
+  ) async {
+    final repository = _repository(
+      _Transport(),
+      _Credentials(),
+      tester: tester,
+    );
+    await tester.pumpWidget(
+      _app(
+        repository,
+        (_) async => throw StateError('Web login unavailable'),
+        supportsWebLogin: false,
+      ),
+    );
+    expect(find.text('密码 / 短信登录'), findsNothing);
+    expect(find.text('获取登录二维码'), findsOneWidget);
+  });
+
   testWidgets('official page result goes through the existing session commit', (
     tester,
   ) async {
@@ -406,10 +431,12 @@ Widget _app(
   WebLoginPresenter presenter, {
   double keyboard = 0,
   double textScale = 1,
+  bool supportsWebLogin = true,
 }) => ProviderScope(
   overrides: [
     authRepositoryProvider.overrideWithValue(repository),
     webLoginPresenterProvider.overrideWithValue(presenter),
+    webLoginSupportedProvider.overrideWithValue(supportsWebLogin),
   ],
   child: MaterialApp(
     builder: (context, child) => MediaQuery(

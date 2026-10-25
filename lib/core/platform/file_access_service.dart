@@ -1,5 +1,8 @@
 import 'dart:io';
 
+import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
+
 import '../../domain/app_failure.dart';
 
 /// Desktop file browsing is an explicit gesture; mobile files stay app-owned.
@@ -8,6 +11,17 @@ final class FileAccessService {
   bool get canOpenDirectory => Platform.isWindows || Platform.isMacOS;
   bool get canChooseDownloadDirectory => canOpenDirectory;
   bool get pauseDownloadsInBackground => Platform.isAndroid || Platform.isIOS;
+
+  Future<String> defaultDownloadDirectory() async {
+    // Flatpak exposes XDG_DATA_HOME as persistent app-owned storage. The host's
+    // Documents path may be outside the sandbox, even when it can be discovered.
+    final root = Platform.isLinux
+        ? await getApplicationSupportDirectory()
+        : await getApplicationDocumentsDirectory();
+    return Platform.isLinux
+        ? path.join(root.path, 'offline')
+        : path.join(root.path, 'BiliSail', 'offline');
+  }
 
   Future<void> openDirectory(String directory) async {
     if (!canOpenDirectory) return;

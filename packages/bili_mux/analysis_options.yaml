@@ -4,4 +4,6 @@ analyzer:
     - android/**
     - windows/**
     - macos/**
+    - ios/**
+    - linux/**
 include: package:flutter_lints/flutter.yaml

@@ -201,13 +201,15 @@ class _AccountDialogState extends ConsumerState<AccountDialog>
                             onPressed: auth.isBusy ? null : controller.signIn,
                             child: const Text('获取登录二维码'),
                           ),
-                          const SizedBox(height: 12),
-                          OutlinedButton(
-                            onPressed: auth.isBusy
-                                ? null
-                                : () => unawaited(_openWebLogin()),
-                            child: const Text('密码 / 短信登录'),
-                          ),
+                          if (ref.watch(webLoginSupportedProvider)) ...[
+                            const SizedBox(height: 12),
+                            OutlinedButton(
+                              onPressed: auth.isBusy
+                                  ? null
+                                  : () => unawaited(_openWebLogin()),
+                              child: const Text('密码 / 短信登录'),
+                            ),
+                          ],
                         ],
                       ],
                       if (auth.message case final String message)

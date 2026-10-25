@@ -431,3 +431,9 @@ FRB 支持跨平台是可行性依据，但平台构建、取消、错误和流�
 **决定（2026-10-25，按用户后续要求修订 D46/D51）**：恢复 `singlePage`，Android 缺省采用单标签，其他平台继续默认双标签。已保存的有效单／双／多标签选择均优先于平台默认，不反推旧双标签值的来源，不覆盖已保存偏好。
 
 单标签按实际访问顺序返回，播放 → UP 空间 → 新播放可逐页回退；仍在历史中的页面沿用原作用域和会话，最后一次出栈才释放。与双标签共用页面缓存、页内／模态优先、播放互斥和预测返回入口，保留 16 页／64 次访问上限及模式切换时的会话身份，见[单标签记录](validation/single-page-navigation.md#恢复单标签2026-10-25)。
+
+## D56：iOS 与 Linux 先接入工程和 CI 预览包
+
+**决定（2026-10-26）**：按用户要求增加 iOS arm64 与 Linux x64，复用检查、播放契约及独立 mux；本地不打包。iOS 使用 CocoaPods 和 iPhoneOS arm64，输出须自行 Apple 签名的未签名 IPA；GitHub token 继续只承担 artifact／Release 上传。Linux 从完整 GTK bundle 同时生成 AppImage 与 Flatpak，保留媒体依赖、运行库版本及许可，Flatpak 限定沙盒权限。
+
+Linux 暂用扫码登录，以显式的 Dart 平台适配禁用实验 WPE WebKit 原生实现；其他平台的网页登录和四个业务包职责保持。新目标的首次远端构建、安装与设备播放须独立验收，不能以 Windows 离线检查或旧三端记录代替。细节与未测项见[iOS／Linux 记录](validation/ios-linux.md)。

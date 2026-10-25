@@ -187,10 +187,7 @@ class AppDependencies {
       database,
       downloadSources,
       muxer: NativeDownloadMuxer(),
-      defaultDirectory: () async {
-        final root = await getApplicationDocumentsDirectory();
-        return path.join(root.path, 'BiliSail', 'offline');
-      },
+      defaultDirectory: const FileAccessService().defaultDownloadDirectory,
     );
     final cardPreviews = VideoCardPreviewPlayback(
       createEngine: () => MediaKitEngine(onDiagnostic: playbackLog?.record),

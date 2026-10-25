@@ -8,6 +8,15 @@ import 'package:path_provider/path_provider.dart';
 import '../../shared/ui/app_dialog.dart';
 import 'passport_webview_environment.dart';
 
+bool passportWebLoginSupportedForPlatform(TargetPlatform platform) =>
+    switch (platform) {
+      TargetPlatform.android ||
+      TargetPlatform.iOS ||
+      TargetPlatform.windows ||
+      TargetPlatform.macOS => true,
+      _ => false,
+    };
+
 final class BrowserLoginCookie {
   const BrowserLoginCookie(
     this.name,

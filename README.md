@@ -6,7 +6,7 @@
 
 <p align="center">
   专注观看体验的跨平台 Bilibili 第三方客户端<br>
-  基于 Flutter 与 Dart，面向 Windows、Android 和 macOS
+  基于 Flutter 与 Dart，面向 Windows、Android、macOS、iOS 和 Linux
 </p>
 
 <p align="center">
@@ -79,19 +79,23 @@ BiliSail（哔帆）以视频、影视和直播观看为核心，提供双／多
 | Windows | x64 / Windows 10 1809 及以上 | 本地与 CI 构建、MSIX 打包／测试签名通过；游客视频／影视／直播、受控多标签并发和离线分轨播放已有原生验证，本机已有 MSIX 安装运行记录；新版安装、卸载和升级待完整回归 |
 | Android | arm64 / Android 7.0（API 24）及以上 | 本地与 CI 构建 APK 通过，固定 release 签名与单 arm64 ABI 校验通过；真机运行、播放、离线下载和覆盖升级待验 |
 | macOS | arm64 / macOS 12.0 及以上 | CI 的 arm64 构建、架构校验和 DMG 打包通过；设备启动、原生播放、安装及 Gatekeeper 验收待验 |
+| iOS | arm64 / iOS 15.0 及以上 | 已接入工程及 CI 未签名 IPA；首次远端构建、签名安装、账号与播放实机验收待完成 |
+| Linux | x64 / AppImage 基线 Ubuntu 24.04；Flatpak Freedesktop 25.08 | 已接入 GTK 工程及 CI Flatpak／AppImage；首次远端构建及桌面运行待验；使用 X11／XWayland、扫码登录，详见[平台扩展记录](docs/validation/ios-linux.md) |
 
 
 ## 下载与安装
 
 安装包入口：[GitHub Releases](https://github.com/CKopoer/BiliSail/releases)。
 
-提供三个平台的安装包、构建信息及 SHA-256 校验文件。也可按[源码运行说明](#从源码运行)自行构建。
+工作流支持五个平台的预览包、构建信息及 SHA-256 校验文件；实际可下载平台以对应 Release 的附件为准。也可按[源码运行说明](#从源码运行)自行构建。
 
 | 平台 | 预览包格式 | 安装说明 |
 | --- | --- | --- |
 | Windows x64 | `.msix`/`.msi`/`.exe`，附签名公钥证书 `.cer` | 使用msix安装时，需要先信任对应证书；具体步骤见 [MSIX 签名与安装](docs/validation/ci-cd.md#windows-msix-签名与安装) |
 | Android arm64 | `.apk` | 固定 release 密钥，跨签名切换与覆盖升级说明见 [Android 签名](docs/validation/ci-cd.md#android-固定签名与覆盖升级) |
 | macOS arm64 | `.dmg` | 打开后将 `BiliSail.app` 拖到 `Applications`；当前配置使用 ad-hoc 签名，安装后启动需要`设置-隐私与安全性-允许BiliSail运行` |
+| iOS arm64 | `-unsigned.ipa` | 安装前须自行使用 Apple 证书及 provisioning profile 签名；GitHub token 仅供 CI 上传产物使用 |
+| Linux x64 | `.flatpak` / `.AppImage` | Flatpak 通过 `flatpak install --user 文件.flatpak` 安装；AppImage 赋予执行权限后运行。运行库、密钥环及沙盒说明见[平台扩展记录](docs/validation/ios-linux.md) |
 
 GitHub Actions 的 **CI** 执行根应用和四个包的检查，并按平台构建预览产物；维护者可手动运行 **Release preview** 创建预览 Release 草稿，再公开发布。Release 和 CI 构建包的签名种类以各自的 `build-info.json` 为准。触发方式、产物校验与签名配置见 [CI/CD 说明](docs/validation/ci-cd.md)。
 

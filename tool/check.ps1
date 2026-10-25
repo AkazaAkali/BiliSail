@@ -60,6 +60,7 @@ try {
   }
   if ($runLint) {
     Invoke-Check dart @('format', '--output=none', '--set-exit-if-changed', 'lib', 'test', 'integration_test')
+    Invoke-Check dart @('format', '--output=none', '--set-exit-if-changed', 'linux/plugins/flutter_inappwebview_linux/lib')
     foreach ($package in $packages) {
       Push-Location (Join-Path $repoRoot "packages/$package")
       try {
@@ -67,6 +68,9 @@ try {
       } finally { Pop-Location }
     }
     Invoke-Check flutter @('analyze', '--no-pub')
+    # Flutter excludes generated platform trees from root analysis; this local
+    # Dart-only platform adapter is maintained source rather than a generated file.
+    Invoke-Check dart @('analyze', 'linux/plugins/flutter_inappwebview_linux/lib')
   }
   if ($runRootTests) {
     $testArgs = @('test', '--no-pub')

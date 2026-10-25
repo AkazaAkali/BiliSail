@@ -2,6 +2,12 @@
 
 记录日期：2026-10-05。本文件用于本地 0.1.0 预览的来源追踪，不表示已经完成对外发行所需的全部原生许可证归档。项目尚未确定自己的开源许可证。
 
+## 2026-10-26 iOS 与 Linux 预览包
+
+iOS 原生播放器沿用锁定 media-kit 依赖，独立 bili_mux 继续从固定 FFmpeg 源码构建，原始归档与构建材料随 `.mux-source.zip` 提供。Linux 从 Ubuntu 24.04 软件源安装 libmpv，使用 linuxdeploy 收集运行依赖；这些二进制不沿用 Windows LGPL 资产的配置声明，各自许可以包内 `usr/share/doc/bilisail/dependencies/*.copyright` 为准，`packages.tsv` 记录实际 binary/source 名称与版本。正式分发仍需归档实际子依赖的对应源码和许可材料。
+
+打包工具 [linuxdeploy 1-alpha-20251107-1](https://github.com/linuxdeploy/linuxdeploy/releases/tag/1-alpha-20251107-1) 及 [GTK 部署 hook](https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/tree/7a3fbc31a9e5075073ff8790f26effbac5f84453) 固定版本／提交和 SHA-256。GTK hook 的运行时脚本随包保留其来源许可，工具许可不替代所打包库的许可。Linux 禁用 WebView 的适配为本项目独立编写，没有复制上游或 PiliPlus 应用源码。平台与验收边界见[iOS／Linux 记录](docs/validation/ios-linux.md)。
+
 ## 工程与参考
 
 - Flutter 工程由本机 Flutter 3.47.6 模板生成；Dart 3.13.5。直接版本写入各 `pubspec.yaml`，实际完整依赖保留在根及三个包的 `pubspec.lock`。

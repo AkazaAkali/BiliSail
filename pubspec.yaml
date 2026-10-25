@@ -36,6 +36,10 @@ dependencies:
 # media_kit_video and the aggregate native package declare hosted dependencies.
 # Resolve their core/Android dependencies to the same audited fork commit.
 dependency_overrides:
+  # Linux uses QR login until the experimental WPE WebKit implementation has
+  # a separately validated portable packaging path. No native WebView is linked.
+  flutter_inappwebview_linux:
+    path: linux/plugins/flutter_inappwebview_linux
   media_kit:
     git:
       url: https://github.com/CKopoer/media-kit.git

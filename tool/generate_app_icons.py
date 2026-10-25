@@ -1,4 +1,5 @@
 """Regenerate launcher assets: uv run --with pillow==12.3.0 python tool/generate_app_icons.py."""
+import json
 from pathlib import Path
 
 from PIL import Image
@@ -15,3 +16,14 @@ with Image.open(root / "assets/branding/app_icon.png") as image:
             root / f"macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_{size}.png")
     image.save(root / "windows/runner/resources/app_icon.ico", format="ICO",
                sizes=[(size, size) for size in (16, 24, 32, 48, 64, 128, 256)])
+    # iOS App Store icons must be opaque; composite on the brand's white base.
+    opaque = Image.new("RGB", image.size, "white")
+    opaque.paste(image, mask=image.getchannel("A"))
+    icon_dir = root / "ios/Runner/Assets.xcassets/AppIcon.appiconset"
+    contents = json.loads((icon_dir / "Contents.json").read_text(encoding="utf-8"))
+    for entry in contents["images"]:
+        size = round(float(entry["size"].split("x")[0]) * float(entry["scale"][:-1]))
+        opaque.resize((size, size), Image.Resampling.LANCZOS).save(
+            icon_dir / entry["filename"])
+    image.resize((256, 256), Image.Resampling.LANCZOS).save(
+        root / "linux/packaging/dev.bilisail.bilisail.png")

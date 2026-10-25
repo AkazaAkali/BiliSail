@@ -20,6 +20,14 @@ on:
         description: macOS arm64 DMG 安装文件
         type: boolean
         default: true
+      enable_ios:
+        description: iOS arm64 未签名 IPA（安装前需自行签名）
+        type: boolean
+        default: true
+      enable_linux:
+        description: Linux x64 Flatpak / AppImage
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -36,6 +44,8 @@ jobs:
       enable_android: ${{ inputs.enable_android }}
       enable_windows: ${{ inputs.enable_windows }}
       enable_macos: ${{ inputs.enable_macos }}
+      enable_ios: ${{ inputs.enable_ios }}
+      enable_linux: ${{ inputs.enable_linux }}
     secrets:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -85,7 +95,9 @@ jobs:
           - Windows 同时提供 MSIX、MSI 和 EXE 安装包；EXE 内嵌同一 MSI，任选一种安装。MSI 向导可选择安装目录，EXE 通过 Options → Browse 选择，升级默认沿用原目录。三者复用同一签名证书，测试签名需先信任包旁的 .cer；签名种类及 MSI 内部版本见 build-info.json。
           - Android 复用仓库配置的固定 release keystore，证书 SHA-256 见 build-info.json；macOS 仅 ad-hoc 签名，未 notarize。
           - macOS 提供 DMG，打开后将 BiliSail.app 拖到 Applications 安装。
-          - 构建成功不等于三端播放验收；正式分发前仍需完成签名、资源许可和设备验证。
+          - iOS 提供 arm64 未签名 IPA，安装前须使用自己的 Apple 证书及 provisioning profile 签名；GitHub Actions token 只用于上传产物和 Release。
+          - Linux x64 提供 AppImage 与 Flatpak。AppImage 基线为 Ubuntu 24.04，Flatpak 使用 Freedesktop 25.08 runtime；图形使用 X11／XWayland，登录需可用的系统 Secret Service。
+          - 构建成功不等于各平台播放验收；正式分发前仍需完成签名、资源许可和设备验证。
           "@
           $notes | Set-Content release-notes.md -Encoding utf8
           gh release create $tag @assets THIRD_PARTY_NOTICES.md --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "BiliSail $env:RELEASE_VERSION preview" --notes-file release-notes.md --draft --prerelease

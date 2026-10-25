@@ -1,11 +1,11 @@
 # GitHub Actions CI/CD 与安装包
 
-更新日期：2026-10-25。配置覆盖 Android arm64、Windows x64、macOS arm64；本地验证结果与远端、设备未测项分别记录。此流程交付预览构建，不表示 M0 三端验收或 M5 正式发行完成。
+更新日期：2026-10-26。配置覆盖 Android arm64、Windows x64、macOS arm64、iOS arm64、Linux x64；新增平台的首次远端构建与设备验收待完成，详见[iOS／Linux 接入记录](ios-linux.md)。本地验证结果与远端、设备未测项分别记录。此流程交付预览构建，不表示各平台验收或 M5 正式发行完成。
 
 ## 入口与分工
 
 - [CI](../../.github/workflows/ci.yml)：替换原来的 `windows.yml`；分支 push、PR、手动运行时执行检查及构建，也供 Release 复用。
-- [Release preview](../../.github/workflows/release.yml)：在 Actions 页面手动运行；可选择三个平台，全部所选构建通过后创建 **draft + prerelease** 并上传包、签名公钥证书、校验文件与第三方说明。不会自动公开发布。
+- [Release preview](../../.github/workflows/release.yml)：在 Actions 页面手动运行；可选择五个平台，全部所选构建通过后创建 **draft + prerelease** 并上传包、签名公钥证书、校验文件与第三方说明。不会自动公开发布。
 - [检查脚本](../../tool/check.ps1)：本地默认检查根应用和四个独立包；CI 在 Ubuntu 使用 PowerShell 7，分别执行 `Lint`、两份 `RootTests` 分片和 `PackageTests`。格式检查覆盖根应用与各包，根分析统一扫描子包，故分析前仍安装所有包的开发依赖。`-EnforceLockfile` 要求 pub 使用提交的锁文件及内容哈希。
 - [构建打包脚本](../../tool/build-release.ps1)：各平台使用对应主机生成预览包，缺文件、原生命令失败、签名失败立即停止。已有同目标输出目录时拒绝覆盖，重新本地构建前先将其移走。
 
@@ -15,6 +15,8 @@
 | Android | `ubuntu-24.04`，Temurin JDK 17 | 仅 arm64 的 release APK；正常构建复用固定 keystore，PR 使用临时预览签名 |
 | Windows | `windows-2022`，Visual Studio C++ / Windows SDK / .NET 8 / WiX 6.0.2 | 同时提供 x64 MSIX、MSI 和 EXE 安装包；全部包含完整原生 DLL/data 及 VC++ runtime |
 | macOS | `macos-15`，Apple Silicon / Xcode | arm64 DMG；先验证签名／最终权限、同一 Release 应用首帧和跨进程 Keychain 读写删除，再由 `hdiutil` 打包校验；仅 ad-hoc 签名，未 notarize |
+| iOS | `macos-15`，Apple Silicon / Xcode / CocoaPods | arm64 未签名 IPA；核对应用版本、bundle ID、arm64 framework 及 Payload 布局；安装前需自行 Apple 签名 |
+| Linux | `ubuntu-24.04`，GTK / libsecret / libmpv / Flatpak SDK | x64 AppImage 与 Flatpak；携带媒体依赖，核对版本及主机／实际 Flatpak Runtime 内动态依赖；X11／XWayland |
 | Release 上传 | `ubuntu-24.04` | 合并本次所选平台的 Actions artifacts 后创建草稿 |
 
 PowerShell 7 是跨平台 shell；Ubuntu 上复用 `.ps1` 不要求 Windows。Windows 原生构建需要 Windows 主机与 Visual Studio 工具链，macOS 原生构建需要 macOS/Xcode。macOS 在固定 SDK 中显式启用 `--enable-macos-arm64-only`，避免默认 universal 构建引入未承诺的 Intel 目标。参见 [Flutter Windows 构建](https://docs.flutter.dev/platform-integration/windows/building)、[GitHub runner 范围](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。
@@ -37,7 +39,7 @@ Dart 3.13.5 内置的 [Pub 源码](https://github.com/dart-lang/pub/blob/ec276d1
 
 每个平台的 `artifacts/<target>/release/` 中包含：
 
-- Android 的 `.apk`、Windows 的 `.msix` / `.msi` / `.exe`、macOS 的 `.dmg`，命名均为 `BiliSail-<version>-<target>.<extension>`。
+- Android 的 `.apk`、Windows 的 `.msix` / `.msi` / `.exe`、macOS 的 `.dmg`、Linux 的 `.AppImage` / `.flatpak`，命名均为 `BiliSail-<version>-<target>.<extension>`；iOS 使用 `BiliSail-<version>-ios-arm64-unsigned.ipa`。
 - Windows 包旁的 `.cer`，只含签名证书公钥。
 - `.build-info.json`：源码 revision 与 `sourceDirty`、Flutter/engine/Dart 版本、目标、签名类型、Android 签名证书 SHA-256、Windows MSI 内部版本与 WiX 版本、runner image、根锁文件 SHA-256；macOS 的 `macosValidation` 保存发布门槛的通过状态。
 - 每个上述文件对应的 `.sha256`，格式兼容 `sha256sum -c`。
