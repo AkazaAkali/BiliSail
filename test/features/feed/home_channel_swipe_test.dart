@@ -6,6 +6,61 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('idle primary groups keep their paging controllers on return', (
+    tester,
+  ) async {
+    _viewport(tester);
+    final channel = ValueNotifier(HomeChannel.recommended);
+    addTearDown(channel.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ValueListenableBuilder(
+            valueListenable: channel,
+            builder: (_, value, _) => HomeChannelSwipe(
+              channel: value,
+              channelGroups: const [
+                [HomeChannel.recommended, HomeChannel.popular],
+                [HomeChannel.dynamic, HomeChannel.videoDynamic],
+              ],
+              onChanged: (value) => channel.value = value,
+              pageBuilder: (_, value, _) => Text(value.name),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    TabController controller(HomeChannel group) => tester
+        .widget<TabBarView>(
+          find.descendant(
+            of: find.byKey(
+              ValueKey(('home-channel-group', group)),
+              skipOffstage: false,
+            ),
+            matching: find.byType(TabBarView, skipOffstage: false),
+            skipOffstage: false,
+          ),
+        )
+        .controller!;
+    final home = controller(HomeChannel.recommended);
+    channel.value = HomeChannel.videoDynamic;
+    await tester.pumpAndSettle();
+    final dynamic = controller(HomeChannel.dynamic);
+    expect(controller(HomeChannel.recommended), same(home));
+    for (var i = 0; i < 3; i++) {
+      channel.value = HomeChannel.recommended;
+      await tester.pumpAndSettle();
+      expect(controller(HomeChannel.dynamic), same(dynamic));
+      channel.value = HomeChannel.videoDynamic;
+      await tester.pumpAndSettle();
+      expect(controller(HomeChannel.recommended), same(home));
+      expect(controller(HomeChannel.dynamic), same(dynamic));
+      expect(dynamic.index, 1);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'the pager preserves desktop scrollbars and inner mouse dragging',
     (tester) async {

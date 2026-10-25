@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:bilisail/core/network/api_requests.dart';
+import 'package:bilisail/core/presentation/workspace_activity.dart';
 import 'package:bilisail/domain/app_failure.dart';
 import 'package:bilisail/domain/dynamic_post.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
@@ -18,6 +19,93 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 void main() {
+  for (final channel in [HomeChannel.dynamic, HomeChannel.videoDynamic]) {
+    testWidgets('$channel navigation callback changes preserve mounted cards', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 850);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repository = _Repository(itemCount: 40);
+      var previousLogins = 0;
+      var currentLogins = 0;
+      final configuration = ValueNotifier<(bool, VoidCallback?)>((
+        true,
+        () => previousLogins++,
+      ));
+      addTearDown(configuration.dispose);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [homeRepositoryProvider.overrideWithValue(repository)],
+          child: MaterialApp(
+            home: Scaffold(
+              body: ValueListenableBuilder(
+                valueListenable: configuration,
+                builder: (_, value, _) => Offstage(
+                  offstage: !value.$1,
+                  child: WorkspaceActivity(
+                    active: value.$1,
+                    child: HomeContent(
+                      channel: channel,
+                      section: channel.sections.first,
+                      isSignedIn: true,
+                      active: value.$1,
+                      onLogin: value.$2,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      _position(tester).jumpTo(160);
+      await tester.pumpAndSettle();
+      final offset = _position(tester).pixels;
+      final originals = find
+          .byWidgetPredicate(
+            (widget) =>
+                widget is InteractiveDynamicPostCard ||
+                widget is VideoDynamicCard,
+          )
+          .evaluate()
+          .map((element) => element.widget)
+          .toList();
+      expect(originals, isNotEmpty);
+      for (final active in [false, true, false, true]) {
+        configuration.value = (active, () => currentLogins++);
+        await tester.pumpAndSettle();
+        for (final card in originals) {
+          expect(find.byWidget(card, skipOffstage: false), findsOneWidget);
+        }
+      }
+      expect(_position(tester).pixels, closeTo(offset, .01));
+      if (channel == HomeChannel.dynamic) {
+        tester
+            .widget<InteractiveDynamicPostCard>(
+              find.byType(InteractiveDynamicPostCard).first,
+            )
+            .onLogin!();
+        expect(previousLogins, 0);
+        expect(currentLogins, 1);
+        configuration.value = (true, null);
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<InteractiveDynamicPostCard>(
+                find.byType(InteractiveDynamicPostCard).first,
+              )
+              .onLogin,
+          isNull,
+        );
+      }
+      expect(repository.calls, hasLength(1));
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets(
     'full refresh and sign-out unload cards and reset the body cache',
     (tester) async {

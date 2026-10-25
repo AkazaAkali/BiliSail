@@ -2,9 +2,29 @@
 
 日期：2026-10-06。工具链：Flutter 3.47.6 / Dart 3.13.5。
 
-2026-10-25：单标签模式已按用户要求退役，旧 `singlePage` 偏好迁移至双标签；Android 默认双标签，Windows/macOS 默认多标签。以下为历史实施记录；当前导航与迁移以[晴湾第三轮方案](../ui-redesign/third-round-plan.md)和[实施记录](../ui-redesign/implementation.md)为准。
+2026-10-25：按用户后续要求恢复单标签，Android 默认单标签，其他平台默认双标签。设置提供单／双／多标签，保留所有已保存的有效选择；此前已保存为 `dualTabs` 的值继续按双标签读取，尚存的 `singlePage` 直接恢复，不再强制迁移。平台默认仅补缺失／非法值，数据库与设置快照版本不变。以下“恢复单标签”说明当前行为，后续旧章节保留历史记录。
 
-## 行为
+## 恢复单标签（2026-10-25）
+
+- [工作区](../../lib/app/workspace_tabs.dart)按实际访问顺序返回，不跳过播放页：视频 A → UP 空间 → 视频 B → 返回空间 → 返回 A。视频、影视、直播、离线播放共用规则。普通页面遮挡播放沿用既有策略；进入另一播放页先暂停旧会话，返回沿用源和进度，用户手动暂停／倍速保持。
+- 重复访问同一空间或播放页时保留更早的访问记录；返回只释放不再被历史引用的离开页，其请求、页面作用域和播放会话随之清理。频道、设置分类、分 P／选集和后台连续播放只更新原页面，不产生重复访问；迟到回调不能重建已出栈页面。
+- 固定根导航保持同层，切换一级入口不把它变成临时页；消息仍优先退出所选会话，再返回消息入口，根页仍采用 Android 退出确认。弹窗、全屏和页内详情优先于工作区返回，预测手势读取同一返回目标，取消不消耗历史。
+- 单标签隐藏标签栏，禁用新建／循环标签；既有关闭快捷键逐页返回。桌面沿用共享返回按钮和窗口标题栏，Android 播放页继续使用系统返回。横竖屏／窗口缩放不改变模式。
+- 切换模式保留未关闭页面及其会话；双标签切到单标签时仍可消耗已有媒体历史。缓存最多 16 页、访问最多 64 条，满额时淘汰最旧的非根、非当前、非最近播放页面，避免空间跳转堵住导航并保护返回原视频的入口。
+
+验证覆盖头像真实点击、空间内另开视频、同一页／会话／分 P 恢复、手动暂停／倍速／源 generation、重复访问、缓存上限、模式切换、弹窗优先和预测式返回。
+
+### 本轮验证
+
+- 单标签、模式持久化及 Android 默认值专项 61 项通过，日志 `build/single-page-acceptance.log`。覆盖真实 router／ProviderScope 的头像点击、空间中新开视频、弹窗优先、取消预测返回、原页面／会话／分 P 保留、消息入口、根分支、横竖布局及新建／循环／关闭快捷键。
+- `flutter test --no-pub test/features/playback/playback_session_test.dart` 共 197 项通过，日志 `build/single-page-session-final.log`。新增单标签和双切单的媒体检查点覆盖源恢复、暂停、倍速、owner 更换和账号 epoch 隔离；原有播放状态机回归继续通过。
+- 根检查脚本按 `-Stage Lint`、`-Stage RootTests`、`-Stage PackageTests` 执行。格式、静态分析及打包边界通过；四个包共 632 项通过（API 456、播放器 81、弹幕 93、mux 2），10 项 mux 原生测试因未设置 `BILI_MUX_LIBRARY` 跳过，不计原生集成通过。日志为 `build/single-page-delivery-lint.log`、`build/single-page-packages.log`。
+- 最终根测试 2679 项通过、8 项失败，日志 `build/single-page-delivery-root.log`；失败为同期新增的 `predictive_back_page_reuse_test.dart` 页面复用用例 1 项，以及 `app_update_test.dart` 正式版／预发布筛选用例 7 项。全量未通过，不用专项通过替代全量结论。较早运行曾遇到账号恢复／epoch 和双标签保留失败，最新相关 20 项账号回归及 1 项 Android 双标签会话回归已复测通过（`build/single-page-existing-regressions.log`、`build/single-page-dual-regression.log`）。保留同期路由、预测返回、页面预览及更新检查改动。
+- 提交前按用户要求将重叠的导航与预测返回实现一并提交，最新预测返回及真实页面复用 30 项通过（`build/single-page-submit-predictive.log`）。上条全量结果保留为实现阶段的共享工作区记录；本次补充复测不宣称重新通过全量检查。
+- `tool/build-download-mux.ps1 -Target android-arm64` 和 Android arm64 Profile 构建通过，日志 `build/single-page-android-mux.log`、`build/single-page-android-profile-final.log`。产物为 `build/app/outputs/flutter-apk/app-profile.apk`，交付副本保存在 `artifacts/android-single-page-20261025/app-profile.apk`；Profile 使用调试签名。
+- 324 条本地文档链接及 `git diff --check` 通过。未发现连接的 Android 设备或可热重载的调试进程；Android 真实音视频、手势手感、安装升级和 macOS／Windows 原生运行未在本轮验收。本次未做性能测量。
+
+## 行为（历史实施记录）
 
 设置 → 外观 → 页面导航模式仅提供“单标签页、多标签页”。Windows 和 macOS 默认多标签页，Android 默认单标签页；用户手动选择优先，保存后跨启动保留。平台决定默认模式，调整窗口宽度或横竖屏不会改变模式。两种模式共用现有页面身份、ProviderScope 与 PageStorage，切换模式或调整窗口宽度不会重新挂载搜索、首页或播放页面。
 

@@ -223,6 +223,10 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
                 Expanded(
                   child: WorkspaceActivity(
                     active: showInfo && WorkspaceActivity.isActive(context),
+                    previewing:
+                        showInfo &&
+                        WorkspaceActivity.isVisible(context) &&
+                        !WorkspaceActivity.isActive(context),
                     child: CommentDetailBuilder(
                       target: switch (selected?.aid) {
                         final String aid => CommentTarget(

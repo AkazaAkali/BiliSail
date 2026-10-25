@@ -47,15 +47,15 @@ void main() {
       }
     },
   );
-  test('all platforms default to dual tabs', () {
+  test('Android defaults to single page and other platforms to dual tabs', () {
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     for (final platform in TargetPlatform.values) {
       debugDefaultTargetPlatformOverride = platform;
-      expect(
-        workspaceNavigationModeForPlatform(platform),
-        WorkspaceNavigationMode.dualTabs,
-      );
-      expect(defaultWorkspaceNavigationMode, WorkspaceNavigationMode.dualTabs);
+      final expected = platform == TargetPlatform.android
+          ? WorkspaceNavigationMode.singlePage
+          : WorkspaceNavigationMode.dualTabs;
+      expect(workspaceNavigationModeForPlatform(platform), expected);
+      expect(defaultWorkspaceNavigationMode, expected);
     }
   });
 }

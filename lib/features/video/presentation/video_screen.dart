@@ -368,6 +368,10 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                     final infoTabs = WorkspaceActivity(
                       active:
                           detailsVisible && WorkspaceActivity.isActive(context),
+                      previewing:
+                          detailsVisible &&
+                          WorkspaceActivity.isVisible(context) &&
+                          !WorkspaceActivity.isActive(context),
                       child: CommentDetailBuilder(
                         target: switch (video.aid) {
                           final String aid => CommentTarget(

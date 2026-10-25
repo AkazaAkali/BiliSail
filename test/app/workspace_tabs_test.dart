@@ -2,6 +2,141 @@ import 'package:bilisail/app/workspace_tabs.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('single page can always return home after bounded repeated visits', () {
+    final workspace = WorkspaceTabs()..setSingleMode(true);
+    workspace.acceptRoute(Uri.parse('/video/A'));
+    for (var index = 0; index < 100; index++) {
+      workspace.acceptRoute(Uri.parse(index.isEven ? '/user/42' : '/video/A'));
+    }
+    var count = 0;
+    while (workspace.canGoBack) {
+      final destination = workspace.backDestination();
+      expect(workspace.goBack(), isTrue);
+      expect(workspace.active.id, destination?.id);
+      count++;
+      expect(count, lessThanOrEqualTo(WorkspaceTabs.maximumHistory + 1));
+    }
+    expect(workspace.activeId, 'home');
+    expect(workspace.tabs, hasLength(1));
+  });
+
+  for (final media in [
+    '/video/A?cid=2',
+    '/pgc/episode/3',
+    '/live/42',
+    '/offline/task',
+  ]) {
+    test(
+      'single page returns through spaces to $media and releases popped pages',
+      () {
+        final workspace = WorkspaceTabs()..setSingleMode(true);
+        workspace.acceptRoute(Uri.parse(media));
+        final playback = workspace.active;
+        workspace.acceptRoute(Uri.parse('/user/42'));
+        final profile = workspace.active;
+        workspace.acceptRoute(Uri.parse('/search?q=cat'));
+        final search = workspace.active;
+        expect(workspace.backDestination()?.id, profile.id);
+        expect(workspace.goBack(), isTrue);
+        expect(workspace.active.id, profile.id);
+        expect(workspace.tabs.map((tab) => tab.id), isNot(contains(search.id)));
+        workspace.acceptRoute(workspace.active.route);
+        expect(workspace.backDestination()?.id, playback.id);
+        expect(workspace.goBack(), isTrue);
+        expect(workspace.active.location, playback.location);
+        expect(workspace.active.id, playback.id);
+        expect(
+          workspace.tabs.map((tab) => tab.id),
+          isNot(contains(profile.id)),
+        );
+        expect(
+          workspace.updateLocation(profile.id, Uri.parse('/user/99')),
+          isFalse,
+        );
+        expect(workspace.goBack(), isTrue);
+        expect(workspace.activeId, 'home');
+        expect(workspace.tabs, hasLength(1));
+        expect(workspace.canGoBack, isFalse);
+      },
+    );
+  }
+
+  test('single page keeps repeated visits until their last pop', () {
+    final workspace = WorkspaceTabs()..setSingleMode(true);
+    workspace.acceptRoute(Uri.parse('/video/A?cid=2'));
+    final first = workspace.active;
+    workspace.acceptRoute(Uri.parse('/user/42'));
+    final profile = workspace.active;
+    workspace.acceptRoute(Uri.parse('/video/B'));
+    final second = workspace.active;
+    workspace.acceptRoute(profile.location);
+    expect(workspace.active.id, profile.id);
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.active.id, second.id);
+    expect(workspace.tabs.map((tab) => tab.id), contains(profile.id));
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.active.id, profile.id);
+    expect(workspace.tabs.map((tab) => tab.id), isNot(contains(second.id)));
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.active.id, first.id);
+    expect(workspace.active.location.queryParameters['cid'], '2');
+    expect(workspace.tabs, hasLength(2));
+  });
+
+  test('single page bounds its cache and preserves the last playback behind spaces', () {
+    final workspace = WorkspaceTabs()..setSingleMode(true);
+    workspace.acceptRoute(Uri.parse('/video/A'));
+    final playback = workspace.activeId;
+    for (var index = 0; index < 80; index++) {
+      expect(workspace.acceptRoute(Uri.parse('/user/$index')), isTrue);
+    }
+    expect(workspace.tabs, hasLength(WorkspaceTabs.maximumTabs));
+    var backs = 0;
+    while (!workspace.active.isPlayback && workspace.goBack()) {
+      backs++;
+    }
+    expect(backs, WorkspaceTabs.maximumTabs - 2);
+    expect(workspace.activeId, playback);
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.tabs, hasLength(1));
+  });
+
+  test('switching from dual to single keeps media history before consuming the page', () {
+    final workspace = WorkspaceTabs()..setDualMode(true);
+    workspace.acceptRoute(Uri.parse('/video/A?cid=2'));
+    final playback = workspace.activeId;
+    workspace.acceptRoute(Uri.parse('/video/B'));
+    workspace.setDualMode(false);
+    workspace.setSingleMode(true);
+    workspace.acceptRoute(Uri.parse('/user/42'));
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.activeId, playback);
+    expect(workspace.active.location.path, '/video/B');
+    expect(workspace.backDestination()?.location, Uri.parse('/video/A?cid=2'));
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.activeId, playback);
+    expect(workspace.active.location, Uri.parse('/video/A?cid=2'));
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.tabs, hasLength(1));
+  });
+
+  test('single page treats root selection and same-page changes as history boundaries', () {
+    final workspace = WorkspaceTabs()..setSingleMode(true);
+    workspace.acceptRoute(Uri.parse('/video/A'));
+    final playback = workspace.activeId;
+    workspace.acceptRoute(Uri.parse('/video/A?cid=2&tab=$playback'));
+    workspace.acceptRoute(Uri.parse('/user/42'));
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.active.location.queryParameters['cid'], '2');
+    workspace.acceptRoute(Uri.parse('/settings'));
+    expect(workspace.canGoBack, isFalse);
+    workspace.acceptRoute(Uri.parse('/settings?section=playback&tab=home'));
+    workspace.acceptRoute(Uri.parse('/user/43'));
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.active.location.path, '/settings');
+    expect(workspace.canGoBack, isFalse);
+  });
+
   for (final dual in [true, false]) {
     test(
       'Back previews match commits without consuming history in dual=$dual',

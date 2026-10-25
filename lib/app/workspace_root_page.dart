@@ -80,6 +80,10 @@ class _WorkspaceRootPageState extends State<WorkspaceRootPage> {
       excluding: !selected,
       child: WorkspaceActivity(
         active: selected && WorkspaceActivity.isActive(context),
+        previewing:
+            selected &&
+            WorkspaceActivity.isVisible(context) &&
+            !WorkspaceActivity.isActive(context),
         child: PageStorage(bucket: storage, child: child),
       ),
     ),

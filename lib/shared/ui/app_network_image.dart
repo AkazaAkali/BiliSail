@@ -167,7 +167,7 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
     final wasActive = _active;
     _active =
         TickerMode.valuesOf(context).enabled &&
-        WorkspaceActivity.isActive(context);
+        WorkspaceActivity.isVisible(context);
     if (_active && !wasActive) _visibilityChecked = false;
     // Observe viewport changes without rebuilding the whole list on scroll.
     MediaQuery.maybeSizeOf(context);

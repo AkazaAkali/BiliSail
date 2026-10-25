@@ -166,12 +166,23 @@ final class _RetainedTabViewState<T extends Object>
     super.didChangeDependencies();
     final progressChanged = _connectProgress();
     final active = WorkspaceActivity.isActive(context);
+    final deactivated = _active && !active;
+    final interruptMotion =
+        deactivated &&
+        (_dragging ||
+            _tabs?.indexIsChanging == true ||
+            (_tabs?.offset ?? 0).abs() > precisionErrorTolerance);
     if (_tabs == null ||
         _tabs?.animationDuration != _duration ||
-        (_active && !active)) {
+        interruptMotion) {
       _replaceController();
-    } else if (progressChanged) {
-      _progress?._attach(this, _tabs?.animation?.value ?? 0);
+    } else {
+      // Keep idle retained pagers intact on primary navigation. Only unfinished
+      // motion needs a new controller to restore the routed page.
+      if (deactivated) _generation++;
+      if (progressChanged) {
+        _progress?._attach(this, _tabs?.animation?.value ?? 0);
+      }
     }
     _active = active;
   }
@@ -377,6 +388,10 @@ final class _RetainedTabPageState<T extends Object>
           }
           return WorkspaceActivity(
             active: active && WorkspaceActivity.isActive(context),
+            previewing:
+                active &&
+                WorkspaceActivity.isVisible(context) &&
+                !WorkspaceActivity.isActive(context),
             child: ExcludeFocus(
               excluding: !active,
               child: IgnorePointer(

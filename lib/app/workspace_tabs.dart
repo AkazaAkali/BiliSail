@@ -64,6 +64,7 @@ final class WorkspaceTabs {
   int _nextId = 1;
   final List<String> _backHistory = [];
   bool _dualMode = false;
+  bool _singleMode = false;
   String _browseId = 'home';
   String? _playbackId;
   final List<Uri> _playbackHistory = [];
@@ -114,6 +115,10 @@ final class WorkspaceTabs {
     }
   }
 
+  /// Single-page Back consumes visits and releases pages no longer in history.
+  /// Mode changes alone retain every page and its playback owner.
+  void setSingleMode(bool enabled) => _singleMode = enabled;
+
   List<WorkspaceTab> get visibleTabs => !_dualMode
       ? tabs
       : [
@@ -123,6 +128,7 @@ final class WorkspaceTabs {
 
   String get browseId => _browseId;
   String? get playbackId => _playbackId;
+  List<Uri> get playbackHistory => List.unmodifiable(_playbackHistory);
   bool get canGoBackBrowsing => _browseId != 'home';
 
   /// Desktop dual windows keep media navigation out of the browser's Back.
@@ -153,11 +159,14 @@ final class WorkspaceTabs {
   String get activeId => _activeId;
   int get activeIndex => _tabs.indexWhere((tab) => tab.id == _activeId);
   WorkspaceTab get active => _tabs[activeIndex];
-  bool get canGoBack => _dualMode && active.isPlayback
-      ? true
-      : _dualMode
-      ? canGoBackBrowsing
-      : _backHistory.any((id) => id != activeId);
+  bool get canGoBack {
+    if (_singleMode && active.pinned) return false;
+    if (_dualMode) return active.isPlayback || canGoBackBrowsing;
+    // History is bounded; a deep page must still be able to reach the root
+    // after repeated visits have pushed its original root visit out.
+    if (_singleMode) return true;
+    return _backHistory.any((id) => id != activeId);
+  }
 
   /// Resolves a preview without selecting a page or consuming its history.
   WorkspaceTab? backDestination({bool fromMessages = false}) {
@@ -172,6 +181,9 @@ final class WorkspaceTabs {
           : origin;
     }
     if (!canGoBack) return null;
+    if (_singleMode && active.isPlayback && _playbackHistory.isNotEmpty) {
+      return WorkspaceTab(id: activeId, location: _playbackHistory.last);
+    }
     if (_dualMode && active.isPlayback) {
       if (_playbackHistory.isNotEmpty) {
         return WorkspaceTab(id: activeId, location: _playbackHistory.last);
@@ -184,7 +196,7 @@ final class WorkspaceTabs {
       if (_dualMode && destination.isPlayback) continue;
       return destination;
     }
-    return _dualMode ? _tabs.first : null;
+    return _dualMode || _singleMode ? _tabs.first : null;
   }
 
   void _activate(String id) {
@@ -204,6 +216,9 @@ final class WorkspaceTabs {
   /// Back traverses visits, rather than the visual order of the tab strip.
   bool goBack() {
     if (!canGoBack) return false;
+    if (_singleMode && active.isPlayback && _playbackHistory.isNotEmpty) {
+      return updateLocation(activeId, _playbackHistory.removeLast());
+    }
     if (_dualMode && active.isPlayback) {
       if (_playbackHistory.isNotEmpty) {
         updateLocation(activeId, _playbackHistory.removeLast());
@@ -214,7 +229,8 @@ final class WorkspaceTabs {
     }
     if (_dualMode) return goBackBrowsing();
     _trimHistory();
-    _activeId = _backHistory.removeLast();
+    final leaving = _activeId;
+    _activeId = _backHistory.isEmpty ? 'home' : _backHistory.removeLast();
     if (!active.isPlayback) {
       _browseId = _activeId;
     } else if (_playbackId != activeId) {
@@ -222,6 +238,7 @@ final class WorkspaceTabs {
       _playbackHistory.clear();
     }
     _trimHistory();
+    if (_singleMode && !_backHistory.contains(leaving)) close(leaving);
     return true;
   }
 
@@ -293,6 +310,7 @@ final class WorkspaceTabs {
       // Primary destinations share one root identity. Moving between them is
       // a selection, not a visit to a new page in the transient Back stack.
       _activeId = _browseId = 'home';
+      if (_singleMode) _backHistory.clear();
       _trimHistory();
       return true;
     }
@@ -331,9 +349,9 @@ final class WorkspaceTabs {
       return true;
     }
     if (_tabs.length >= maximumTabs) {
-      if (!_dualMode) return false;
-      // Dual mode has no tab-close UI. Bound the page cache by releasing the
-      // oldest non-home, inactive page instead of blocking further browsing.
+      if (!_dualMode && !_singleMode) return false;
+      // Single/dual mode has no tab-close UI. Protect the last playback page
+      // while browsing spaces, and evict an older inactive page at capacity.
       close(
         _tabs
             .firstWhere(
@@ -341,7 +359,8 @@ final class WorkspaceTabs {
                   !tab.pinned &&
                   tab.id != _activeId &&
                   (!_dualMode ||
-                      (tab.id != _browseId && tab.id != _playbackId)),
+                      (tab.id != _browseId && tab.id != _playbackId)) &&
+                  (!_singleMode || tab.id != _playbackId),
             )
             .id,
       );

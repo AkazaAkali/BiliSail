@@ -28,9 +28,20 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  for (final detached in [false, true]) {
+  for (final (detached, initialMode, returnMode) in [
+    for (final detached in [false, true])
+      for (final (initialMode, returnMode) in [
+        (WorkspaceNavigationMode.dualTabs, WorkspaceNavigationMode.dualTabs),
+        (
+          WorkspaceNavigationMode.singlePage,
+          WorkspaceNavigationMode.singlePage,
+        ),
+        (WorkspaceNavigationMode.dualTabs, WorkspaceNavigationMode.singlePage),
+      ])
+        (detached, initialMode, returnMode),
+  ]) {
     test(
-      'dual media back restores position and pause after owner detached=$detached',
+      'media Back restores checkpoints from $initialMode to $returnMode after owner detached=$detached',
       () async {
         var epoch = 0;
         final engine = _FakeEngine();
@@ -44,7 +55,7 @@ void main() {
         addTearDown(session.close);
         session.configureSettings(
           AppSettings(
-            navigationMode: WorkspaceNavigationMode.dualTabs,
+            navigationMode: initialMode,
             autoPlay: true,
             resumePlayback: false,
           ),
@@ -53,6 +64,7 @@ void main() {
         session.attach(owner);
         await session.activate(owner, _detail('one'), _part('one'));
         await session.seek(const Duration(seconds: 24));
+        await session.setRate(1.5);
         await session.pause();
         if (detached) {
           session.detach(owner);
@@ -61,12 +73,16 @@ void main() {
           session.attach(owner);
         }
         await session.activate(owner, _detail('two'), _part('two'));
+        session.configureSettings(
+          AppSettings(navigationMode: returnMode, resumePlayback: false),
+        );
         await session.activate(owner, _detail('one'), _part('one'));
         expect(
           engine.openOptions.last.startPosition,
           const Duration(seconds: 24),
         );
         expect(engine.currentSnapshot.phase, PlaybackPhase.paused);
+        expect(engine.currentSnapshot.rate, 1.5);
         expect(engine.maxSimultaneousPlayers, 1);
         await session.activate(owner, _detail('two'), _part('two'));
         epoch++;

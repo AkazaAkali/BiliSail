@@ -1,4 +1,6 @@
 import 'package:bilisail/features/video/application/video_author_controller.dart';
+import 'package:bilisail/features/video/presentation/video_author_header.dart';
+import 'package:bilisail/shared/ui/network_avatar.dart';
 
 import '../support/follow_repository_fake.dart';
 
@@ -6,6 +8,7 @@ import '../support/input_test_app.dart';
 import '../support/video_card_fake_engine.dart';
 import '../support/detached_window_fake.dart';
 import '../support/native_window_events.dart';
+import '../support/system_back_gesture.dart';
 
 import 'package:bilisail/app/workspace_playback_window.dart';
 import 'package:bilisail/core/platform/detached_playback_window.dart';
@@ -74,6 +77,154 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final platform in [TargetPlatform.android, TargetPlatform.windows]) {
+    _workspaceTestWidgets(
+      'single page avatar returns to the same video, part and session on $platform',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(390, 844);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final settings = _SettingsRepository(
+          navigationMode: WorkspaceNavigationMode.singlePage,
+        );
+        final profile = _ProfileRepository();
+        final auth = AuthFake();
+        addTearDown(auth.stream.close);
+        final engines = <CardFakeEngine>[];
+        final sessions = <PlaybackSession>[];
+        final manager = PlaybackManager(
+          createSession: () {
+            final engine = CardFakeEngine();
+            engines.add(engine);
+            final session = PlaybackSession(
+              engine: engine,
+              repository: _UnusedPlaybackRepository(),
+              progress: _UnusedProgressRepository(),
+              accountScope: () => 'guest',
+            );
+            sessions.add(session);
+            return session;
+          },
+        );
+        addTearDown(manager.close);
+        final router = createBiliRouter(
+          initialLocation: '/video/BV1234567890?cid=2',
+          playerBuilder: (_, _, part) => Consumer(
+            builder: (context, ref, _) {
+              ref.watch(playbackSessionProvider);
+              return Text('原播放分 P ${part.cid}');
+            },
+          ),
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              settingsRepositoryProvider.overrideWithValue(settings),
+              playbackManagerProvider.overrideWithValue(manager),
+              videoRepositoryProvider.overrideWithValue(
+                _VideoRepository(authorId: const UserId('42')),
+              ),
+              profileRepositoryProvider.overrideWithValue(profile),
+              authRepositoryProvider.overrideWithValue(auth),
+              videoAuthorRepositoryProvider.overrideWithValue(
+                FollowRepositoryFake(),
+              ),
+              relatedVideosProvider.overrideWith((ref, id) async => []),
+              videoTagsProvider.overrideWith((ref, id) async => []),
+              feedRepositoryProvider.overrideWithValue(_FeedRepository()),
+              homeRepositoryProvider.overrideWithValue(_HomeRepository()),
+            ],
+            child: InputTestApp.router(routerConfig: router),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final original = tester.state(find.byType(VideoScreen));
+        final session = sessions.single;
+        expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
+        expect(find.byKey(const ValueKey('new-workspace-tab')), findsNothing);
+        for (var visit = 0; visit < 2; visit++) {
+          final avatar = find.descendant(
+            of: find.byType(VideoAuthorHeader),
+            matching: find.byType(NetworkAvatar),
+          );
+          await tester.ensureVisible(avatar);
+          await tester.tap(avatar);
+          await tester.pumpAndSettle();
+          expect(router.routeInformationProvider.value.uri.path, '/user/42');
+          expect(find.byType(VideoScreen), findsNothing);
+          expect(find.byType(VideoScreen, skipOffstage: false), findsOneWidget);
+          final signals = profile.signals['42']!.toList();
+          if (visit == 0) {
+            final dialog = showAppDialog<void>(
+              context: tester.element(find.byType(ProfileScreen)),
+              builder: (_) => const AlertDialog(content: Text('空间弹窗')),
+            );
+            await tester.pumpAndSettle();
+            await tester.binding.handlePopRoute();
+            await tester.pumpAndSettle();
+            await dialog;
+            expect(find.byType(ProfileScreen), findsOneWidget);
+          } else {
+            router.go('/video/BV0987654321');
+            await tester.pumpAndSettle();
+            expect(sessions, hasLength(2));
+            await tester.binding.handlePopRoute();
+            await tester.pumpAndSettle();
+            expect(find.byType(ProfileScreen), findsOneWidget);
+          }
+          if (platform == TargetPlatform.android) {
+            if (visit == 0) {
+              final space = tester.state(find.byType(ProfileScreen));
+              await systemBackGesture(tester, 'startBackGesture');
+              await tester.pump();
+              await systemBackGesture(
+                tester,
+                'updateBackGestureProgress',
+                progress: .5,
+              );
+              await tester.pump();
+              expect(engines.first.disposals, 0);
+              expect(sessions, hasLength(1));
+              await systemBackGesture(tester, 'cancelBackGesture');
+              await tester.pumpAndSettle();
+              expect(tester.state(find.byType(ProfileScreen)), same(space));
+            }
+            await tester.binding.handlePopRoute();
+          } else {
+            await tester.tap(find.byKey(const ValueKey('workspace-back')));
+          }
+          await tester.pumpAndSettle();
+          expect(tester.state(find.byType(VideoScreen)), same(original));
+          expect(find.text('原播放分 P 2'), findsOneWidget);
+          expect(
+            router.routeInformationProvider.value.uri.queryParameters['cid'],
+            '2',
+          );
+          expect(find.byType(ProfileScreen, skipOffstage: false), findsNothing);
+          expect(signals.every((signal) => signal.isCancelled), isTrue);
+          expect(engines.first.disposals, 0);
+          expect(identical(sessions.first, session), isTrue);
+        }
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+        expect(router.routeInformationProvider.value.uri.path, '/');
+        expect(find.byType(VideoScreen, skipOffstage: false), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+        final closing = manager.close();
+        for (var frame = 0; frame < 5; frame++) {
+          await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+          await tester.pump();
+        }
+        await closing;
+        expect(engines.every((engine) => engine.disposals == 1), isTrue);
+        expect(tester.takeException(), isNull);
+      },
+      platform: platform,
+    );
+  }
+
   for (final mode in WorkspaceNavigationMode.values) {
     for (final platform in [TargetPlatform.android, TargetPlatform.windows]) {
       _workspaceTestWidgets(
@@ -382,7 +533,12 @@ void main() {
         );
         router.go('/video/BV0987654321');
         await tester.pumpAndSettle();
-        expect(tester.state(find.byType(VideoScreen)), same(videoState));
+        expect(
+          tester.state(find.byType(VideoScreen)),
+          platform == TargetPlatform.android
+              ? isNot(same(videoState))
+              : same(videoState),
+        );
         expect(
           tester.widget<PlaybackInfoTabs>(find.byType(PlaybackInfoTabs)).value,
           0,
@@ -422,6 +578,7 @@ void main() {
           '2',
         );
         expect(find.text('playing BV1234567890/2'), findsOneWidget);
+        expect(tester.state(find.byType(VideoScreen)), same(videoState));
         if (detached) {
           final controller = scope.read(settingsControllerProvider.notifier);
           for (final mode in [
@@ -923,7 +1080,10 @@ void main() {
         expect(find.text('99+'), findsOneWidget);
         expect(find.text('粉丝数由高到低'), findsOneWidget);
         expect(search.calls.length, callsBeforeReturn);
-        expect(dogSignal.isCancelled, mode == WorkspaceNavigationMode.dualTabs);
+        expect(
+          dogSignal.isCancelled,
+          mode != WorkspaceNavigationMode.multipleTabs,
+        );
         expect(root.read(searchControllerProvider).query, isEmpty);
         expect(tester.takeException(), isNull);
       },
@@ -1023,9 +1183,10 @@ void main() {
             workspaceNavigationModeForPlatform(platform) ==
             WorkspaceNavigationMode.dualTabs;
         expect(
-          find.byKey(const ValueKey('workspace-tab-strip')),
-          dual ? findsNothing : findsOneWidget,
+          tester.widget<BiliAppShell>(find.byType(BiliAppShell)).navigationMode,
+          workspaceNavigationModeForPlatform(platform),
         );
+        expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
         settings.loaded.complete(
           AppSettings(
             navigationMode: dual
@@ -2232,6 +2393,8 @@ void _workspaceTestWidgets(
 );
 
 final class _VideoRepository implements VideoRepository {
+  _VideoRepository({this.authorId});
+  final UserId? authorId;
   @override
   Future<VideoDetail> loadDetail(
     VideoId id, {
@@ -2242,6 +2405,7 @@ final class _VideoRepository implements VideoRepository {
       title: '多分 P 视频',
       coverUrl: '',
       author: '测试 UP',
+      authorId: authorId,
       duration: const Duration(minutes: 2),
     ),
     description: '',

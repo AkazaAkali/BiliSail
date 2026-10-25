@@ -7,7 +7,7 @@
 - Android Manifest 显式开启 `android:enableOnBackInvokedCallback`。Android 14 及以上通过 Flutter 的系统返回手势事件驱动工作区的两页横向平移：当前页沿手势方向移出，上一页从另一侧移入，两页边缘相接并保持原尺寸与垂直位置；左右边缘均支持，取消手势回到原位。旧系统、实体返回键及三键导航沿用现有返回入口。
 - 工作区保留页面，不在 go_router 的占位路由上执行 pop。`WorkspaceTabs.backDestination` 只读取返回目标；手势确认动画结束后才调用既有返回逻辑。双标签关闭离开的临时浏览页，播放先回退媒体历史，历史为空才关闭会话；多标签沿访问历史选择上一页。
 - Android 双标签播放页隐藏顶部返回、标题与关闭按钮所在的整行，不保留该行的 44 逻辑像素占位；横屏和大屏同样处理。系统返回键与返回手势继续沿用上述页内详情、媒体历史、关闭会话的优先级。
-- 可复用的上一页参与横向预览，保持 `WorkspaceActivity.active=false`、无焦点、无指针和无障碍参与，不激活隐藏播放器。共用同一槽位的旧媒体或消息入口根页面，显示目标名称提示；不为预览重载旧媒体、创建第二个播放器或抓取屏幕快照。
+- 上一页以完整的实时组件参与横向预览，包括搜索／频道栏、列表和底部导航。预览保持 `WorkspaceActivity.active=false`、`previewing=true`，允许图片和只读列表布局／加载，保持输入与播放所有权停用。历史视频区显示黑色，不为预览调用播放器构建器、切换媒体或抓取整页截图。
 - `PageBackHandler` 的页内详情优先于工作区返回。弹窗、图片查看和全屏等已有独立路由继续由自己的返回入口处理；本轮不新增这些路由的手势动画。根页保留退出确认，因此不直接触发系统返回桌面的预览。
 - 手势期间页面特征树不随进度逐帧重建，只有局部变换更新。路由、导航模式、账号身份、页内返回能力、模态、窗口尺寸、输入法或应用活动状态改变时废弃旧手势；迟到的确认不能返回新页面。遵循系统减少动画设置，省略位移和结束过渡。
 
@@ -15,13 +15,24 @@
 
 - 用户反馈视频页预测返回时向反方向和下方收缩。原实现叠加中心缩放与固定 24 逻辑像素横移；缩放会让顶部下移，宽屏下还可能盖过横移量。
 - 共享过渡改为按实际内容宽度进行分数平移，取消缩放、圆角和淡出；上一页与目标名称占位使用相同进度从另一侧移入。手势区域增加固定裁剪，避免横屏／大屏的移动页面绘制到侧栏和工具栏之外。
-- 新增视频页回归覆盖 390×844、844×390、1080×844 和左右边缘，在多个前进／回撤进度检查原尺寸、垂直坐标、运动方向、两页边缘相接与裁剪区域；继续验证取消保留页面、确认后释放原页面。媒体历史同槽位仍只显示目标提示，不为预览加载第二个播放器。
+- 新增视频页回归覆盖 390×844、844×390、1080×844 和左右边缘，在多个前进／回撤进度检查原尺寸、垂直坐标、运动方向、两页边缘相接与裁剪区域；继续验证取消保留页面、确认后释放原页面。初版的目标名称占位已由下方完整组件预览替代。
 - 定向回归 19 项通过（`build/predictive-back-horizontal-targeted.log`）。新增几何用例在旧实现上先复现页面缩小失败，修正后通过。`tool/check.ps1 -SkipPub` 通过：根应用 2606、bili_api 456、bili_player 81、bili_danmaku 93、bili_mux 2，共 3238 项测试通过；格式、静态分析和打包边界检查通过。10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。完整日志为 `build/predictive-back-horizontal-check.log`。
 - Android arm64 封装组件准备及 `flutter build apk --profile --target-platform android-arm64 --no-pub` 通过，日志为 `build/predictive-back-horizontal-android-mux.log` 和 `build/predictive-back-horizontal-android-profile.log`，测试包为 `build/app/outputs/flutter-apk/app-profile.apk`（约 118.5 MB，调试签名）。构建保留已有的 CupertinoIcons 字体资源提示。未连接 Android 实机或可热重载的调试应用，本轮未启动模拟器；真实解码画面与系统手势手感仍待设备确认，几何测试不替代实机验收。未构建 Windows/macOS；本页 6 个本地链接和 `git diff --check` 通过。
+
+## 完整组件预览与播放器隔离（2026-10-25）
+
+- 用户反馈历史视频只有“返回 BV…”占位、回首页后工具栏等组件才补出来；随后明确要求其他组件正常准备，视频区可以黑屏，确认返回时只加载播放器。
+- Android 每个页面框架包含自己的完整 Scaffold 与导航组件，整页共同平移；预览和提交使用同一套组件、控制器和 PageStorage，不在确认后重建首页框架。搜索输入控制器按标签保留，预览不会显示当前视频标签的搜索草稿。
+- 同一播放标签的媒体历史保留各自的视频／影视／直播／离线页面 UI，共享标签级 ProviderScope 和唯一 PlaybackSession。非当前历史源通过 `WorkspaceMediaPermission` 返回黑色视频区，不构建播放器；确认返回后才挂载该源的播放器，详情和评论继续使用原状态。普通隐藏播放标签仍遵循原并发／暂停策略。
+- `WorkspaceActivity.isVisible` 允许预览图片和列表准备，`isActive` 继续隔离输入、页内返回和播放所有权。取消手势不选择目标、不重新打开媒体；确认后保留最终位置两帧，让同一实时页面完成布局再结束过渡。账号变化清理旧私有页面及历史，旧手势仍按账号／导航身份隔离。
+- 工作区当前页面与媒体历史 UI 共用 16 页上限，URI 视图及滚动存储随淘汰释放，不增加无界页面缓存。同槽根页面切换或容量限制下没有保留目标视图时，沿正常返回路径处理，不展示 BV 文字占位。缓存淘汰、账号变化及显式刷新后的数据仍按原规则读取。
+- 实际路由组件回归检查：返回预览、取消和确认后，VideoScreen、CommentsPanel 及评论 Scrollable 保持同一实例与滚动位置，详情／评论请求计数不增加；播放器仅在确认后重新创建。首页搜索与底栏在预览及提交后保持同一实例及几何位置。连续 22 个媒体访问保持 UI 数量不超过 16。
+- “我的 → 视频／UP 空间 → 返回”曾多出公共头像与搜索框：工具行显隐错误读取外壳 State 的 context，使隐藏／预览页面使用了当前视频或空间页的导航配置。`_navigationToolsVisible` 改为接收该页面框架的 BuildContext；导航工具按各自页面身份判断。三种导航模式的六组回归在旧代码均复现，在修正后验证预览与提交均无额外工具行，且“我的”内容实例和位置不变。
 
 ## 实现与来源
 
 - [手势区域与局部变换](../../lib/core/presentation/predictive_back_region.dart)、[工作区接入](../../lib/app/shell.dart)、[只读返回目标](../../lib/app/workspace_tabs.dart)、[Android Manifest](../../android/app/src/main/AndroidManifest.xml)。
+- [实时预览状态](../../lib/app/workspace_back_presentation.dart)、[可见性与媒体许可](../../lib/core/presentation/workspace_activity.dart)、[标签级作用域和播放器门控](../../lib/app/router.dart)、[页面复用回归](../../test/app/predictive_back_page_reuse_test.dart)。
 - 采用 Flutter 3.47.6 自带的 `WidgetsBindingObserver` 预测手势 API，不增加依赖，不修改 Flutter SDK 或 Pub 缓存。普通 Material 路由沿用 SDK 默认的预测式返回过渡。
 - 官方依据：[Android 预测式返回迁移](https://docs.flutter.dev/release/breaking-changes/android-predictive-back)、[Flutter 默认 Android 过渡](https://docs.flutter.dev/release/breaking-changes/default-android-page-transition)、[Android 接入要求](https://developer.android.com/guide/navigation/custom-back/predictive-back-gesture)。本轮使用公开 API 和独立工作区变换实现，没有复制上游实现代码。
 

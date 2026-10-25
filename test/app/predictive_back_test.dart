@@ -16,6 +16,98 @@ import '../support/input_test_app.dart';
 import '../support/system_back_gesture.dart';
 
 void main() {
+  for (final mode in WorkspaceNavigationMode.values) {
+    for (final target in ['/video/A', '/user/42']) {
+      testWidgets(
+        'My keeps its own chrome through Back from $target in $mode',
+        (tester) async {
+          tester.view.physicalSize = const Size(390, 844);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final router = _router(
+            mode: mode,
+            accountBuilder: (_) =>
+                const SizedBox(key: ValueKey('test-account-avatar')),
+          );
+          addTearDown(router.dispose);
+          await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+          await tester.pumpAndSettle();
+          router.go('/me');
+          await tester.pumpAndSettle();
+          final mine = tester.element(find.text('page /me'));
+          final mineBounds = tester.getRect(find.text('page /me'));
+          expect(
+            find.byKey(const ValueKey('workspace-common-tools')),
+            findsNothing,
+          );
+          router.go(target);
+          await tester.pumpAndSettle();
+          expect(await systemBackGesture(tester, 'startBackGesture'), isTrue);
+          await systemBackGesture(
+            tester,
+            'updateBackGestureProgress',
+            progress: 0.5,
+          );
+          await tester.pumpAndSettle();
+          expect(tester.element(find.text('page /me')), same(mine));
+          expect(
+            find.byKey(const ValueKey('workspace-common-tools')),
+            findsNothing,
+          );
+          expect(
+            find.byKey(const ValueKey('test-account-avatar')),
+            findsNothing,
+          );
+          expect(find.byKey(const ValueKey('workspace-search')), findsNothing);
+          await systemBackGesture(tester, 'commitBackGesture');
+          await tester.pumpAndSettle();
+          expect(router.routeInformationProvider.value.uri.path, '/me');
+          expect(tester.element(find.text('page /me')), same(mine));
+          expect(tester.getRect(find.text('page /me')), mineBounds);
+          expect(
+            find.byKey(const ValueKey('workspace-common-tools')),
+            findsNothing,
+          );
+          expect(find.byKey(const ValueKey('workspace-search')), findsNothing);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+        variant: TargetPlatformVariant.only(TargetPlatform.android),
+      );
+    }
+  }
+
+  testWidgets('media history UI stays within the shared 16 page limit', (
+    tester,
+  ) async {
+    final disposed = <String>[];
+    final router = _router(
+      builder: (_, tab) => _PageProbe(tab: tab, disposed: disposed),
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+    final home = tester.element(find.text('page /'));
+    for (var visit = 0; visit < 22; visit++) {
+      router.go('/video/video-$visit');
+      await tester.pumpAndSettle();
+      expect(
+        find.byType(_PageProbe, skipOffstage: false).evaluate().length,
+        lessThanOrEqualTo(WorkspaceTabs.maximumTabs),
+      );
+      expect(home.mounted, isTrue);
+    }
+    await systemBackGesture(tester, 'startBackGesture');
+    await tester.pump();
+    expect(find.text('page /video/video-20'), findsOneWidget);
+    await systemBackGesture(tester, 'cancelBackGesture');
+    await tester.pumpAndSettle();
+    expect(router.routeInformationProvider.value.uri.path, '/video/video-21');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
   for (final size in const [Size(390, 844), Size(844, 390), Size(1080, 844)]) {
     for (final edge in SwipeEdge.values) {
       testWidgets(
@@ -37,7 +129,13 @@ void main() {
           final video = find.byKey(const ValueKey('page-surface-/video/A'));
           final previous = find.byKey(const ValueKey('page-surface-/'));
           final original = tester.getRect(video);
-          expect(original, tester.getRect(find.byType(PredictiveBackRegion)));
+          Finder frame(Finder content) =>
+              find.ancestor(of: content, matching: find.byType(Scaffold)).first;
+          final frameBounds = tester.getRect(frame(video));
+          expect(
+            frameBounds,
+            tester.getRect(find.byType(PredictiveBackRegion)),
+          );
           final videoElement = tester.element(video);
           final direction = edge == SwipeEdge.left ? 1.0 : -1.0;
           await systemBackGesture(tester, 'startBackGesture', edge: edge);
@@ -50,18 +148,18 @@ void main() {
               edge: edge,
             );
             await tester.pump();
-            final outgoing = tester.getRect(video);
-            final incoming = tester.getRect(previous);
+            final outgoing = tester.getRect(frame(video));
+            final incoming = tester.getRect(frame(previous));
             for (final rect in [outgoing, incoming]) {
-              expect(rect.width, closeTo(original.width, 0.001));
-              expect(rect.height, closeTo(original.height, 0.001));
+              expect(rect.width, closeTo(frameBounds.width, 0.001));
+              expect(rect.height, closeTo(frameBounds.height, 0.001));
             }
-            expect(outgoing.top, original.top);
-            expect(incoming.top, original.top);
+            expect(outgoing.top, frameBounds.top);
+            expect(incoming.top, frameBounds.top);
             expect(
               outgoing.left,
               closeTo(
-                original.left + direction * original.width * progress,
+                frameBounds.left + direction * frameBounds.width * progress,
                 0.001,
               ),
             );
@@ -78,7 +176,7 @@ void main() {
             matching: find.byType(ClipRect),
           );
           expect(clipping, findsWidgets);
-          expect(tester.getRect(clipping.first), original);
+          expect(tester.getRect(clipping.last), frameBounds);
           await systemBackGesture(tester, 'cancelBackGesture');
           await tester.pumpAndSettle();
           expect(tester.element(video), same(videoElement));
@@ -231,7 +329,7 @@ void main() {
           expect(find.text('page /'), findsOneWidget);
           expect(
             disposed,
-            mode == WorkspaceNavigationMode.dualTabs ? ['tab-1'] : isEmpty,
+            mode != WorkspaceNavigationMode.multipleTabs ? ['tab-1'] : isEmpty,
           );
           expect(find.text('退出哔帆？'), findsNothing);
           expect(tester.takeException(), isNull);
@@ -254,30 +352,32 @@ void main() {
       await tester.pumpAndSettle();
       router.go('/video/A');
       await tester.pumpAndSettle();
+      final pageA = tester.element(find.text('page /video/A'));
       router.go('/video/B');
       await tester.pumpAndSettle();
       final player = tester.element(find.text('page /video/B'));
       await systemBackGesture(tester, 'startBackGesture');
       await tester.pump();
-      expect(find.text('返回 A'), findsOneWidget);
-      expect(find.text('page /video/A'), findsNothing);
+      expect(find.text('返回 A'), findsNothing);
+      expect(tester.element(find.text('page /video/A')), same(pageA));
       expect(tester.element(find.text('page /video/B')), same(player));
       expect(disposed, isEmpty);
       await systemBackGesture(tester, 'commitBackGesture');
       await tester.pumpAndSettle();
       expect(router.routeInformationProvider.value.uri.path, '/video/A');
-      expect(disposed, isEmpty);
+      expect(tester.element(find.text('page /video/A')), same(pageA));
+      expect(disposed, ['tab-1']);
       await systemBackGesture(tester, 'startBackGesture');
       await tester.pump();
       await systemBackGesture(tester, 'cancelBackGesture');
       await tester.pumpAndSettle();
       expect(router.routeInformationProvider.value.uri.path, '/video/A');
-      expect(disposed, isEmpty);
+      expect(disposed, ['tab-1']);
       await systemBackGesture(tester, 'startBackGesture');
       await systemBackGesture(tester, 'commitBackGesture');
       await tester.pumpAndSettle();
       expect(router.routeInformationProvider.value.uri.path, '/');
-      expect(disposed, ['tab-1']);
+      expect(disposed, ['tab-1', 'tab-1']);
       await tester.pumpWidget(const SizedBox.shrink());
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),
@@ -436,6 +536,7 @@ GoRouter _router({
   WorkspaceNavigationMode mode = WorkspaceNavigationMode.dualTabs,
   WorkspacePageBuilder? builder,
   Future<void> Function()? onExitRequested,
+  WidgetBuilder? accountBuilder,
 }) => GoRouter(
   observers: [],
   routes: [
@@ -445,11 +546,18 @@ GoRouter _router({
         location: state.uri.toString(),
         navigationMode: mode,
         onExitRequested: onExitRequested,
+        accountBuilder: accountBuilder,
         pageBuilder: builder ?? (_, tab) => Text('page ${tab.location.path}'),
         child: child,
       ),
       routes: [
-        for (final path in ['/', '/history', '/user/:mid', '/video/:bvid'])
+        for (final path in [
+          '/',
+          '/me',
+          '/history',
+          '/user/:mid',
+          '/video/:bvid',
+        ])
           GoRoute(path: path, builder: (_, _) => const SizedBox.shrink()),
       ],
     ),

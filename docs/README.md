@@ -49,7 +49,7 @@
 | [参考项目与资料](references.md) | 本地源码定位、借鉴边界、官方资料和待确认事项 |
 | [首版实测记录](validation/m0-results.md) | Windows 原生播放、工程检查、构建结果和未测项 |
 | [界面与多标签验证](validation/uwp-workspace.md) | UWP 风格布局、首页频道、多标签状态与本轮验证边界 |
-| [旧单标签导航与顶部滚动](validation/single-page-navigation.md) | 单标签退役前的历史记录；状态保留与横向滚轮验证 |
+| [单标签导航与顶部滚动](validation/single-page-navigation.md) | 单标签恢复、Android 默认值、播放与空间返回链及历史滚动验证 |
 | [首页子频道协议](validation/home-subtabs.md) | 各首页列表的端点、游标与前序接入记录 |
 | [窄屏一级导航动效](validation/primary-navigation-motion.md) | Android 底栏滑入/淡入、隐藏根分支构建复用与验证边界 |
 | [Android 预测式返回](validation/android-predictive-back.md) | 工作区系统手势预览、取消／确认、返回优先级和验证边界 |

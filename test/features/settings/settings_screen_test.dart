@@ -582,8 +582,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.widgetWithText(ChoiceChip, '自动'), findsNothing);
-    expect(find.widgetWithText(ChoiceChip, '单标签页'), findsNothing);
     for (final (label, mode) in [
+      ('单标签页', WorkspaceNavigationMode.singlePage),
       ('双标签页', WorkspaceNavigationMode.dualTabs),
       ('多标签页', WorkspaceNavigationMode.multipleTabs),
     ]) {

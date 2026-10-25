@@ -402,7 +402,7 @@ class PlaybackSession extends ChangeNotifier {
       voice: _voice,
     );
     _checkpoints[owner] = checkpoint;
-    if (_settings.navigationMode == WorkspaceNavigationMode.dualTabs) {
+    if (_settings.navigationMode != WorkspaceNavigationMode.multipleTabs) {
       final key = (video?.summary.id, selected?.cid, contentTarget);
       _navigationCheckpoints.remove(key);
       _navigationCheckpoints[key] = checkpoint;
@@ -1298,7 +1298,7 @@ class PlaybackSession extends ChangeNotifier {
   void configureSettings(AppSettings settings) {
     final previous = _settings;
     _settings = settings.normalized();
-    if (_settings.navigationMode != WorkspaceNavigationMode.dualTabs) {
+    if (_settings.navigationMode == WorkspaceNavigationMode.multipleTabs) {
       _navigationCheckpoints.clear();
     }
     if (!_settings.highEnergyProgressEnabled) {

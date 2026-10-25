@@ -64,7 +64,7 @@ final class _HomeContentState extends ConsumerState<HomeContent> {
   HomeQuery? _bodyQuery;
   Set<(HomeEntryKind, String)>? _bodyUnsubscribing;
   Set<String>? _bodyWatchLaterPending;
-  VoidCallback? _bodyLogin;
+  bool? _bodyHasLogin;
   bool? _bodyCanUnsubscribe;
   Widget? _bodySliver;
 
@@ -73,7 +73,7 @@ final class _HomeContentState extends ConsumerState<HomeContent> {
     _bodyQuery = null;
     _bodyUnsubscribing = null;
     _bodyWatchLaterPending = null;
-    _bodyLogin = null;
+    _bodyHasLogin = null;
     _bodyCanUnsubscribe = null;
     _bodySliver = null;
   }
@@ -287,6 +287,8 @@ final class _HomeContentState extends ConsumerState<HomeContent> {
     );
   }
 
+  void _login() => widget.onLogin?.call();
+
   Widget _itemsSliver(
     List<HomeEntry> items, {
     required HomeQuery query,
@@ -302,7 +304,7 @@ final class _HomeContentState extends ConsumerState<HomeContent> {
         query == _bodyQuery &&
         setEquals(feed.unsubscribing, _bodyUnsubscribing) &&
         setEquals(watchLaterActions?.pending, _bodyWatchLaterPending) &&
-        widget.onLogin == _bodyLogin &&
+        (widget.onLogin != null) == _bodyHasLogin &&
         canUnsubscribe == _bodyCanUnsubscribe) {
       return cached;
     }
@@ -312,7 +314,7 @@ final class _HomeContentState extends ConsumerState<HomeContent> {
     _bodyQuery = query;
     _bodyUnsubscribing = feed.unsubscribing;
     _bodyWatchLaterPending = watchLaterActions?.pending;
-    _bodyLogin = widget.onLogin;
+    _bodyHasLogin = widget.onLogin != null;
     _bodyCanUnsubscribe = canUnsubscribe;
     if (widget.channel == HomeChannel.dynamic) {
       return _bodySliver = SliverDynamicPostList(
@@ -334,7 +336,9 @@ final class _HomeContentState extends ConsumerState<HomeContent> {
         onOpenUser: (id) => context.go('/user/${id.value}'),
         onOpenVideo: (video) => context.go('/video/${video.id.value}'),
         onOpenLink: _openLink,
-        onLogin: widget.onLogin,
+        // Routes recreate callbacks on each navigation. Forward through this
+        // State so cached cards use the latest action without a new delegate.
+        onLogin: widget.onLogin == null ? null : _login,
       );
     }
     return _bodySliver = SliverResponsiveCardGrid(

@@ -21,6 +21,42 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 void main() {
+  _workspaceTestWidgets(
+    'single page shortcuts keep navigation and pop visits',
+    (tester) async {
+      final router = _router(
+        (_, tab) => Text('page ${tab.location.path}'),
+        navigationMode: WorkspaceNavigationMode.singlePage,
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+      await tester.pumpAndSettle();
+      router.go('/video/BV1234567890');
+      await tester.pumpAndSettle();
+      router.go('/user/42');
+      await tester.pumpAndSettle();
+      await _shortcut(tester, LogicalKeyboardKey.keyT);
+      await _shortcut(tester, LogicalKeyboardKey.tab);
+      expect(router.routeInformationProvider.value.uri.path, '/user/42');
+      expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
+      await _shortcut(tester, LogicalKeyboardKey.keyW);
+      expect(
+        router.routeInformationProvider.value.uri.path,
+        '/video/BV1234567890',
+      );
+      expect(find.text('page /user/42', skipOffstage: false), findsNothing);
+      await _shortcut(tester, LogicalKeyboardKey.keyW);
+      expect(router.routeInformationProvider.value.uri.path, '/');
+      expect(
+        find.text('page /video/BV1234567890', skipOffstage: false),
+        findsNothing,
+      );
+      await _shortcut(tester, LogicalKeyboardKey.keyW);
+      expect(router.routeInformationProvider.value.uri.path, '/');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final mode in WorkspaceNavigationMode.values) {
     _workspaceTestWidgets(
       'Android root Back requires explicit exit and modal dismissal wins in $mode',
@@ -163,6 +199,7 @@ void main() {
             platform == TargetPlatform.android ||
             platform == TargetPlatform.iOS;
         final dual = mode == WorkspaceNavigationMode.dualTabs;
+        final single = mode == WorkspaceNavigationMode.singlePage;
         final router = _router(
           (_, tab) =>
               SizedBox.expand(key: ValueKey('body-${tab.location.path}')),
@@ -201,9 +238,9 @@ void main() {
             );
             expect(
               find.byKey(const ValueKey('dual-window-caption')),
-              dual && !mobile ? findsOneWidget : findsNothing,
+              (dual || single) && !mobile ? findsOneWidget : findsNothing,
             );
-            if (dual && !mobile) {
+            if ((dual || single) && !mobile) {
               expect(
                 tester
                     .getSize(find.byKey(const ValueKey('dual-window-caption')))
@@ -212,12 +249,15 @@ void main() {
               );
             }
             final hasBack =
-                dual &&
+                (dual || single) &&
                 !const ['/', '/settings'].contains(location) &&
-                (!mobile || !playback);
+                (!mobile ||
+                    !playback ||
+                    (single && platform == TargetPlatform.iOS));
             expect(
               find.byKey(const ValueKey('workspace-back')),
               hasBack ? findsOneWidget : findsNothing,
+              reason: '$location width=$width',
             );
             expect(
               find.byTooltip('返回上一视频'),
@@ -241,10 +281,12 @@ void main() {
                 location.startsWith('/user/')) {
               expect(
                 tester.getTopLeft(find.byKey(ValueKey('body-$location'))).dy,
-                (dual
+                ((dual || single)
                         ? mobile
                               ? (playback
-                                    ? (playbackHeader ? 44 : 0)
+                                    ? (platform == TargetPlatform.android
+                                          ? 0
+                                          : 44)
                                     : profile
                                     ? 42
                                     : 0)

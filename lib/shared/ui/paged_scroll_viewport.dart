@@ -74,7 +74,7 @@ final class _PagedScrollViewportState extends State<PagedScrollViewport> {
   }
 
   void _syncActivity() {
-    final active = widget.active && WorkspaceActivity.isActive(context);
+    final active = widget.active && WorkspaceActivity.isVisible(context);
     if (active != _active) {
       _active = active;
       if (active) _scheduleCheck(force: true);

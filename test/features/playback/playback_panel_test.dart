@@ -924,6 +924,7 @@ void main() {
           final beforeModeChange = firstSession.sourceGeneration;
           for (final targetMode in [
             WorkspaceNavigationMode.multipleTabs,
+            WorkspaceNavigationMode.singlePage,
             WorkspaceNavigationMode.dualTabs,
           ]) {
             await controller.setNavigationMode(targetMode);
@@ -966,6 +967,43 @@ void main() {
         expect(firstSession.sourceGeneration, generation);
         expect((firstSession.engine as _FakeEngine).activeSurfaces, 0);
         expect((secondSession.engine as _FakeEngine).activeSurfaces, 1);
+        if (mode == WorkspaceNavigationMode.singlePage) {
+          await secondSession.pause();
+          await secondSession.seek(const Duration(seconds: 24));
+          await tester.binding.handlePopRoute();
+          await _pumpFrames(tester);
+          expect(firstSession.sourceGeneration, generation);
+          expect(
+            firstSession.snapshots.value.position,
+            const Duration(milliseconds: 1234),
+          );
+          expect(firstSession.snapshots.value.phase, PlaybackPhase.playing);
+          expect(secondSession.media, isNull);
+          expect((firstSession.engine as _FakeEngine).activeSurfaces, 1);
+          await firstSession.pause();
+          await firstSession.setRate(1.5);
+          router.go('/video/${second.summary.id.value}');
+          await _pumpFrames(tester);
+          await tester.binding.handlePopRoute();
+          await _pumpFrames(tester);
+          expect(firstSession.sourceGeneration, generation);
+          expect(firstSession.snapshots.value.phase, PlaybackPhase.paused);
+          expect(firstSession.snapshots.value.desiredPlaying, isFalse);
+          expect(firstSession.snapshots.value.rate, 1.5);
+          await tester.binding.handlePopRoute();
+          await _pumpFrames(tester);
+          expect(find.byType(PlaybackPanel, skipOffstage: false), findsNothing);
+          expect(firstSession.media, isNull);
+          await tester.pumpWidget(const SizedBox());
+          await _pumpFrames(tester);
+          final closing = manager.close();
+          for (var i = 0; i < 5; i++) {
+            await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+            await tester.pump();
+          }
+          await closing;
+          return;
+        }
         // Mode changes preserve the page/provider identity and media sources.
         final container = ProviderScope.containerOf(
           tester.element(find.byType(PlaybackPanel).last),

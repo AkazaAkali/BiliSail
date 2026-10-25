@@ -57,12 +57,11 @@ class SqliteSettingsRepository implements SettingsRepository {
       defaultDanmakuFontScale,
     );
     return AppSettings(
-      navigationMode: decoded['navigationMode'] == 'singlePage'
-          ? WorkspaceNavigationMode.dualTabs
-          : WorkspaceNavigationMode.values
-                    .where((item) => item.name == decoded['navigationMode'])
-                    .firstOrNull ??
-                defaultNavigationMode,
+      navigationMode:
+          WorkspaceNavigationMode.values
+              .where((item) => item.name == decoded['navigationMode'])
+              .firstOrNull ??
+          defaultNavigationMode,
       shortcuts: ShortcutSettings.fromJson(decoded['shortcuts']),
       allowConcurrentPlayback: boolean('allowConcurrentPlayback', false),
       cacheImages: boolean('cacheImages', true),

@@ -16,12 +16,18 @@ class PredictiveBackRegion extends StatefulWidget {
     super.key,
     required this.enabled,
     required this.identity,
+    this.destinationIdentity,
+    this.onStart,
+    this.onEnd,
     required this.onBack,
     required this.builder,
   });
 
   final bool enabled;
   final Object identity;
+  final Object? destinationIdentity;
+  final bool Function()? onStart;
+  final VoidCallback? onEnd;
   final VoidCallback onBack;
   final PredictiveBackRegionBuilder builder;
 
@@ -35,14 +41,17 @@ class _PredictiveBackRegionState extends State<PredictiveBackRegion>
   SwipeEdge _edge = SwipeEdge.left;
   bool _previewing = false;
   bool _tracking = false;
+  bool _committing = false;
+  Object? _expectedIdentity;
   int _generation = 0;
 
-  bool get _canStart =>
-      widget.enabled &&
+  bool get _routeAvailable =>
       Theme.of(context).platform == TargetPlatform.android &&
       (ModalRoute.isCurrentOf(context) ?? true) &&
       // Scaffold removes consumed keyboard insets from its body's MediaQuery.
       View.of(context).viewInsets.bottom == 0;
+
+  bool get _canStart => widget.enabled && _routeAvailable;
 
   @override
   void initState() {
@@ -53,13 +62,17 @@ class _PredictiveBackRegionState extends State<PredictiveBackRegion>
   @override
   void didUpdateWidget(PredictiveBackRegion oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (_committing && widget.identity == _expectedIdentity) return;
     if (oldWidget.identity != widget.identity || !widget.enabled) _reset();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_previewing && !_canStart) _reset();
+    if (_previewing &&
+        (!_routeAvailable || (!_committing && !widget.enabled))) {
+      _reset();
+    }
   }
 
   @override
@@ -73,8 +86,11 @@ class _PredictiveBackRegionState extends State<PredictiveBackRegion>
   }
 
   void _reset() {
+    if (_previewing) widget.onEnd?.call();
     _generation++;
     _tracking = _previewing = false;
+    _committing = false;
+    _expectedIdentity = null;
     _progress.stop();
     _progress.value = 0;
   }
@@ -82,10 +98,12 @@ class _PredictiveBackRegionState extends State<PredictiveBackRegion>
   @override
   bool handleStartBackGesture(PredictiveBackEvent backEvent) {
     if (!_canStart || _previewing || backEvent.isButtonEvent) return false;
+    if (widget.onStart?.call() == false) return false;
     setState(() {
       _generation++;
       _tracking = _previewing = true;
       _edge = backEvent.swipeEdge;
+      _expectedIdentity = widget.destinationIdentity;
       _progress.value = backEvent.progress;
     });
     return true;
@@ -122,8 +140,18 @@ class _PredictiveBackRegionState extends State<PredictiveBackRegion>
           .orCancel;
       if (!mounted || generation != _generation) return;
       final shouldReturn = commit && _canStart;
+      if (shouldReturn) {
+        _committing = true;
+        widget.onBack();
+        // Keep the prepared destination at its final position while its live
+        // tree and window chrome finish the committed layout and paint.
+        for (var frame = 0; frame < 2; frame++) {
+          WidgetsBinding.instance.scheduleFrame();
+          await WidgetsBinding.instance.endOfFrame;
+          if (!mounted || generation != _generation) return;
+        }
+      }
       setState(_reset);
-      if (shouldReturn) widget.onBack();
     } on TickerCanceled {
       // Navigation, account changes and disposal invalidate this gesture.
     }
@@ -132,6 +160,7 @@ class _PredictiveBackRegionState extends State<PredictiveBackRegion>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (_previewing) widget.onEnd?.call();
     _progress.dispose();
     super.dispose();
   }

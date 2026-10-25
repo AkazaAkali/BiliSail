@@ -11,6 +11,7 @@ import '../core/presentation/page_back_scope.dart';
 import '../core/presentation/predictive_back_region.dart';
 import 'workspace_tabs.dart';
 import 'workspace_navigation.dart';
+import 'workspace_back_presentation.dart';
 import 'platform_defaults.dart';
 import '../core/input/input_stroke.dart';
 import '../core/input/shortcut_dispatcher.dart';
@@ -32,6 +33,11 @@ import '../shared/ui/primary_navigation_transition.dart';
 typedef WorkspacePageBuilder = Widget Function(
   BuildContext context,
   WorkspaceTab tab,
+);
+typedef WorkspacePageScopeBuilder = Widget Function(
+  BuildContext context,
+  WorkspaceTab tab,
+  Widget child,
 );
 typedef DragRegionBuilder = Widget Function(BuildContext context, Widget child);
 typedef WorkspaceWindowBuilder = Widget Function(
@@ -113,6 +119,7 @@ final class BiliAppShell extends StatefulWidget {
     required this.child,
     this.accountBuilder,
     this.pageBuilder,
+    this.pageScopeBuilder,
     this.windowControlsBuilder,
     this.dragRegionBuilder,
     this.shortcuts = const ShortcutSettings.defaults(),
@@ -132,6 +139,7 @@ final class BiliAppShell extends StatefulWidget {
   final Widget child;
   final WidgetBuilder? accountBuilder;
   final WorkspacePageBuilder? pageBuilder;
+  final WorkspacePageScopeBuilder? pageScopeBuilder;
   final WidgetBuilder? windowControlsBuilder;
   final DragRegionBuilder? dragRegionBuilder;
   @override
@@ -148,11 +156,11 @@ final class _BiliAppShellState extends State<BiliAppShell>
   );
 
   final _workspace = WorkspaceTabs();
-  final _searchController = TextEditingController();
-  final _tabKeys = <String, GlobalKey>{};
+  final _searchControllers = <String, TextEditingController>{};
+  final _tabKeys = <(String, String, String), GlobalKey>{};
   final _pageKeys = <String, GlobalKey>{};
+  final _viewStorage = <(String, String), PageStorageBucket>{};
   final _searchDrafts = <String, String>{};
-  final _pageStorage = <String, PageStorageBucket>{};
   final _pageBack = <String, PageBackController>{};
   final _pagingProgress = <(String, bool), TabPagingProgress>{};
   final _lastChannels = <WorkspaceSection, HomeChannel>{};
@@ -161,6 +169,19 @@ final class _BiliAppShellState extends State<BiliAppShell>
   bool _windowFailed = false;
   int _windowActivation = 0;
   bool _exitConfirmationOpen = false;
+  WorkspaceTab? _gestureSource, _gestureDestination;
+
+  WorkspaceTab _frameTab(BuildContext context) =>
+      WorkspaceFrameTab.maybeOf(context) ?? _displayTab;
+
+  bool _frameShowsBack(BuildContext context) {
+    final tab = _frameTab(context);
+    return (_dualTabs || _singlePage) &&
+        _canGoBack &&
+        (!(tab.pinned && tab.isRoot) ||
+            (tab.isMessages && _canReturnFromMessages) ||
+            (_pageBack[tab.id]?.canGoBack ?? false));
+  }
 
   bool get _android => Theme.of(context).platform == TargetPlatform.android;
   bool get _compactChannels => MediaQuery.sizeOf(context).width < 600;
@@ -191,13 +212,6 @@ final class _BiliAppShellState extends State<BiliAppShell>
       (_pageBack[_displayTab.id]?.canGoBack ?? false) ||
       _canReturnFromMessages ||
       (_desktopDual ? _workspace.canGoBackBrowsing : _workspace.canGoBack);
-
-  bool get _showBackButton =>
-      _dualTabs &&
-      _canGoBack &&
-      (!(_displayTab.pinned && _displayTab.isRoot) ||
-          _canReturnFromMessages ||
-          (_pageBack[_displayTab.id]?.canGoBack ?? false));
 
   bool _goBackWithinPage() => _pageBack[_displayTab.id]?.goBack() ?? false;
 
@@ -230,27 +244,34 @@ final class _BiliAppShellState extends State<BiliAppShell>
       (widget.navigationMode ?? defaultWorkspaceNavigationMode) ==
       WorkspaceNavigationMode.dualTabs;
 
+  bool get _singlePage =>
+      (widget.navigationMode ?? defaultWorkspaceNavigationMode) ==
+      WorkspaceNavigationMode.singlePage;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _workspace.setDualMode(_dualTabs);
+    _workspace.setSingleMode(_singlePage);
     _workspace.acceptRoute(Uri.parse(widget.location));
     _rememberSection(_displayTab.location);
     _restoreSearch();
-    _searchController.addListener(_saveSearch);
   }
 
   @override
   void didUpdateWidget(covariant BiliAppShell oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.accountIdentity != oldWidget.accountIdentity) {
+      _tabKeys.clear();
+      _viewStorage.clear();
       _workspace.clearPlaybackHistory();
     }
     if (widget.navigationMode != oldWidget.navigationMode) {
       _windowFailed = false;
     }
     _workspace.setDualMode(_dualTabs);
+    _workspace.setSingleMode(_singlePage);
     if (widget.navigationMode != oldWidget.navigationMode) _revealActiveTab();
     if (widget.location != oldWidget.location) {
       if (!_workspace.acceptRoute(Uri.parse(widget.location))) {
@@ -292,10 +313,16 @@ final class _BiliAppShellState extends State<BiliAppShell>
 
   void _prunePages() {
     final liveIds = _workspace.tabs.map((tab) => tab.id).toSet();
-    _tabKeys.removeWhere((id, _) => !liveIds.contains(id));
+    _tabKeys.removeWhere(
+      (key, _) => !liveIds.contains(key.$1) || !liveIds.contains(key.$3),
+    );
     _pageKeys.removeWhere((id, _) => !liveIds.contains(id));
     _searchDrafts.removeWhere((id, _) => !liveIds.contains(id));
-    _pageStorage.removeWhere((id, _) => !liveIds.contains(id));
+    _searchControllers.removeWhere((id, controller) {
+      if (liveIds.contains(id)) return false;
+      controller.dispose();
+      return true;
+    });
     _pageBack.removeWhere((id, controller) {
       if (liveIds.contains(id)) return false;
       controller.dispose();
@@ -308,9 +335,17 @@ final class _BiliAppShellState extends State<BiliAppShell>
     });
   }
 
-  void _saveSearch() => _searchDrafts[_displayTab.id] = _searchController.text;
+  TextEditingController _searchFor(WorkspaceTab tab) =>
+      _searchControllers.putIfAbsent(tab.id, () {
+        final controller = TextEditingController(
+          text:
+              _searchDrafts[tab.id] ?? tab.location.queryParameters['q'] ?? '',
+        );
+        controller.addListener(() => _searchDrafts[tab.id] = controller.text);
+        return controller;
+      });
   void _restoreSearch() {
-    _searchController.text =
+    _searchFor(_displayTab).text =
         _searchDrafts[_displayTab.id] ??
         _displayTab.location.queryParameters['q'] ??
         '';
@@ -319,7 +354,9 @@ final class _BiliAppShellState extends State<BiliAppShell>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _searchController.dispose();
+    for (final controller in _searchControllers.values) {
+      controller.dispose();
+    }
     for (final controller in _pageBack.values) {
       controller.dispose();
     }
@@ -332,7 +369,9 @@ final class _BiliAppShellState extends State<BiliAppShell>
   void _revealActiveTab() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final tabContext = _tabKeys[_workspace.activeId]?.currentContext;
+      final frame = _viewKey(_displayTab);
+      final tabContext =
+          _tabKeys[(frame.$1, frame.$2, _workspace.activeId)]?.currentContext;
       if (tabContext != null) {
         Scrollable.ensureVisible(tabContext, alignment: 0.5);
       }
@@ -346,7 +385,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
   }
 
   void _newTab() {
-    if (_dualTabs) return;
+    if (_dualTabs || _singlePage) return;
     if (_workspace.tabs.length >= WorkspaceTabs.maximumTabs) {
       showAppNotice(context, '最多打开 16 个标签页，请先关闭不用的标签');
       return;
@@ -376,9 +415,8 @@ final class _BiliAppShellState extends State<BiliAppShell>
   void _closeTab(String id) {
     final wasActive = id == _workspace.activeId;
     if (!_workspace.close(id)) return;
-    _tabKeys.remove(id);
+    _tabKeys.removeWhere((key, _) => key.$1 == id || key.$3 == id);
     _searchDrafts.remove(id);
-    _pageStorage.remove(id);
     _prunePages();
     setState(() {});
     if (wasActive) _commitWorkspace();
@@ -461,6 +499,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
   }
 
   void _cycleTabs({bool backwards = false}) {
+    if (_singlePage) return;
     if (_desktopDual) {
       setState(() => _windowActivation++);
       return;
@@ -543,7 +582,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
       case ShortcutAction.newTab:
         _newTab();
       case ShortcutAction.closeTab:
-        if (_desktopDual) {
+        if (_desktopDual || _singlePage) {
           _goBack();
         } else if (!_goBackWithinPage()) {
           _closeTab(_workspace.activeId);
@@ -563,7 +602,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
       dispatcher.configure(widget.shortcuts);
     }
     // Keyboard resizing changes geometry, not the cached pages' configuration.
-    final pages = _pages(context);
+    final pages = Builder(builder: _pages);
     final main = CommandTargetScope<Object>(
       scope: CommandScope.workspace,
       commands: {
@@ -582,125 +621,15 @@ final class _BiliAppShellState extends State<BiliAppShell>
         },
         child: Focus(
           autofocus: true,
-          child: Scaffold(
-            floatingActionButton:
-                _dualTabs &&
-                    !_desktopDual &&
-                    !_workspace.active.isPlayback &&
-                    _workspace.playbackId != null
-                ? FloatingActionButton.small(
-                    tooltip: '返回播放',
-                    onPressed: () => _selectTab(_workspace.playbackId!),
-                    child: const Icon(Icons.play_arrow_rounded),
-                  )
-                : null,
-            body: SafeArea(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final compact = constraints.maxWidth < 600;
-                  final wide = constraints.maxWidth >= 1600;
-                  final colors = Theme.of(context).colorScheme;
-                  return Column(
-                    children: [
-                      if (_dualTabs) ...[
-                        if (widget.windowControlsBuilder != null)
-                          _dualWindowCaption(context)
-                        else if (!_android &&
-                            !_desktopDual &&
-                            _workspace.active.isPlayback)
-                          _mobilePlaybackHeader(context),
-                      ] else
-                        _tabStrip(context),
-                      Expanded(
-                        child: Row(
-                          children: [
-                            SizedBox(
-                              width: compact ? 0 : (wide ? 164 : 76),
-                              child: Offstage(
-                                offstage: compact,
-                                child: _sideNavigation(context, extended: wide),
-                              ),
-                            ),
-                            Expanded(
-                              child: Padding(
-                                padding: compact
-                                    ? EdgeInsets.zero
-                                    : const EdgeInsets.fromLTRB(0, 12, 16, 16),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(
-                                    compact ? 0 : 18,
-                                  ),
-                                  child: ColoredBox(
-                                    color: colors.surface,
-                                    child: PrimaryNavigationTransition(
-                                      key: const ValueKey(
-                                        'workspace-primary-transition',
-                                      ),
-                                      enabled: _animatePrimaryNavigation,
-                                      index: _displayTab.isRoot
-                                          ? sectionForLocation(
-                                              _displayTab.location,
-                                              compact: _compactChannels,
-                                            ).index
-                                          : null,
-                                      child: Column(
-                                        children: [
-                                          if (_showBackButton &&
-                                              widget.windowControlsBuilder ==
-                                                  null &&
-                                              _displayTab.isProfile)
-                                            SizedBox(
-                                              key: const ValueKey(
-                                                'workspace-profile-back-header',
-                                              ),
-                                              height: 42,
-                                              child: Align(
-                                                alignment: Alignment.centerLeft,
-                                                child: _backButton(),
-                                              ),
-                                            ),
-                                          if (_displayTab.location.path !=
-                                                  '/search' &&
-                                              !_displayTab.isPlayback &&
-                                              !_displayTab.isProfile)
-                                            LayoutBuilder(
-                                              builder: (context, bounds) =>
-                                                  _navigationHeader(
-                                                    context,
-                                                    bounds,
-                                                    _channelBar(
-                                                      context,
-                                                      compact: compact,
-                                                    ),
-                                                    compact: compact,
-                                                  ),
-                                            ),
-                                          Expanded(child: pages),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (compact &&
-                          !_displayTab.isPlayback &&
-                          !_displayTab.isProfile)
-                        _animatedBottomNavigation(context),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ),
+          child: (_android
+              ? pages
+              : _workspaceFrame(context, _displayTab, pages)),
         ),
       ),
     );
     final windowBuilder = widget.playbackWindowBuilder;
-    if (windowBuilder == null) return main;
+    final presented = _withBackPreview(context, main);
+    if (windowBuilder == null) return presented;
     final playback = _desktopDual
         ? _workspace.tabs
               .where((tab) => tab.id == _workspace.playbackId)
@@ -708,7 +637,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
         : null;
     return windowBuilder(
       context,
-      child: main,
+      child: presented,
       playback: playback == null
           ? null
           : _page(context, playback, active: true),
@@ -719,12 +648,134 @@ final class _BiliAppShellState extends State<BiliAppShell>
     );
   }
 
+  Widget _workspaceFrame(
+    BuildContext context,
+    WorkspaceTab tab,
+    Widget pages,
+  ) => WorkspaceFrameTab(
+    tab: tab,
+    child: Builder(
+      builder: (context) => Scaffold(
+        floatingActionButton:
+            _dualTabs &&
+                !_desktopDual &&
+                !tab.isPlayback &&
+                _workspace.playbackId != null &&
+                !(_gestureDestination?.id == tab.id &&
+                    (_gestureSource?.isPlayback ?? false) &&
+                    _workspace.playbackHistory.isEmpty)
+            ? FloatingActionButton.small(
+                tooltip: '返回播放',
+                onPressed: () => _selectTab(_workspace.playbackId!),
+                child: const Icon(Icons.play_arrow_rounded),
+              )
+            : null,
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxWidth < 600;
+              final wide = constraints.maxWidth >= 1600;
+              final colors = Theme.of(context).colorScheme;
+              return Column(
+                children: [
+                  if (_dualTabs || _singlePage) ...[
+                    if (widget.windowControlsBuilder != null)
+                      _dualWindowCaption(context)
+                    else if (!_android && !_desktopDual && tab.isPlayback)
+                      _mobilePlaybackHeader(context),
+                  ] else
+                    _tabStrip(context),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: compact ? 0 : (wide ? 164 : 76),
+                          child: Offstage(
+                            offstage: compact,
+                            child: _sideNavigation(context, extended: wide),
+                          ),
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: compact
+                                ? EdgeInsets.zero
+                                : const EdgeInsets.fromLTRB(0, 12, 16, 16),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(
+                                compact ? 0 : 18,
+                              ),
+                              child: ColoredBox(
+                                color: colors.surface,
+                                child: PrimaryNavigationTransition(
+                                  key: const ValueKey(
+                                    'workspace-primary-transition',
+                                  ),
+                                  enabled: _animatePrimaryNavigation,
+                                  index: tab.isRoot
+                                      ? sectionForLocation(
+                                          tab.location,
+                                          compact: _compactChannels,
+                                        ).index
+                                      : null,
+                                  child: Column(
+                                    children: [
+                                      if (_frameShowsBack(context) &&
+                                          widget.windowControlsBuilder ==
+                                              null &&
+                                          tab.isProfile)
+                                        SizedBox(
+                                          key: const ValueKey(
+                                            'workspace-profile-back-header',
+                                          ),
+                                          height: 42,
+                                          child: Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: _backButton(),
+                                          ),
+                                        ),
+                                      if (tab.location.path != '/search' &&
+                                          !tab.isPlayback &&
+                                          !tab.isProfile)
+                                        LayoutBuilder(
+                                          builder: (context, bounds) =>
+                                              _navigationHeader(
+                                                context,
+                                                bounds,
+                                                _channelBar(
+                                                  context,
+                                                  compact: compact,
+                                                ),
+                                                compact: compact,
+                                              ),
+                                        ),
+                                      Expanded(child: pages),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (compact && !tab.isPlayback && !tab.isProfile)
+                    _animatedBottomNavigation(context),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    ),
+  );
+
   Widget _dualWindowCaption(BuildContext context) => SizedBox(
     key: const ValueKey('dual-window-caption'),
     height: 32,
     child: Row(
       children: [
-        if (_showBackButton) _backButton(),
+        if (_frameShowsBack(context)) _backButton(),
         Expanded(
           child:
               widget.dragRegionBuilder?.call(
@@ -748,11 +799,14 @@ final class _BiliAppShellState extends State<BiliAppShell>
     height: 44,
     child: Row(
       children: [
-        IconButton(
-          tooltip: '返回上一视频',
-          onPressed: _playbackWindowBack,
-          icon: const Icon(Icons.arrow_back),
-        ),
+        if (_singlePage)
+          _backButton()
+        else
+          IconButton(
+            tooltip: '返回上一视频',
+            onPressed: _playbackWindowBack,
+            icon: const Icon(Icons.arrow_back),
+          ),
         Expanded(
           child: Text(
             _workspace.active.title,
@@ -760,136 +814,204 @@ final class _BiliAppShellState extends State<BiliAppShell>
             overflow: TextOverflow.ellipsis,
           ),
         ),
-        IconButton(
-          tooltip: '关闭播放',
-          onPressed: _closePlaybackWindow,
-          icon: const Icon(Icons.close),
-        ),
+        if (!_singlePage)
+          IconButton(
+            tooltip: '关闭播放',
+            onPressed: _closePlaybackWindow,
+            icon: const Icon(Icons.close),
+          ),
       ],
     ),
   );
 
-  Widget _pages(BuildContext context) {
-    final builder = widget.pageBuilder;
-    if (builder == null) {
-      return PageBackScope(
-        controller: _backFor(_workspace.activeId),
-        child: widget.child,
-      );
-    }
+  Object _backIdentity(WorkspaceTab tab) =>
+      (widget.accountIdentity, widget.navigationMode, tab.id, tab.location);
+
+  Widget _withBackPreview(BuildContext context, Widget child) {
+    if (!_android || _desktopDual || widget.pageBuilder == null) return child;
     final destination = _workspace.backDestination(
       fromMessages: _canReturnFromMessages,
     );
-    bool isPreview(WorkspaceTab tab) =>
-        tab.id != _displayTab.id &&
-        tab.id == destination?.id &&
-        tab.location == destination?.location;
+    final supported =
+        destination != null &&
+        _viewsForTab(
+          _workspace.tabs.firstWhere((tab) => tab.id == destination.id),
+        ).any((view) => view.location == destination.location);
     return PredictiveBackRegion(
-      enabled:
-          _android &&
-          !_desktopDual &&
-          destination != null &&
-          !(_pageBack[_displayTab.id]?.canGoBack ?? false),
-      identity: (
-        widget.location,
-        widget.navigationMode,
-        widget.accountIdentity,
-        _displayTab.id,
-        destination?.id,
-        destination?.location,
-      ),
+      enabled: supported && !(_pageBack[_displayTab.id]?.canGoBack ?? false),
+      identity: _backIdentity(_displayTab),
+      destinationIdentity: destination == null
+          ? null
+          : _backIdentity(destination),
+      onStart: () {
+        _gestureSource = _displayTab;
+        _gestureDestination = destination;
+        return destination != null;
+      },
+      onEnd: () {
+        _gestureSource = null;
+        _gestureDestination = null;
+      },
       onBack: _goBack,
-      builder: (context, progress, edge, previewing) => Stack(
+      builder: (context, progress, edge, previewing) =>
+          WorkspaceBackPresentation(
+            progress: progress,
+            edge: edge,
+            source: previewing ? _gestureSource : null,
+            destination: previewing ? _gestureDestination : null,
+            child: child,
+          ),
+    );
+  }
+
+  (String, String) _viewKey(WorkspaceTab tab) => (
+    tab.id,
+    !_android
+        ? 'slot'
+        : tab.isRoot
+        ? 'root'
+        : tab.location.path,
+  );
+
+  List<WorkspaceTab> _viewsForTab(WorkspaceTab tab) {
+    if (!_android || tab.id != _workspace.playbackId) {
+      return [tab];
+    }
+    final views = <WorkspaceTab>[tab];
+    final paths = {tab.location.path};
+    final budget = WorkspaceTabs.maximumTabs - _workspace.tabs.length;
+    for (final location in _workspace.playbackHistory.reversed) {
+      if (views.length > budget) break;
+      if (paths.add(location.path)) {
+        views.add(WorkspaceTab(id: tab.id, location: location));
+      }
+    }
+    return views.reversed.toList();
+  }
+
+  Widget _pages(BuildContext context) {
+    final builder = widget.pageBuilder;
+    if (builder == null) {
+      return _android
+          ? _workspaceFrame(
+              context,
+              _displayTab,
+              PageBackScope(
+                controller: _backFor(_workspace.activeId),
+                child: widget.child,
+              ),
+            )
+          : PageBackScope(
+              controller: _backFor(_workspace.activeId),
+              child: widget.child,
+            );
+    }
+    final liveViews = {
+      for (final tab in _workspace.tabs)
+        for (final view in _viewsForTab(tab)) _viewKey(view),
+    };
+    _tabKeys.removeWhere((key, _) => !liveViews.contains((key.$1, key.$2)));
+    _viewStorage.removeWhere((key, _) => !liveViews.contains(key));
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Offstage(child: widget.child),
+        for (final tab in _workspace.tabs)
+          if (!_desktopDual || tab.id != _workspace.playbackId)
+            _page(context, tab, active: tab.id == _displayTab.id),
+      ],
+    );
+  }
+
+  Widget _page(BuildContext context, WorkspaceTab tab, {required bool active}) {
+    final back = WorkspaceBackPresentation.maybeOf(context);
+    final previewsTab = back?.destination?.id == tab.id;
+    final content = Builder(
+      builder: (context) => Stack(
         fit: StackFit.expand,
         children: [
-          // go_router needs its shell Navigator mounted to dispatch system back
-          // and dismiss dialogs. Its feature routes only build placeholders.
-          Offstage(child: widget.child),
-          if (previewing && destination != null)
-            // Replaced media/root locations have no second live page. Preview
-            // their identity without loading another source or starting audio.
-            ExcludeSemantics(
-              child: PredictiveBackPageTransition(
-                progress: progress,
-                edge: edge,
-                incoming: true,
-                child: ColoredBox(
-                  color: Theme.of(context).colorScheme.surfaceContainerLow,
-                  child: Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text('返回 ${destination.title}'),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          for (final tab in [
-            ..._workspace.tabs.where((tab) => tab.id != _displayTab.id),
-            _displayTab,
-          ])
-            if (!_desktopDual || tab.id != _workspace.playbackId)
-              _page(
-                context,
-                tab,
-                active: tab.id == _displayTab.id,
-                preview: previewing && isPreview(tab),
-                backProgress:
-                    previewing && (tab.id == _displayTab.id || isPreview(tab))
-                    ? progress
-                    : kAlwaysDismissedAnimation,
-                backEdge: edge,
-              ),
+          for (final view in _viewsForTab(tab))
+            _locationView(context, tab, view, active: active, back: back),
         ],
+      ),
+    );
+    return Offstage(
+      key: _pageKeys.putIfAbsent(tab.id, GlobalKey.new),
+      offstage: !active && !previewsTab,
+      child: FocusScope(
+        canRequestFocus: active,
+        skipTraversal: !active,
+        child: WorkspaceActivity(
+          active: active,
+          previewing: previewsTab && !active,
+          child: WorkspacePlaybackSelection(
+            tabId: _desktopDual ? _workspace.playbackId : null,
+            child:
+                widget.pageScopeBuilder?.call(context, tab, content) ?? content,
+          ),
+        ),
       ),
     );
   }
 
-  Widget _page(
+  Widget _locationView(
     BuildContext context,
-    WorkspaceTab tab, {
+    WorkspaceTab tab,
+    WorkspaceTab view, {
     required bool active,
-    bool preview = false,
-    Animation<double> backProgress = kAlwaysDismissedAnimation,
-    SwipeEdge backEdge = SwipeEdge.left,
-  }) => Offstage(
-    key: _pageKeys.putIfAbsent(tab.id, GlobalKey.new),
-    offstage: !active && !preview,
-    child: PredictiveBackPageTransition(
-      progress: backProgress,
-      edge: backEdge,
-      incoming: preview,
-      child: IgnorePointer(
-        ignoring: preview,
-        child: ExcludeSemantics(
-          excluding: preview,
-          // Keep account listeners active for cached pages. Riverpod pauses
-          // listeners below a disabled TickerMode, delaying logout cleanup.
-          child: FocusScope(
-            canRequestFocus: active,
-            skipTraversal: !active,
-            child: WorkspaceActivity(
-              active: active,
-              child: WorkspacePlaybackSelection(
-                tabId: _desktopDual ? _workspace.playbackId : null,
-                child: PageStorage(
-                  bucket: _pageStorage.putIfAbsent(
-                    tab.id,
-                    PageStorageBucket.new,
-                  ),
-                  child: WorkspacePageHeader(
-                    builder: _searchHeader,
-                    child: WorkspacePageNavigation(
-                      navigate: (location) =>
-                          _updatePageLocation(tab, location),
-                      child: TabPagingScope(
-                        progress: _pagingFor(tab),
-                        child: PageBackScope(
-                          controller: _backFor(tab.id),
-                          child:
-                              widget.pageBuilder?.call(context, tab) ??
-                              widget.child,
+    required WorkspaceBackPresentation? back,
+  }) {
+    final selected = _viewKey(tab) == _viewKey(view);
+    final incoming = back?.matches(back.destination, view) ?? false;
+    final outgoing = back?.matches(back.source, view) ?? false;
+    final current = active && selected;
+    final key = _viewKey(view);
+    return Offstage(
+      key: ValueKey(('workspace-view', key)),
+      offstage: !current && !incoming,
+      child: PredictiveBackPageTransition(
+        progress: incoming || outgoing
+            ? back!.progress
+            : kAlwaysDismissedAnimation,
+        edge: back?.edge ?? SwipeEdge.left,
+        incoming: incoming,
+        child: IgnorePointer(
+          ignoring: !current,
+          child: ExcludeSemantics(
+            excluding: !current,
+            child: FocusScope(
+              canRequestFocus: current,
+              skipTraversal: !current,
+              child: WorkspaceActivity(
+                active: current,
+                previewing: incoming && !current,
+                child: WorkspaceMediaPermission(
+                  allowed: selected,
+                  child: PageStorage(
+                    bucket: _viewStorage.putIfAbsent(
+                      key,
+                      PageStorageBucket.new,
+                    ),
+                    child: WorkspacePageHeader(
+                      builder: _searchHeader,
+                      child: WorkspacePageNavigation(
+                        navigate: (location) =>
+                            _updatePageLocation(view, location),
+                        child: TabPagingScope(
+                          progress: _pagingFor(view),
+                          child: PageBackScope(
+                            controller: _backFor(tab.id),
+                            child: Builder(
+                              builder: (context) {
+                                final page =
+                                    widget.pageBuilder?.call(context, view) ??
+                                    widget.child;
+                                return _android
+                                    ? _workspaceFrame(context, view, page)
+                                    : page;
+                              },
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -900,8 +1022,8 @@ final class _BiliAppShellState extends State<BiliAppShell>
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   void _selectSection(WorkspaceSection section, {required bool compact}) {
     switch (section) {
@@ -950,7 +1072,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
   Widget _sideNavigation(BuildContext context, {required bool extended}) {
     final colors = Theme.of(context).colorScheme;
     final section = sectionForLocation(
-      _displayTab.location,
+      _frameTab(context).location,
       compact: _compactChannels,
     );
     Widget entry(
@@ -1095,9 +1217,10 @@ final class _BiliAppShellState extends State<BiliAppShell>
                       item.label,
                       _sectionIcon(
                         item,
-                        selected: !_displayTab.isPlayback && section == item,
+                        selected:
+                            !_frameTab(context).isPlayback && section == item,
                       ),
-                      !_displayTab.isPlayback && section == item,
+                      !_frameTab(context).isPlayback && section == item,
                       () => _selectSection(item, compact: false),
                       key: ValueKey('workspace-nav-${item.name}'),
                     ),
@@ -1207,7 +1330,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
       WorkspaceSection.settings,
     ];
     final selected = sectionForLocation(
-      _displayTab.location,
+      _frameTab(context).location,
       compact: _compactChannels,
     );
     if (!sections.contains(selected)) {
@@ -1391,10 +1514,14 @@ final class _BiliAppShellState extends State<BiliAppShell>
   );
 
   Widget _tab(BuildContext context, WorkspaceTab tab) {
-    final selected = tab.id == _workspace.activeId;
+    final selected = tab.id == _frameTab(context).id;
     final colors = Theme.of(context).colorScheme;
     return Padding(
-      key: _tabKeys.putIfAbsent(tab.id, GlobalKey.new),
+      key: _tabKeys.putIfAbsent((
+        _frameTab(context).id,
+        _viewKey(_frameTab(context)).$2,
+        tab.id,
+      ), GlobalKey.new),
       padding: const EdgeInsets.only(left: 3, top: 4),
       child: Material(
         color: selected ? colors.surface : Colors.transparent,
@@ -1467,7 +1594,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
   };
 
   Widget? _channelBar(BuildContext context, {required bool compact}) {
-    final active = _displayTab;
+    final active = _frameTab(context);
     if (active.location.path == '/history' ||
         active.location.path == '/downloads' ||
         active.location.path == '/messages' ||
@@ -1529,7 +1656,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
 
   Widget _liveSectionBar(BuildContext context) {
     final sections = HomeChannel.live.sections;
-    final requested = _displayTab.location.queryParameters['section'];
+    final requested = _frameTab(context).location.queryParameters['section'];
     final selected = sections.contains(requested) ? requested : sections.first;
     return SizedBox(
       height: PageTabStyle.barHeight,
@@ -1564,8 +1691,8 @@ final class _BiliAppShellState extends State<BiliAppShell>
     ),
   );
 
-  bool _navigationToolsVisible({required bool compact}) =>
-      switch (sectionForLocation(_displayTab.location, compact: false)) {
+  bool _navigationToolsVisible(BuildContext context, {required bool compact}) =>
+      switch (sectionForLocation(_frameTab(context).location, compact: false)) {
         WorkspaceSection.dynamic => !compact,
         WorkspaceSection.mine ||
         WorkspaceSection.messages ||
@@ -1581,12 +1708,12 @@ final class _BiliAppShellState extends State<BiliAppShell>
     bool? showTools,
     bool compact = false,
   }) {
-    if (!(showTools ?? _navigationToolsVisible(compact: compact))) {
+    if (!(showTools ?? _navigationToolsVisible(context, compact: compact))) {
       if (navigation == null &&
-          _dualTabs &&
+          (_dualTabs || _singlePage) &&
           widget.windowControlsBuilder == null &&
-          _showBackButton &&
-          _displayTab.location.path != '/me') {
+          _frameShowsBack(context) &&
+          _frameTab(context).location.path != '/me') {
         return SizedBox(
           key: const ValueKey('workspace-page-back-header'),
           height: 42,
@@ -1636,7 +1763,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(
         children: [
-          if (_showBackButton && widget.windowControlsBuilder == null)
+          if (_frameShowsBack(context) && widget.windowControlsBuilder == null)
             _backButton(),
           if (widget.accountBuilder case final builder?) ...[
             builder(context),
@@ -1647,7 +1774,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
               height: 34,
               child: TextField(
                 key: const ValueKey('workspace-search'),
-                controller: _searchController,
+                controller: _searchFor(_frameTab(context)),
                 textInputAction: TextInputAction.search,
                 style: const TextStyle(fontSize: 12),
                 onSubmitted: _search,
@@ -1657,7 +1784,8 @@ final class _BiliAppShellState extends State<BiliAppShell>
                   contentPadding: const EdgeInsets.symmetric(horizontal: 10),
                   suffixIcon: IconButton(
                     tooltip: '搜索',
-                    onPressed: () => _search(_searchController.text),
+                    onPressed: () =>
+                        _search(_searchFor(_frameTab(context)).text),
                     icon: const Icon(BiliIcons.search, size: 17),
                   ),
                 ),
@@ -1665,8 +1793,8 @@ final class _BiliAppShellState extends State<BiliAppShell>
             ),
           ),
           const SizedBox(width: 5),
-          if (_displayTab.location.path != '/' &&
-              _displayTab.location.path != '/search' &&
+          if (_frameTab(context).location.path != '/' &&
+              _frameTab(context).location.path != '/search' &&
               MediaQuery.sizeOf(context).width >= 600) ...[
             _tool('观看历史', BiliIcons.history, '/history'),
             _tool('下载', Icons.download_outlined, '/downloads'),

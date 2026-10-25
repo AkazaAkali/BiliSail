@@ -129,6 +129,12 @@ GoRouter createBiliRouter({
             playbackWindowBuilder: playbackWindowBuilder,
             onActivateBrowser: onActivateBrowser,
             onExitRequested: onExitRequested,
+            pageScopeBuilder: (context, tab, child) => _WorkspacePageScope(
+              tab: tab,
+              observeAccount: accountBuilder != null,
+              allowConcurrentPlayback: settings.concurrentPlaybackEnabled,
+              child: child,
+            ),
             pageBuilder: (context, tab) => _WorkspacePage(
               tab: tab,
               playerBuilder: playerBuilder,
@@ -178,6 +184,72 @@ GoRouter createBiliRouter({
   errorBuilder: (context, state) =>
       const Scaffold(body: StateView.empty(message: '找不到这个页面')),
 );
+
+final class _WorkspacePageScope extends ConsumerWidget {
+  const _WorkspacePageScope({
+    required this.tab,
+    required this.observeAccount,
+    required this.allowConcurrentPlayback,
+    required this.child,
+  });
+  final WorkspaceTab tab;
+  final bool observeAccount, allowConcurrentPlayback;
+  final Widget child;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final playback = ref.watch(playbackManagerProvider);
+    final selectedPlayback = WorkspacePlaybackSelection.of(context);
+    if (playback != null &&
+        WorkspaceActivity.isActive(context) &&
+        (selectedPlayback == null || selectedPlayback == tab.id)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted || !WorkspaceActivity.isActive(context)) return;
+        unawaited(
+          playback.updateWorkspace(
+            allowConcurrent: allowConcurrentPlayback,
+            activeTabId: tab.id,
+          ),
+        );
+      });
+    }
+    final account = observeAccount
+        ? ref.watch(
+            authControllerProvider.select(
+              (auth) => (
+                auth.isSignedIn,
+                auth.mid,
+                auth.userName,
+                ref.read(sessionEpochProvider)(),
+              ),
+            ),
+          )
+        : (false, null, null, 0);
+    return ProviderScope(
+      // An expired restored login can cancel reads while still displaying
+      // guest. Include the epoch so cancelled pages restart in that case too.
+      key: ValueKey(account),
+      overrides: [
+        commentVideoNavigatorProvider.overrideWithValue(
+          (video) => context.go('/video/${video.value}'),
+        ),
+        if (playback != null)
+          playbackSessionProvider.overrideWith((ref) {
+            final session = playback.acquire(tab.id);
+            ref.onDispose(() => playback.release(tab.id, session));
+            return session;
+          }),
+        feedControllerProvider.overrideWith(FeedController.new),
+        homeControllerProvider.overrideWith2(HomeController.new),
+        profileControllerProvider.overrideWith2(ProfileController.new),
+        liveControllerProvider.overrideWith2(LiveController.new),
+        pgcControllerProvider.overrideWith2(PgcController.new),
+        searchControllerProvider.overrideWith(SearchController.new),
+        messagesControllerProvider.overrideWith(MessagesController.new),
+      ],
+      child: child,
+    );
+  }
+}
 
 final class _WorkspacePage extends ConsumerWidget {
   const _WorkspacePage({
@@ -510,21 +582,6 @@ final class _WorkspacePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final playback = ref.watch(playbackManagerProvider);
-    final selectedPlayback = WorkspacePlaybackSelection.of(context);
-    if (playback != null &&
-        WorkspaceActivity.isActive(context) &&
-        (selectedPlayback == null || selectedPlayback == tab.id)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!context.mounted || !WorkspaceActivity.isActive(context)) return;
-        unawaited(
-          playback.updateWorkspace(
-            allowConcurrent: allowConcurrentPlayback,
-            activeTabId: tab.id,
-          ),
-        );
-      });
-    }
     final account = observeAccount
         ? ref.watch(
             authControllerProvider.select(
@@ -537,301 +594,297 @@ final class _WorkspacePage extends ConsumerWidget {
             ),
           )
         : (false, null, null, 0);
-    return ProviderScope(
-      // An expired restored login can cancel reads while still displaying
-      // guest. Include the epoch so cancelled pages restart in that case too.
-      key: ValueKey(account),
-      overrides: [
-        commentVideoNavigatorProvider.overrideWithValue(
-          (video) => context.go('/video/${video.value}'),
-        ),
-        if (playback != null)
-          playbackSessionProvider.overrideWith((ref) {
-            final session = playback.acquire(tab.id);
-            ref.onDispose(() => playback.release(tab.id, session));
-            return session;
-          }),
-        feedControllerProvider.overrideWith(FeedController.new),
-        homeControllerProvider.overrideWith2(HomeController.new),
-        profileControllerProvider.overrideWith2(ProfileController.new),
-        liveControllerProvider.overrideWith2(LiveController.new),
-        pgcControllerProvider.overrideWith2(PgcController.new),
-        searchControllerProvider.overrideWith(SearchController.new),
-        messagesControllerProvider.overrideWith(MessagesController.new),
-      ],
-      child: Builder(
-        builder: (context) => CommandTargetScope<Object>(
-          scope: CommandScope.page,
-          active: WorkspaceActivity.isActive(context),
-          merge: const {ShortcutAction.refresh},
-          commands: {
-            if (!tab.isRoot &&
-                !tab.isPgc &&
-                (tab.isVideo ||
-                    tab.isLive ||
-                    tab.isProfile ||
-                    tab.isOffline ||
-                    const ['/search', '/history'].contains(tab.location.path)))
-              ShortcutAction.refresh: (stroke) => _refresh(context, stroke),
-          },
-          child: Builder(
-            builder: (context) {
-              final uri = tab.location;
-              if (tab.isRoot) return _rootPage(context, account.$1);
-              switch (uri.path) {
-                case '/search':
-                  return WorkspacePageHeader.wrap(
-                    context,
-                    SearchScreen(
-                      key: PageStorageKey('search-${tab.id}'),
-                      query: uri.queryParameters['q'] ?? '',
+    return Builder(
+      builder: (context) => CommandTargetScope<Object>(
+        scope: CommandScope.page,
+        active: WorkspaceActivity.isActive(context),
+        merge: const {ShortcutAction.refresh},
+        commands: {
+          if (!tab.isRoot &&
+              !tab.isPgc &&
+              (tab.isVideo ||
+                  tab.isLive ||
+                  tab.isProfile ||
+                  tab.isOffline ||
+                  const ['/search', '/history'].contains(tab.location.path)))
+            ShortcutAction.refresh: (stroke) => _refresh(context, stroke),
+        },
+        child: Builder(
+          builder: (context) {
+            final uri = tab.location;
+            if (tab.isRoot) return _rootPage(context, account.$1);
+            switch (uri.path) {
+              case '/search':
+                return WorkspacePageHeader.wrap(
+                  context,
+                  SearchScreen(
+                    key: PageStorageKey('search-${tab.id}'),
+                    query: uri.queryParameters['q'] ?? '',
+                  ),
+                );
+              case '/history':
+                return HistoryScreen(key: PageStorageKey('history-${tab.id}'));
+              default:
+                if (tab.isOffline) {
+                  return OfflineScreen(
+                    key: PageStorageKey('offline-${tab.id}'),
+                    taskId: uri.pathSegments.last,
+                    playerBuilder: (context, task) => _workspacePlayer(
+                      context,
+                      () =>
+                          offlinePlayerBuilder?.call(context, task) ??
+                          const StateView.empty(message: '离线播放服务未配置'),
                     ),
+                    onBackToDownloads: () => context.go('/downloads'),
+                    coverProvider: downloadCoverProvider,
                   );
-                case '/history':
-                  return HistoryScreen(
-                    key: PageStorageKey('history-${tab.id}'),
-                  );
-                default:
-                  if (tab.isOffline) {
-                    return OfflineScreen(
-                      key: PageStorageKey('offline-${tab.id}'),
-                      taskId: uri.pathSegments.last,
-                      playerBuilder:
-                          offlinePlayerBuilder ??
-                          (_, _) => const StateView.empty(message: '离线播放服务未配置'),
-                      onBackToDownloads: () => context.go('/downloads'),
-                      coverProvider: downloadCoverProvider,
-                    );
+                }
+                if (tab.isPgc) {
+                  final id = uri.pathSegments.last;
+                  if (!RegExp(r'^[1-9][0-9]*$').hasMatch(id)) {
+                    return const StateView.empty(message: '影视地址无效');
                   }
-                  if (tab.isPgc) {
-                    final id = uri.pathSegments.last;
-                    if (!RegExp(r'^[1-9][0-9]*$').hasMatch(id)) {
-                      return const StateView.empty(message: '影视地址无效');
-                    }
-                    return PgcScreen(
-                      key: PageStorageKey('pgc-${tab.id}'),
-                      seasonId: uri.pathSegments[1] == 'season' ? id : null,
-                      episodeId: uri.pathSegments[1] == 'episode'
-                          ? id
-                          : uri.queryParameters['ep'],
-                      playerBuilder:
-                          pgcPlayerBuilder ??
-                          (_, _, _) =>
-                              const StateView.empty(message: '影视播放服务未配置'),
-                      commentsBuilder: pgcCommentsBuilder,
-                      onDownload: onDownloadSeason == null
-                          ? null
-                          : (season, selected) => onDownloadSeason?.call(
-                              context,
-                              season,
-                              selected,
-                            ),
-                      onOpenSeason: (season) =>
-                          context.go('/pgc/season/${season.seasonId}'),
-                      onEpisodeChanged: (episode) {
-                        final target = uri.replace(
-                          path: uri.pathSegments[1] == 'episode'
-                              ? '/pgc/episode/${episode.episodeId}'
-                              : uri.path,
-                          queryParameters: {
-                            ...uri.queryParameters,
-                            'ep': episode.episodeId,
-                            'tab': tab.id,
-                          },
-                        );
-                        final navigation = WorkspacePageNavigation.maybeOf(
+                  return PgcScreen(
+                    key: PageStorageKey('pgc-${tab.id}'),
+                    seasonId: uri.pathSegments[1] == 'season' ? id : null,
+                    episodeId: uri.pathSegments[1] == 'episode'
+                        ? id
+                        : uri.queryParameters['ep'],
+                    playerBuilder: (context, season, episode) =>
+                        _workspacePlayer(
                           context,
-                        );
-                        if (navigation != null) {
-                          navigation.navigate(target);
-                        } else {
-                          context.go(target.toString());
-                        }
-                      },
-                    );
-                  }
-                  if (tab.isLive) {
-                    return LiveScreen(
-                      key: PageStorageKey('live-${tab.id}'),
-                      roomId: uri.pathSegments.last,
-                      composerBuilder: liveComposerBuilder,
-                      playerBuilder:
-                          livePlayerBuilder ??
-                          (_, _) => const StateView.empty(message: '直播播放服务未配置'),
-                      onOpenUser: (user) => context.go('/user/${user.value}'),
-                    );
-                  }
-                  if (tab.isProfile) {
-                    final id = UserId(uri.pathSegments.last);
-                    return id.isValid
-                        ? ProfileScreen(
-                            key: PageStorageKey('profile-${tab.id}'),
-                            id: id,
-                            isSelf: account.$1 && account.$2 == id.value,
-                            initialSection:
-                                ProfileSection.values
-                                    .where(
-                                      (s) =>
-                                          s.name ==
-                                          uri.queryParameters['section'],
-                                    )
-                                    .firstOrNull ??
-                                ProfileSection.videos,
-                            onOpenUser: (user) =>
-                                context.go('/user/${user.value}'),
-                            onOpenVideo: (video) =>
-                                context.go('/video/${video.id.value}'),
-                            onOpenLiveRoom: (room) =>
-                                context.go('/live/${room.value}'),
-                            onLogin: () => showAppDialog<void>(
-                              context: context,
-                              builder: (_) => const AccountDialog(),
-                            ),
-                            onMessage: (profile) => context.go(
-                              Uri(
-                                path: '/messages',
-                                queryParameters: {
-                                  'talker': profile.id.value,
-                                  'name': profile.name,
-                                  if (profile.avatarUrl case final avatar?)
-                                    'avatar': avatar.toString(),
-                                },
-                              ).toString(),
-                            ),
-                          )
-                        : const StateView.empty(message: '用户地址无效');
-                  }
-                  if (tab.isVideo) {
-                    final id = VideoId(uri.pathSegments.last);
-                    final queueId = uri.queryParameters['queue'];
-                    final queue = queueId == null
+                          () =>
+                              pgcPlayerBuilder?.call(
+                                context,
+                                season,
+                                episode,
+                              ) ??
+                              const StateView.empty(message: '影视播放服务未配置'),
+                        ),
+                    commentsBuilder: pgcCommentsBuilder,
+                    onDownload: onDownloadSeason == null
                         ? null
-                        : ref
-                              .watch(watchLaterQueueRegistryProvider)
-                              .resolve(
-                                queueId,
-                                scope: ref
-                                    .read(homeRepositoryProvider)
-                                    .accountScope,
-                                sessionEpoch: ref.read(sessionEpochProvider)(),
-                              );
-                    return id.isValid
-                        ? VideoScreen(
-                            key: PageStorageKey('video-${tab.id}'),
-                            id: id,
-                            queue: queue?.indexOf(id) == -1 ? null : queue,
-                            initialCid: uri.queryParameters['cid'],
-                            playerBuilder: playerBuilder,
-                            actionsBuilder: actionsBuilder,
-                            menuBuilder: menuBuilder,
-                            onSearchTag: (tag) => context.go(
-                              Uri(
-                                path: '/search',
-                                queryParameters: {'q': tag},
-                              ).toString(),
-                            ),
-                            onOpenUser: (user) =>
-                                context.go('/user/${user.value}'),
-                            onLogin: observeAccount
-                                ? () => showAppDialog<void>(
-                                    context: context,
-                                    builder: (_) => const AccountDialog(),
+                        : (season, selected) =>
+                              onDownloadSeason?.call(context, season, selected),
+                    onOpenSeason: (season) =>
+                        context.go('/pgc/season/${season.seasonId}'),
+                    onEpisodeChanged: (episode) {
+                      final target = uri.replace(
+                        path: uri.pathSegments[1] == 'episode'
+                            ? '/pgc/episode/${episode.episodeId}'
+                            : uri.path,
+                        queryParameters: {
+                          ...uri.queryParameters,
+                          'ep': episode.episodeId,
+                          'tab': tab.id,
+                        },
+                      );
+                      final navigation = WorkspacePageNavigation.maybeOf(
+                        context,
+                      );
+                      if (navigation != null) {
+                        navigation.navigate(target);
+                      } else {
+                        context.go(target.toString());
+                      }
+                    },
+                  );
+                }
+                if (tab.isLive) {
+                  return LiveScreen(
+                    key: PageStorageKey('live-${tab.id}'),
+                    roomId: uri.pathSegments.last,
+                    composerBuilder: liveComposerBuilder,
+                    playerBuilder: (context, room) => _workspacePlayer(
+                      context,
+                      () =>
+                          livePlayerBuilder?.call(context, room) ??
+                          const StateView.empty(message: '直播播放服务未配置'),
+                    ),
+                    onOpenUser: (user) => context.go('/user/${user.value}'),
+                  );
+                }
+                if (tab.isProfile) {
+                  final id = UserId(uri.pathSegments.last);
+                  return id.isValid
+                      ? ProfileScreen(
+                          key: PageStorageKey('profile-${tab.id}'),
+                          id: id,
+                          isSelf: account.$1 && account.$2 == id.value,
+                          initialSection:
+                              ProfileSection.values
+                                  .where(
+                                    (s) =>
+                                        s.name ==
+                                        uri.queryParameters['section'],
                                   )
-                                : null,
-                            onOpenVideoPart: (id, cid) => context.go(
-                              Uri(
-                                path: '/video/${id.value}',
-                                queryParameters: cid == null
-                                    ? null
-                                    : {'cid': cid},
-                              ).toString(),
-                            ),
-                            onOpenVideo: (video) =>
-                                context.go('/video/${video.id.value}'),
-                            onAdvanceVideo: (video, cid) {
-                              final target = Uri(
-                                path: '/video/${video.value}',
-                                queryParameters: cid == null
-                                    ? null
-                                    : {'cid': cid},
-                              );
-                              final navigation =
-                                  WorkspacePageNavigation.maybeOf(context);
-                              if (navigation != null) {
-                                navigation.navigate(target);
-                              } else {
-                                context.go(
-                                  target
-                                      .replace(
-                                        queryParameters: {
-                                          ...target.queryParameters,
-                                          'tab': tab.id,
-                                        },
-                                      )
-                                      .toString(),
-                                );
-                              }
-                            },
-                            onOpenQueueVideo: queue == null
-                                ? null
-                                : (video) {
-                                    final target = Uri(
-                                      path: '/video/${video.value}',
-                                      queryParameters: {'queue': queue.id},
-                                    );
-                                    final navigation =
-                                        WorkspacePageNavigation.maybeOf(
-                                          context,
-                                        );
-                                    if (navigation != null) {
-                                      navigation.navigate(target);
-                                    } else {
-                                      context.go(
-                                        target
-                                            .replace(
-                                              queryParameters: {
-                                                ...target.queryParameters,
-                                                'tab': tab.id,
-                                              },
-                                            )
-                                            .toString(),
-                                      );
-                                    }
-                                  },
-                            onPartChanged: (part) {
-                              final target = uri.replace(
-                                queryParameters: {
-                                  ...uri.queryParameters,
-                                  'cid': part.cid,
-                                },
-                              );
-                              final navigation = queue == null
+                                  .firstOrNull ??
+                              ProfileSection.videos,
+                          onOpenUser: (user) =>
+                              context.go('/user/${user.value}'),
+                          onOpenVideo: (video) =>
+                              context.go('/video/${video.id.value}'),
+                          onOpenLiveRoom: (room) =>
+                              context.go('/live/${room.value}'),
+                          onLogin: () => showAppDialog<void>(
+                            context: context,
+                            builder: (_) => const AccountDialog(),
+                          ),
+                          onMessage: (profile) => context.go(
+                            Uri(
+                              path: '/messages',
+                              queryParameters: {
+                                'talker': profile.id.value,
+                                'name': profile.name,
+                                if (profile.avatarUrl case final avatar?)
+                                  'avatar': avatar.toString(),
+                              },
+                            ).toString(),
+                          ),
+                        )
+                      : const StateView.empty(message: '用户地址无效');
+                }
+                if (tab.isVideo) {
+                  final id = VideoId(uri.pathSegments.last);
+                  final queueId = uri.queryParameters['queue'];
+                  final queue = queueId == null
+                      ? null
+                      : ref
+                            .watch(watchLaterQueueRegistryProvider)
+                            .resolve(
+                              queueId,
+                              scope: ref
+                                  .read(homeRepositoryProvider)
+                                  .accountScope,
+                              sessionEpoch: ref.read(sessionEpochProvider)(),
+                            );
+                  return id.isValid
+                      ? VideoScreen(
+                          key: PageStorageKey('video-${tab.id}'),
+                          id: id,
+                          queue: queue?.indexOf(id) == -1 ? null : queue,
+                          initialCid: uri.queryParameters['cid'],
+                          playerBuilder: (context, detail, part) =>
+                              _workspacePlayer(
+                                context,
+                                () => playerBuilder(context, detail, part),
+                              ),
+                          actionsBuilder: actionsBuilder,
+                          menuBuilder: menuBuilder,
+                          onSearchTag: (tag) => context.go(
+                            Uri(
+                              path: '/search',
+                              queryParameters: {'q': tag},
+                            ).toString(),
+                          ),
+                          onOpenUser: (user) =>
+                              context.go('/user/${user.value}'),
+                          onLogin: observeAccount
+                              ? () => showAppDialog<void>(
+                                  context: context,
+                                  builder: (_) => const AccountDialog(),
+                                )
+                              : null,
+                          onOpenVideoPart: (id, cid) => context.go(
+                            Uri(
+                              path: '/video/${id.value}',
+                              queryParameters: cid == null
                                   ? null
-                                  : WorkspacePageNavigation.maybeOf(context);
-                              if (navigation != null) {
-                                navigation.navigate(target);
-                              } else {
-                                context.go(
-                                  target
-                                      .replace(
-                                        queryParameters: {
-                                          ...target.queryParameters,
-                                          'tab': tab.id,
-                                        },
-                                      )
-                                      .toString(),
-                                );
-                              }
-                            },
-                          )
-                        : const StateView.empty(message: '视频地址无效');
-                  }
-                  return const StateView.empty(message: '找不到这个页面');
-              }
-            },
-          ),
+                                  : {'cid': cid},
+                            ).toString(),
+                          ),
+                          onOpenVideo: (video) =>
+                              context.go('/video/${video.id.value}'),
+                          onAdvanceVideo: (video, cid) {
+                            final target = Uri(
+                              path: '/video/${video.value}',
+                              queryParameters: cid == null
+                                  ? null
+                                  : {'cid': cid},
+                            );
+                            final navigation = WorkspacePageNavigation.maybeOf(
+                              context,
+                            );
+                            if (navigation != null) {
+                              navigation.navigate(target);
+                            } else {
+                              context.go(
+                                target
+                                    .replace(
+                                      queryParameters: {
+                                        ...target.queryParameters,
+                                        'tab': tab.id,
+                                      },
+                                    )
+                                    .toString(),
+                              );
+                            }
+                          },
+                          onOpenQueueVideo: queue == null
+                              ? null
+                              : (video) {
+                                  final target = Uri(
+                                    path: '/video/${video.value}',
+                                    queryParameters: {'queue': queue.id},
+                                  );
+                                  final navigation =
+                                      WorkspacePageNavigation.maybeOf(context);
+                                  if (navigation != null) {
+                                    navigation.navigate(target);
+                                  } else {
+                                    context.go(
+                                      target
+                                          .replace(
+                                            queryParameters: {
+                                              ...target.queryParameters,
+                                              'tab': tab.id,
+                                            },
+                                          )
+                                          .toString(),
+                                    );
+                                  }
+                                },
+                          onPartChanged: (part) {
+                            final target = uri.replace(
+                              queryParameters: {
+                                ...uri.queryParameters,
+                                'cid': part.cid,
+                              },
+                            );
+                            final navigation = queue == null
+                                ? null
+                                : WorkspacePageNavigation.maybeOf(context);
+                            if (navigation != null) {
+                              navigation.navigate(target);
+                            } else {
+                              context.go(
+                                target
+                                    .replace(
+                                      queryParameters: {
+                                        ...target.queryParameters,
+                                        'tab': tab.id,
+                                      },
+                                    )
+                                    .toString(),
+                              );
+                            }
+                          },
+                        )
+                      : const StateView.empty(message: '视频地址无效');
+                }
+                return const StateView.empty(message: '找不到这个页面');
+            }
+          },
         ),
       ),
     );
   }
 }
+
+Widget _workspacePlayer(BuildContext context, Widget Function() build) =>
+    WorkspaceMediaPermission.isAllowed(context)
+    ? build()
+    : const ColoredBox(
+        key: ValueKey('workspace-preview-player'),
+        color: Colors.black,
+      );

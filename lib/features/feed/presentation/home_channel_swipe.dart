@@ -54,6 +54,10 @@ final class _HomeChannelSwipeState extends State<HomeChannelSwipe> {
                 active:
                     group.first == selectedGroup.first &&
                     WorkspaceActivity.isActive(context),
+                previewing:
+                    group.first == selectedGroup.first &&
+                    WorkspaceActivity.isVisible(context) &&
+                    !WorkspaceActivity.isActive(context),
                 child: RetainedTabView<HomeChannel>(
                   tabs: group,
                   value: group.contains(previous) ? previous : group.first,
