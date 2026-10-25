@@ -169,11 +169,13 @@ void main() {
       );
 
   void expectBalanceAlignment(WidgetTester tester) {
-    Rect coinCharacter(String label) {
-      final paragraph = tester.renderObject<RenderParagraph>(find.text(label));
+    Rect character(Finder finder) {
+      final paragraph = tester.renderObject<RenderParagraph>(
+        find.descendant(of: finder, matching: find.byType(RichText)),
+      );
       final box = paragraph
           .getBoxesForSelection(
-            const TextSelection(baseOffset: 1, extentOffset: 2),
+            const TextSelection(baseOffset: 0, extentOffset: 1),
           )
           .single;
       return Rect.fromPoints(
@@ -182,10 +184,21 @@ void main() {
       );
     }
 
-    final coins = coinCharacter('硬币');
-    final bCoins = coinCharacter('B币');
+    expect(
+      character(find.text('B')).left,
+      closeTo(character(find.text('硬')).left, .5),
+    );
+    final suffixes = find.descendant(
+      of: find.byKey(const ValueKey('account-balances')),
+      matching: find.text('币'),
+    );
+    expect(suffixes, findsNWidgets(2));
+    final coins = character(suffixes.at(0));
+    final bCoins = character(suffixes.at(1));
     expect(bCoins.left, closeTo(coins.left, .5));
     expect(bCoins.right, closeTo(coins.right, .5));
+    expect(tester.widget<Text>(find.text('硬')).semanticsLabel, '硬币');
+    expect(tester.widget<Text>(find.text('B')).semanticsLabel, 'B币');
     expect(
       tester.getTopLeft(find.text('6.25')).dx,
       closeTo(tester.getTopLeft(find.text('12.5')).dx, .01),
@@ -202,8 +215,8 @@ void main() {
       expect(find.text('测试账号'), findsOneWidget);
       expect(find.text('等级 5'), findsOneWidget);
       expect(find.text('经验 20500 / 28800'), findsOneWidget);
-      expect(find.text('硬币'), findsOneWidget);
-      expect(find.text('B币'), findsOneWidget);
+      expect(find.text('硬'), findsOneWidget);
+      expect(find.text('B'), findsOneWidget);
       expect(find.text('12.5'), findsOneWidget);
       expect(find.text('6.25'), findsOneWidget);
       expectBalanceAlignment(tester);
@@ -309,8 +322,8 @@ void main() {
       await mount(tester);
       expect(find.text('等级 —'), findsOneWidget);
       expect(find.text('经验 — / —'), findsOneWidget);
-      expect(find.text('硬币'), findsOneWidget);
-      expect(find.text('B币'), findsOneWidget);
+      expect(find.text('硬'), findsOneWidget);
+      expect(find.text('B'), findsOneWidget);
       expect(find.text('—'), findsNWidgets(5));
       expect(find.byType(LinearProgressIndicator), findsNothing);
       expect(
@@ -346,8 +359,8 @@ void main() {
     await mount(tester);
     expect(find.text('等级 0'), findsOneWidget);
     expect(find.text('经验 0 / 100'), findsOneWidget);
-    expect(find.text('硬币'), findsOneWidget);
-    expect(find.text('B币'), findsOneWidget);
+    expect(find.text('硬'), findsOneWidget);
+    expect(find.text('B'), findsOneWidget);
     expect(find.text('0'), findsNWidgets(5));
     expect(
       tester
@@ -495,7 +508,7 @@ void main() {
       expect(find.text('等级 6'), findsOneWidget);
       expect(find.text('等级 5'), findsNothing);
       expect(find.text('6.25'), findsNothing);
-      expect(find.text('B币'), findsOneWidget);
+      expect(find.text('B'), findsOneWidget);
       final next = Completer<AccountOverview>();
       overview.onLoad = (_) => next.future;
       auth.emit(
@@ -509,8 +522,8 @@ void main() {
       await tester.pump();
       expect(find.text('等级 6'), findsNothing);
       expect(find.text('等级 —'), findsOneWidget);
-      expect(find.text('硬币'), findsOneWidget);
-      expect(find.text('B币'), findsOneWidget);
+      expect(find.text('硬'), findsOneWidget);
+      expect(find.text('B'), findsOneWidget);
       expect(find.text('—'), findsNWidgets(5));
       next.complete(const AccountOverview(level: 4));
       await tester.pumpAndSettle();

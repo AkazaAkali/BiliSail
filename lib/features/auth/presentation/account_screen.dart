@@ -219,15 +219,21 @@ class _AccountProfileBar extends StatelessWidget {
             : () => onOpenSection?.call('dynamics'),
       ),
     ];
-    TableRow balanceRow(String label, num? value, {double topPadding = 0}) =>
+    TableRow balanceRow(String prefix, num? value, {double topPadding = 0}) =>
         TableRow(
           children: [
             Padding(
               padding: EdgeInsets.only(top: topPadding),
               child: Text(
-                label,
-                textAlign: TextAlign.end,
+                prefix,
+                semanticsLabel: '$prefix币',
                 style: theme.textTheme.bodySmall,
+              ),
+            ),
+            Padding(
+              padding: EdgeInsets.only(top: topPadding),
+              child: ExcludeSemantics(
+                child: Text('币', style: theme.textTheme.bodySmall),
               ),
             ),
             Padding(
@@ -249,8 +255,8 @@ class _AccountProfileBar extends StatelessWidget {
             defaultVerticalAlignment: TableCellVerticalAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              balanceRow('硬币', data?.coins),
-              balanceRow('B币', data?.bCoins, topPadding: 2),
+              balanceRow('硬', data?.coins),
+              balanceRow('B', data?.bCoins, topPadding: 2),
             ],
           ),
         ),

@@ -170,9 +170,11 @@ Android 在当前页面没有可返回层级时显示“退出哔帆？”确认
 
 ## 2026-10-25：硬币与 B 币名称对齐
 
-我的页两行余额改为共用名称和数值列：名称右对齐，使“硬币”和“B币”的“币”字上下对齐，金额从同一位置左对齐。列宽按字体和内容自然计算，保留原有行距、普通字号 48 逻辑像素最小高度及垂直居中，大字体仍自然增高。
+我的页两行余额共用首字、“币”字和数值三列：“B”与“硬”左对齐，两个“币”字上下对齐，金额从同一位置左对齐。列宽按字体和内容自然计算，保留原有行距、普通字号 48 逻辑像素最小高度及垂直居中，大字体仍自然增高；辅助阅读仍使用完整的“硬币”和“B币”名称。
 
 现有我的页 25 项 Widget 测试通过，补充普通／双倍字号、320／390／600／1200 宽度的字形位置和金额起点断言，并检查宽屏及 320 双倍字号的离线渲染预览。本次两文件静态分析通过；`tool/check.ps1 -SkipPub` 的打包边界和格式检查通过，全量分析被同期 `test/app/predictive_back_test.dart:271`、`test/support/system_back_gesture.dart:23` 的两处 `curly_braces_in_flow_control_structures` 提示阻塞，脚本尚未运行到根测试及子包检查。没有调整这些无关代码。日志为 `build/account-balance-alignment-tests.log` 和 `build/account-balance-alignment-check.log`。本轮未构建或实机验收；未发现可连接的 Flutter 调试应用，热重载未执行。
+
+追加首字左对齐要求后，更新既有几何断言并通过全部 25 项我的页 Widget 测试，检查亮／暗色宽屏、390 窄屏和 320 双倍字号预览。此次 `tool/check.ps1 -SkipPub` 的打包边界、格式、静态分析和离线测试通过：根应用 2606、API 456、播放器 81、弹幕 93、封装包 2 项，共 3238 项；封装另有 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。日志为本机忽略文件 `build/account-balance-character-alignment-tests.log` 和 `build/account-balance-character-alignment-check.log`。未构建或实机验收；已尝试发现调试进程并热重载，当前没有可连接的 Flutter 调试应用，热重载未执行。
 
 ## 2026-10-25：头像菜单定位我的页内容标签
 
