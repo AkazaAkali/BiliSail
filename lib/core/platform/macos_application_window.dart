@@ -29,11 +29,16 @@ class MacOSApplicationWindow {
         onCloseRequested: () {
           if (requestingExit) return;
           requestingExit = true;
-          unawaited(
-            ServicesBinding.instance
-                .exitApplication(AppExitType.cancelable)
-                .whenComplete(() => requestingExit = false),
-          );
+          // Cocoa calls this through the SDK's isolate-local FFI callback.
+          // Leave windowShouldClose (including native tab closing) before an
+          // exit request can reenter Cocoa and shut down the shared engine.
+          Timer.run(() {
+            unawaited(
+              ServicesBinding.instance
+                  .exitApplication(AppExitType.cancelable)
+                  .whenComplete(() => requestingExit = false),
+            );
+          });
         },
       ),
     );

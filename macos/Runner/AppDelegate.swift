@@ -40,8 +40,15 @@ class AppDelegate: FlutterAppDelegate {
 // The pinned engine marks shouldTerminate before Dart cleanup completes. Own
 // the pending/approved distinction so another Cmd+Q cannot bypass that cleanup.
 final class ApplicationTerminationCoordinator {
+  private let scheduleTermination: (@escaping () -> Void) -> Void
   private var pending = false
   private var approved = false
+
+  init(scheduleTermination: @escaping (@escaping () -> Void) -> Void = { action in
+    DispatchQueue.main.async(execute: action)
+  }) {
+    self.scheduleTermination = scheduleTermination
+  }
 
   func requestExit(
     using request: (@escaping (Bool) -> Void) -> Void,
@@ -52,10 +59,18 @@ final class ApplicationTerminationCoordinator {
     pending = true
     request { [weak self] approved in
       guard let self = self else { return }
-      self.pending = false
       if approved {
-        self.approved = true
-        terminate()
+        // This reply is still on Flutter's platform-message stack. Terminating
+        // here shuts down the engine before that stack has returned. Keep
+        // duplicate quit requests blocked until the queued action runs too.
+        self.scheduleTermination { [weak self] in
+          guard let self = self else { return }
+          self.pending = false
+          self.approved = true
+          terminate()
+        }
+      } else {
+        self.pending = false
       }
     }
     return .terminateCancel
