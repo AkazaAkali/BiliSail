@@ -168,6 +168,7 @@ class AppDependencies {
       defaultDanmakuArea: defaultDanmakuArea,
       defaultDanmakuFontScale: defaultDanmakuFontScale,
       defaultPlayerControlsMode: defaultPlayerControlsMode,
+      defaultVideoCardHoverPlayback: defaultVideoCardHoverPlayback,
     );
     Future<MediaCdnPreference> cdnPreference() async =>
         (await settings.load()).mediaCdn;

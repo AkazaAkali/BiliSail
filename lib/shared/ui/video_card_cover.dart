@@ -11,6 +11,7 @@ import '../../domain/video.dart';
 import '../../features/video/domain/video_card_interactions.dart';
 import '../../features/video/application/video_card_preview_playback.dart';
 import 'bili_icons.dart';
+import 'scroll_aware_hover_region.dart';
 import 'video_card_interaction_scope.dart';
 import 'video_access_badge.dart';
 
@@ -37,186 +38,67 @@ class VideoCardCover extends StatefulWidget {
   State<VideoCardCover> createState() => _VideoCardCoverState();
 }
 
-class _VideoCardCoverState extends State<VideoCardCover>
-    with WidgetsBindingObserver {
-  bool _coverHovered = false;
+class _VideoCardCoverState extends State<VideoCardCover> {
   bool _pointerHovered = false;
+  bool _snapBack = false;
   bool _busy = false;
   bool _active = true;
   VideoCardInteractionScope? _scope;
-  VideoCardPreviewSession? _preview;
-  RequestCancellation? _previewCancellation;
-  Timer? _hoverDelay;
   int _writeGeneration = 0;
-  bool _foreground = true;
-  bool _scrollHoverCheckScheduled = false;
-  final _scrollPositions = <ScrollPosition>{};
 
-  bool get _scrolling =>
-      _scrollPositions.any((position) => position.isScrollingNotifier.value);
+  bool get _hovered => _active && (widget.hovered ?? _pointerHovered);
 
-  void _syncScrollPositions() {
-    final positions = <ScrollPosition>{};
+  bool _ancestorScrolling() {
+    // Only inspect on a hover exit to snap the shared cover animation back.
+    // Idle/static cards do not subscribe to scroll activity here.
+    var scrolling = false;
     context.visitAncestorElements((element) {
-      if (element is StatefulElement && element.state is ScrollableState) {
-        positions.add((element.state as ScrollableState).position);
+      if (element is StatefulElement &&
+          element.state is ScrollableState &&
+          (element.state as ScrollableState)
+              .position
+              .isScrollingNotifier
+              .value) {
+        scrolling = true;
       }
-      return true;
+      return !scrolling;
     });
-    for (final position in _scrollPositions.difference(positions)) {
-      position.isScrollingNotifier.removeListener(_onScrollActivityChanged);
-    }
-    for (final position in positions.difference(_scrollPositions)) {
-      position.isScrollingNotifier.addListener(_onScrollActivityChanged);
-    }
-    _scrollPositions
-      ..clear()
-      ..addAll(positions);
-  }
-
-  void _onScrollActivityChanged() {
-    // A stationary mouse crosses many cards during smooth wheel scrolling.
-    // Cancel even an in-flight open; only restart after every enclosing list
-    // is idle and the normal hover delay has elapsed again.
-    if (SchedulerBinding.instance.schedulerPhase ==
-        SchedulerPhase.persistentCallbacks) {
-      if (_scrollHoverCheckScheduled) return;
-      _scrollHoverCheckScheduled = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollHoverCheckScheduled = false;
-        if (mounted) _hoverCover(widget.hovered ?? _pointerHovered);
-      });
-      return;
-    }
-    _hoverCover(widget.hovered ?? _pointerHovered);
-  }
-
-  void _schedulePreview() {
-    if (!_coverHovered ||
-        !_active ||
-        !_foreground ||
-        _scrolling ||
-        _scope == null ||
-        !widget.video.id.isValid) {
-      return;
-    }
-    _hoverDelay = Timer(const Duration(milliseconds: 200), _loadPreview);
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    _foreground = state == AppLifecycleState.resumed;
-    if (!_foreground) {
-      _stopPreview();
-      setState(() {
-        _preview = null;
-        _coverHovered = false;
-      });
-    } else {
-      _hoverCover(widget.hovered ?? _pointerHovered);
-    }
+    return scrolling;
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    Scrollable.maybeOf(context);
-    _syncScrollPositions();
     final scope = VideoCardInteractionScope.maybeOf(context);
     final active =
         WorkspaceActivity.isActive(context) &&
         TickerMode.valuesOf(context).enabled;
-    final scopeChanged = scope?.interactions != _scope?.interactions;
-    final becameActive = active && !_active;
-    if (scopeChanged || !active) {
-      _stopPreview();
-      _coverHovered = false;
-      _preview = null;
+    if (scope?.interactions != _scope?.interactions || !active) {
       _busy = false;
       ++_writeGeneration;
     }
     _scope = scope;
     _active = active;
-    if ((scopeChanged || becameActive) &&
-        active &&
-        _foreground &&
-        (widget.hovered ?? _pointerHovered)) {
-      _hoverCover(true);
-    }
   }
 
   @override
   void didUpdateWidget(VideoCardCover oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.video.id != widget.video.id) {
-      _stopPreview();
-      _preview = null;
-      _coverHovered = false;
       _busy = false;
       ++_writeGeneration;
     }
-    if (widget.hovered != null &&
-        (oldWidget.hovered != widget.hovered ||
-            oldWidget.video.id != widget.video.id)) {
-      _hoverCover(widget.hovered!);
+    if (oldWidget.hovered != widget.hovered) {
+      _snapBack = widget.hovered == false && _ancestorScrolling();
     }
-  }
-
-  void _stopPreview() {
-    _hoverDelay?.cancel();
-    _hoverDelay = null;
-    _previewCancellation?.cancel();
-    _previewCancellation = null;
   }
 
   void _hoverCover(bool hovered) {
-    _pointerHovered = hovered;
-    if (!_active || !_foreground) return;
-    final effectiveHover = hovered && !_scrolling;
-    if (_coverHovered == effectiveHover && _preview == null) return;
-    _stopPreview();
+    if (_pointerHovered == hovered) return;
     setState(() {
-      _coverHovered = effectiveHover;
-      _preview = null;
+      _pointerHovered = hovered;
+      _snapBack = !hovered && _ancestorScrolling();
     });
-    _schedulePreview();
-  }
-
-  Future<void> _loadPreview() async {
-    final scope = _scope;
-    if (scope == null ||
-        !_coverHovered ||
-        !_active ||
-        !_foreground ||
-        _scrolling) {
-      return;
-    }
-    final token = RequestCancellation();
-    _previewCancellation = token;
-    try {
-      final result = await scope.interactions.preview(
-        widget.video.id,
-        token,
-        cid: widget.video.previewCid,
-      );
-      if (!mounted ||
-          token.isCancelled ||
-          !_coverHovered ||
-          !_active ||
-          _scrolling ||
-          scope.interactions != _scope?.interactions) {
-        return;
-      }
-      setState(() => _preview = result);
-    } on AppFailure {
-      // Preview is optional; a read failure leaves the clickable cover intact.
-    }
   }
 
   Future<void> _watchLater() async {
@@ -243,79 +125,55 @@ class _VideoCardCoverState extends State<VideoCardCover>
   }
 
   @override
-  void dispose() {
-    _stopPreview();
-    for (final position in _scrollPositions) {
-      position.isScrollingNotifier.removeListener(_onScrollActivityChanged);
-    }
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final preview = _preview;
-    return MouseRegion(
-      onEnter: widget.hovered == null ? (_) => _hoverCover(true) : null,
-      onExit: widget.hovered == null ? (_) => _hoverCover(false) : null,
-      child: AnimatedScale(
-        key: const ValueKey('video-card-cover-scale'),
-        scale: _coverHovered ? _coverHoverScale : 1,
-        // Snap back when scrolling starts; animating the exit would keep
-        // invalidating the cover during the first scroll frames.
-        duration: _scrolling || MediaQuery.disableAnimationsOf(context)
-            ? Duration.zero
-            : const Duration(milliseconds: 200),
-        curve: Curves.easeOutCubic,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(widget.borderRadius),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              widget.child,
-              if (preview != null)
-                IgnorePointer(
-                  // The session is returned only after its first frame is
-                  // ready. Keep the cover underneath and fade only on entry;
-                  // exit must remove the surface as soon as it is released.
-                  child: TweenAnimationBuilder<double>(
-                    key: ObjectKey(preview),
-                    tween: Tween(begin: 0, end: 1),
-                    duration: MediaQuery.disableAnimationsOf(context)
-                        ? Duration.zero
-                        : const Duration(milliseconds: 200),
-                    curve: Curves.linear,
-                    builder: (context, opacity, child) =>
-                        Opacity(opacity: opacity, child: child),
-                    child: _VideoCardPlaybackPreview(
-                      key: const ValueKey('video-card-preview'),
-                      preview: preview,
-                    ),
+    final scope = _scope;
+    final cover = AnimatedScale(
+      key: const ValueKey('video-card-cover-scale'),
+      scale: _hovered ? _coverHoverScale : 1,
+      duration: _snapBack || MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 200),
+      curve: Curves.easeOutCubic,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(widget.borderRadius),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            widget.child,
+            if (_hovered &&
+                scope != null &&
+                scope.hoverPlaybackEnabled &&
+                widget.video.id.isValid)
+              _VideoCardHoverPreview(
+                key: const ValueKey('video-card-hover-preview'),
+                video: widget.video,
+                interactions: scope.interactions,
+              ),
+            if (widget.video.access.label != null)
+              Positioned(
+                top: 6,
+                left: 6,
+                right: 48,
+                child: IgnorePointer(
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: VideoAccessBadge(access: widget.video.access),
                   ),
                 ),
-              if (widget.video.access.label != null)
-                Positioned(
-                  top: 6,
-                  left: 6,
-                  right: 48,
-                  child: IgnorePointer(
-                    child: Align(
-                      alignment: Alignment.topLeft,
-                      child: VideoAccessBadge(access: widget.video.access),
-                    ),
-                  ),
-                ),
-              if (widget.showWatchLaterButton &&
-                  _active &&
-                  _scope != null &&
-                  widget.video.id.isValid &&
-                  (_coverHovered || widget.focused))
-                Positioned(top: 8, right: 8, child: _watchLaterButton()),
-            ],
-          ),
+              ),
+            if (widget.showWatchLaterButton &&
+                _active &&
+                scope != null &&
+                widget.video.id.isValid &&
+                (_hovered || widget.focused))
+              Positioned(top: 8, right: 8, child: _watchLaterButton()),
+          ],
         ),
       ),
     );
+    return widget.hovered == null
+        ? ScrollAwareHoverRegion(onHover: _hoverCover, child: cover)
+        : cover;
   }
 
   Widget _watchLaterButton() {
@@ -360,6 +218,168 @@ class _VideoCardCoverState extends State<VideoCardCover>
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// Mounted only for an enabled, visible hover. Static covers own no preview
+// lifecycle observer, ancestor scroll subscriptions, timer or cancellation.
+class _VideoCardHoverPreview extends StatefulWidget {
+  const _VideoCardHoverPreview({
+    super.key,
+    required this.video,
+    required this.interactions,
+  });
+  final VideoSummary video;
+  final VideoCardOperations interactions;
+
+  @override
+  State<_VideoCardHoverPreview> createState() => _VideoCardHoverPreviewState();
+}
+
+class _VideoCardHoverPreviewState extends State<_VideoCardHoverPreview>
+    with WidgetsBindingObserver {
+  VideoCardPreviewSession? _preview;
+  RequestCancellation? _cancellation;
+  Timer? _hoverDelay;
+  bool _foreground = true;
+  bool _scrollCheckScheduled = false;
+  bool _initialized = false;
+  final _scrollPositions = <ScrollPosition>{};
+
+  bool get _scrolling =>
+      _scrollPositions.any((position) => position.isScrollingNotifier.value);
+
+  @override
+  void initState() {
+    super.initState();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    Scrollable.maybeOf(context);
+    final positions = <ScrollPosition>{};
+    context.visitAncestorElements((element) {
+      if (element is StatefulElement && element.state is ScrollableState) {
+        positions.add((element.state as ScrollableState).position);
+      }
+      return true;
+    });
+    final changed =
+        !_initialized ||
+        positions.length != _scrollPositions.length ||
+        !positions.containsAll(_scrollPositions);
+    if (!changed) return;
+    for (final position in _scrollPositions.difference(positions)) {
+      position.isScrollingNotifier.removeListener(_onScrollActivityChanged);
+    }
+    for (final position in positions.difference(_scrollPositions)) {
+      position.isScrollingNotifier.addListener(_onScrollActivityChanged);
+    }
+    _scrollPositions
+      ..clear()
+      ..addAll(positions);
+    _initialized = true;
+    _restartPreview();
+  }
+
+  @override
+  void didUpdateWidget(_VideoCardHoverPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.video.id != widget.video.id ||
+        oldWidget.video.previewCid != widget.video.previewCid ||
+        oldWidget.interactions != widget.interactions) {
+      _restartPreview();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    _restartPreview();
+  }
+
+  void _onScrollActivityChanged() {
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (_scrollCheckScheduled) return;
+      _scrollCheckScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollCheckScheduled = false;
+        if (mounted) _restartPreview();
+      });
+    } else {
+      _restartPreview();
+    }
+  }
+
+  void _stopPreview() {
+    _hoverDelay?.cancel();
+    _hoverDelay = null;
+    _cancellation?.cancel();
+    _cancellation = null;
+  }
+
+  void _restartPreview() {
+    _stopPreview();
+    setState(() => _preview = null);
+    if (_foreground && !_scrolling) {
+      _hoverDelay = Timer(const Duration(milliseconds: 200), _loadPreview);
+    }
+  }
+
+  Future<void> _loadPreview() async {
+    if (!_foreground || _scrolling) return;
+    final token = RequestCancellation();
+    _cancellation = token;
+    try {
+      final result = await widget.interactions.preview(
+        widget.video.id,
+        token,
+        cid: widget.video.previewCid,
+      );
+      if (!mounted || token.isCancelled || !_foreground || _scrolling) return;
+      setState(() => _preview = result);
+    } on AppFailure {
+      // Preview is optional; a read failure leaves the clickable cover intact.
+    }
+  }
+
+  @override
+  void dispose() {
+    _stopPreview();
+    for (final position in _scrollPositions) {
+      position.isScrollingNotifier.removeListener(_onScrollActivityChanged);
+    }
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = _preview;
+    if (preview == null) return const SizedBox.shrink();
+    // Keep the cover under the first-frame fade; cancellation removes the
+    // surface immediately instead of retaining it for an exit animation.
+    return IgnorePointer(
+      child: TweenAnimationBuilder<double>(
+        key: ObjectKey(preview),
+        tween: Tween(begin: 0, end: 1),
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 200),
+        curve: Curves.linear,
+        builder: (context, opacity, child) =>
+            Opacity(opacity: opacity, child: child),
+        child: _VideoCardPlaybackPreview(
+          key: const ValueKey('video-card-preview'),
+          preview: preview,
         ),
       ),
     );

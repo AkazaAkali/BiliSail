@@ -8,15 +8,19 @@ class VideoCardInteractionScope extends InheritedWidget {
     super.key,
     required this.interactions,
     required this.onNotice,
+    this.hoverPlaybackEnabled = true,
     required super.child,
   });
   final VideoCardOperations interactions;
   final void Function(BuildContext, String) onNotice;
+  final bool hoverPlaybackEnabled;
 
   static VideoCardInteractionScope? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<VideoCardInteractionScope>();
 
   @override
   bool updateShouldNotify(VideoCardInteractionScope oldWidget) =>
-      interactions != oldWidget.interactions || onNotice != oldWidget.onNotice;
+      interactions != oldWidget.interactions ||
+      onNotice != oldWidget.onNotice ||
+      hoverPlaybackEnabled != oldWidget.hoverPlaybackEnabled;
 }

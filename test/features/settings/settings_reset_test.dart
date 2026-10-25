@@ -29,6 +29,9 @@ void main() {
         defaultDanmakuArea: danmakuAreaForPlatform(platform),
         defaultDanmakuFontScale: danmakuFontScaleForPlatform(platform),
         defaultPlayerControlsMode: playerControlsModeForPlatform(platform),
+        defaultVideoCardHoverPlayback: videoCardHoverPlaybackForPlatform(
+          platform,
+        ),
       );
       final defaults = await repository.load();
       await repository.save(defaults);
@@ -46,6 +49,7 @@ void main() {
           cacheImages: false,
           wheelDampingRatio: .5,
           autoPlay: false,
+          videoCardHoverPlayback: !defaults.videoCardHoverPlayback,
           continuousPlayback: true,
           preferredQuality: 120,
           defaultPlaybackRate: 2,
@@ -91,6 +95,10 @@ void main() {
         expect(settings.danmakuArea, defaults.danmakuArea);
         expect(settings.danmakuFontScale, defaults.danmakuFontScale);
         expect(settings.playerControlsMode, defaults.playerControlsMode);
+        expect(
+          settings.videoCardHoverPlayback,
+          defaults.videoCardHoverPlayback,
+        );
         expect(
           settings.highEnergyProgressEnabled,
           defaults.highEnergyProgressEnabled,

@@ -88,6 +88,8 @@ final class SettingsController extends AsyncNotifier<AppSettings> {
       update((current) => current.copyWith(danmakuFontScale: value));
   Future<void> setAutoPlay(bool value) =>
       update((current) => current.copyWith(autoPlay: value));
+  Future<void> setVideoCardHoverPlayback(bool value) =>
+      update((current) => current.copyWith(videoCardHoverPlayback: value));
 
   Future<void> setContinuousPlayback(bool value) =>
       update((current) => current.copyWith(continuousPlayback: value));

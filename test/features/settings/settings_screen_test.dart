@@ -469,6 +469,45 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+  for (final failSave in [false, true]) {
+    testWidgets(
+      'hover playback toggle saves or rolls back (failure: $failSave)',
+      (tester) async {
+        final repository = _SettingsRepository()..failSave = failSave;
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              settingsRepositoryProvider.overrideWithValue(repository),
+            ],
+            child: MaterialApp(
+              builder: AppNoticeHost.builder,
+              home: const Scaffold(
+                body: SettingsScreen(category: SettingsCategory.playback),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final toggle = find.widgetWithText(SwitchListTile, '视频卡悬停播放');
+        expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+        await tester.ensureVisible(toggle);
+        await tester.pumpAndSettle();
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect(repository.settings.videoCardHoverPlayback, failSave);
+        expect(repository.settings.autoPlay, isTrue);
+        expect(tester.widget<SwitchListTile>(toggle).value, failSave);
+        if (failSave) {
+          expect(find.text('设置保存失败，请重试'), findsOneWidget);
+        }
+        ProviderScope.containerOf(tester.element(toggle))
+            .invalidate(settingsControllerProvider);
+        await tester.pumpAndSettle();
+        expect(tester.widget<SwitchListTile>(toggle).value, failSave);
+      },
+    );
+  }
+
   testWidgets('continuous playback toggle saves and reloads independently', (
     tester,
   ) async {
@@ -487,6 +526,7 @@ void main() {
     final toggle = find.widgetWithText(SwitchListTile, '连续播放');
     expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
     await tester.ensureVisible(toggle);
+    await tester.pumpAndSettle();
     await tester.tap(toggle);
     await tester.pumpAndSettle();
     expect(repository.settings.continuousPlayback, isTrue);

@@ -382,6 +382,12 @@ final class _SettingsCategoryPageState
                             '打开视频后开始播放',
                           ),
                           _toggle(
+                            '视频卡悬停播放',
+                            s.videoCardHoverPlayback,
+                            controller.setVideoCardHoverPlayback,
+                            '鼠标停留在视频卡上时静音播放预览，关闭可减少资源和流量占用',
+                          ),
+                          _toggle(
                             '高能进度条',
                             s.highEnergyProgressEnabled,
                             controller.setHighEnergyProgressEnabled,

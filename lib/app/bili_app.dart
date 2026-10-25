@@ -411,7 +411,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
     });
     final settings =
         ref.watch(settingsControllerProvider).value ??
-        const AppSettings.defaults();
+        ref.watch<AppSettings>(settingsDefaultsProvider);
     final cardInteractions = ref.watch(videoCardControllerProvider);
     _input.configure(settings.shortcuts);
     return ImageCacheBinding(
@@ -434,6 +434,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
                   child: VideoCardInteractionScope(
                     interactions: cardInteractions,
                     onNotice: showAppNotice,
+                    hoverPlaybackEnabled: settings.videoCardHoverPlayback,
                     child: child ?? const SizedBox.shrink(),
                   ),
                 ),

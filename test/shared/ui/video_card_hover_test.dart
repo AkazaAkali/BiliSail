@@ -12,6 +12,7 @@ import 'package:bilisail/features/video/domain/video_card_interactions.dart';
 import '../../support/video_card_fake_engine.dart';
 
 import 'package:bilisail/shared/ui/video_card.dart';
+import 'package:bilisail/shared/ui/video_card_cover.dart';
 import 'package:bilisail/shared/ui/video_card_interaction_scope.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -42,6 +43,201 @@ void main() {
       'BiliIcons',
     )..addFont(rootBundle.load('assets/fonts/biliicon.ttf'))).load();
   });
+  testWidgets('disabled hover playback keeps card actions without loading', (
+    tester,
+  ) async {
+    final services = _Interactions();
+    var opens = 0;
+    await tester.pumpWidget(
+      _app(services, hoverPlaybackEnabled: false, open: () => opens++),
+    );
+    final mouse = await _mouse(tester);
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('video-card-cover-scale'))),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(services.reads, 0);
+    expect(services.engines, isEmpty);
+    expect(
+      find.byKey(const ValueKey('video-card-hover-preview')),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('video-card-preview')), findsNothing);
+    expect(
+      tester
+          .widget<AnimatedScale>(
+            find.byKey(const ValueKey('video-card-cover-scale')),
+          )
+          .scale,
+      1.05,
+    );
+    await tester.tap(find.byKey(const ValueKey('video-card-watch-later')));
+    await tester.pump();
+    expect(services.writes, 1);
+    expect(opens, 0);
+    await tester.tap(find.text(_video.title));
+    expect(opens, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('preview listeners exist only during an enabled hover', (
+    tester,
+  ) async {
+    final services = _Interactions();
+    final scroll = _CountingScrollController();
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      scroll.dispose();
+    });
+    Widget app({
+      bool enabled = false,
+      bool hovered = true,
+      bool cover = true,
+    }) => MaterialApp(
+      home: Scaffold(
+        body: VideoCardInteractionScope(
+          interactions: services,
+          onNotice: (_, _) {},
+          hoverPlaybackEnabled: enabled,
+          child: SingleChildScrollView(
+            controller: scroll,
+            child: SizedBox(
+              height: 1000,
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 320,
+                  height: 180,
+                  child: cover
+                      ? VideoCardCover(
+                          video: _video,
+                          hovered: hovered,
+                          child: const ColoredBox(color: Colors.blueGrey),
+                        )
+                      : const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    final owner = find.byKey(const ValueKey('video-card-hover-preview'));
+    await tester.pumpWidget(app(cover: false));
+    final baseline = scroll.notifier.listenerCount;
+    await tester.pumpWidget(app());
+    expect(owner, findsNothing);
+    expect(scroll.notifier.listenerCount, baseline);
+    await tester.pumpWidget(app(enabled: true, hovered: false));
+    expect(owner, findsNothing);
+    expect(scroll.notifier.listenerCount, baseline);
+    await tester.pumpWidget(app(enabled: true));
+    expect(owner, findsOneWidget);
+    expect(tester.state(owner), isA<WidgetsBindingObserver>());
+    expect(scroll.notifier.listenerCount, baseline + 1);
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump();
+    expect(services.reads, 1);
+    await tester.pumpWidget(app());
+    expect(owner, findsNothing);
+    expect(scroll.notifier.listenerCount, baseline);
+    expect(services.token?.isCancelled, isTrue);
+    await tester.pump(const Duration(seconds: 1));
+    expect(services.reads, 1);
+  });
+
+  for (final enabled in [false, true]) {
+    testWidgets('Android touch mounts no preview owner (enabled: $enabled)', (
+      tester,
+    ) async {
+      final services = _Interactions();
+      var opens = 0;
+      await tester.pumpWidget(
+        _app(services, hoverPlaybackEnabled: enabled, open: () => opens++),
+      );
+      await tester.tap(find.text(_video.title));
+      await tester.pump(const Duration(seconds: 1));
+      expect(opens, 1);
+      expect(
+        find.byKey(const ValueKey('video-card-hover-preview')),
+        findsNothing,
+      );
+      expect(services.reads, 0);
+      expect(services.engines, isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+  }
+
+  testWidgets('disabling cancels hover delay and enabling waits again', (
+    tester,
+  ) async {
+    final services = _Interactions();
+    await tester.pumpWidget(_app(services));
+    final mouse = await _mouse(tester);
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('video-card-cover-scale'))),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpWidget(_app(services, hoverPlaybackEnabled: false));
+    await tester.pump(const Duration(seconds: 1));
+    expect(services.reads, 0);
+    await tester.pumpWidget(_app(services));
+    await tester.pump(const Duration(milliseconds: 199));
+    expect(services.reads, 0);
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pump();
+    expect(services.reads, 1);
+    expect(find.byKey(const ValueKey('video-card-preview')), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final phase in ['request', 'opening', 'playing']) {
+    testWidgets('disabling cancels $phase preview and rejects late results', (
+      tester,
+    ) async {
+      final services = _Interactions();
+      final pending = phase == 'playing' ? null : Completer<void>();
+      if (phase == 'request') services.pending = pending;
+      if (phase == 'opening') services.firstOutput = pending;
+      await tester.pumpWidget(_app(services));
+      final mouse = await _mouse(tester);
+      await mouse.moveTo(
+        tester.getCenter(find.byKey(const ValueKey('video-card-cover-scale'))),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pump();
+      expect(services.reads, 1);
+      expect(services.engines, hasLength(phase == 'request' ? 0 : 1));
+      final token = services.token;
+      await tester.pumpWidget(_app(services, hoverPlaybackEnabled: false));
+      expect(token?.isCancelled, isTrue);
+      expect(find.byKey(const ValueKey('video-card-preview')), findsNothing);
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+      if (phase != 'request') {
+        expect(services.engines.single.stops, 1);
+        expect(services.engines.single.disposals, 1);
+      }
+      pending?.complete();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(services.reads, 1);
+      expect(find.byKey(const ValueKey('video-card-preview')), findsNothing);
+      services.pending = null;
+      services.firstOutput = null;
+      await tester.pumpWidget(_app(services));
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pump();
+      expect(services.reads, 2);
+      expect(find.byKey(const ValueKey('video-card-preview')), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets(
     'cover remains visible while native open waits for its first output frame',
     (tester) async {
@@ -459,12 +655,14 @@ Widget _app(
   double width = 320,
   GlobalKey? boundary,
   bool showWatchLaterButton = true,
+  bool hoverPlaybackEnabled = true,
 }) => MaterialApp(
   theme: dark ? BiliTheme.dark() : BiliTheme.light(),
   home: Scaffold(
     body: VideoCardInteractionScope(
       interactions: services,
       onNotice: (_, message) => notice?.call(message),
+      hoverPlaybackEnabled: hoverPlaybackEnabled,
       child: WorkspaceActivity(
         active: active,
         child: Align(
@@ -545,4 +743,49 @@ class _Interactions implements VideoCardOperations {
   bool isAdded(VideoId id) => added;
   @override
   bool isUncertain(VideoId id) => false;
+}
+
+class _CountingScrollController extends ScrollController {
+  _ListenerCountingNotifier get notifier =>
+      position.isScrollingNotifier as _ListenerCountingNotifier;
+
+  @override
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) => _CountingScrollPosition(
+    physics: physics,
+    context: context,
+    oldPosition: oldPosition,
+  );
+}
+
+class _CountingScrollPosition extends ScrollPositionWithSingleContext {
+  _CountingScrollPosition({
+    required super.physics,
+    required super.context,
+    super.oldPosition,
+  });
+
+  final _notifier = _ListenerCountingNotifier();
+  @override
+  ValueNotifier<bool> get isScrollingNotifier => _notifier;
+}
+
+class _ListenerCountingNotifier extends ValueNotifier<bool> {
+  _ListenerCountingNotifier() : super(false);
+  int listenerCount = 0;
+
+  @override
+  void addListener(VoidCallback listener) {
+    listenerCount++;
+    super.addListener(listener);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    listenerCount--;
+    super.removeListener(listener);
+  }
 }

@@ -9,6 +9,11 @@ void main() {
     for (final platform in TargetPlatform.values) {
       debugDefaultTargetPlatformOverride = platform;
       expect(defaultDanmakuArea, platform == TargetPlatform.android ? .5 : .75);
+      expect(defaultVideoCardHoverPlayback, platform != TargetPlatform.android);
+      expect(
+        videoCardHoverPlaybackForPlatform(platform),
+        platform != TargetPlatform.android,
+      );
       expect(defaultDanmakuFontScale, switch (platform) {
         TargetPlatform.android => .6,
         TargetPlatform.windows ||

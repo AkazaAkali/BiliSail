@@ -2,6 +2,25 @@ import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('hover playback defaults on and preserves explicit choices', () {
+    expect(const AppSettings.defaults().videoCardHoverPlayback, isTrue);
+    expect(AppSettings().videoCardHoverPlayback, isTrue);
+    expect(
+      const AppSettings.defaults(videoCardHoverPlayback: false)
+          .copyWith(theme: AppThemePreference.dark)
+          .normalized()
+          .videoCardHoverPlayback,
+      isFalse,
+    );
+    for (final enabled in [false, true]) {
+      final settings = AppSettings(videoCardHoverPlayback: enabled)
+          .normalized()
+          .copyWith(autoPlay: false);
+      expect(settings.videoCardHoverPlayback, enabled);
+      expect(settings.autoPlay, isFalse);
+    }
+  });
+
   test('navigation defaults to dual tabs', () {
     expect(AppSettings().navigationMode, WorkspaceNavigationMode.dualTabs);
     expect(

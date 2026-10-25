@@ -25,6 +25,12 @@ bool highEnergyProgressEnabledForPlatform(TargetPlatform platform) =>
 bool get defaultHighEnergyProgressEnabled =>
     highEnergyProgressEnabledForPlatform(defaultTargetPlatform);
 
+bool videoCardHoverPlaybackForPlatform(TargetPlatform platform) =>
+    platform != TargetPlatform.android;
+
+bool get defaultVideoCardHoverPlayback =>
+    videoCardHoverPlaybackForPlatform(defaultTargetPlatform);
+
 double danmakuAreaForPlatform(TargetPlatform platform) =>
     platform == TargetPlatform.android ? .5 : .75;
 

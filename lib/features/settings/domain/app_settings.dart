@@ -55,6 +55,7 @@ final class AppSettings {
     this.danmakuOpacity = 0.8,
     this.danmakuFontScale = 1.0,
     this.autoPlay = true,
+    this.videoCardHoverPlayback = true,
     this.continuousPlayback = false,
     this.resumePlayback = true,
     this.showCollapsedProgress = true,
@@ -99,6 +100,7 @@ final class AppSettings {
   const AppSettings.defaults({
     this.navigationMode = WorkspaceNavigationMode.dualTabs,
     this.allowConcurrentPlayback = false,
+    this.videoCardHoverPlayback = true,
     this.highEnergyProgressEnabled = false,
     this.danmakuArea = 0.75,
     this.danmakuFontScale = 1.0,
@@ -165,6 +167,7 @@ final class AppSettings {
   final double danmakuOpacity;
   final double danmakuFontScale;
   final bool autoPlay;
+  final bool videoCardHoverPlayback;
   final bool continuousPlayback;
   final bool resumePlayback;
   final bool showCollapsedProgress;
@@ -230,6 +233,7 @@ final class AppSettings {
     double? danmakuOpacity,
     double? danmakuFontScale,
     bool? autoPlay,
+    bool? videoCardHoverPlayback,
     bool? continuousPlayback,
     bool? resumePlayback,
     bool? showCollapsedProgress,
@@ -281,6 +285,8 @@ final class AppSettings {
     danmakuOpacity: danmakuOpacity ?? this.danmakuOpacity,
     danmakuFontScale: danmakuFontScale ?? this.danmakuFontScale,
     autoPlay: autoPlay ?? this.autoPlay,
+    videoCardHoverPlayback:
+        videoCardHoverPlayback ?? this.videoCardHoverPlayback,
     continuousPlayback: continuousPlayback ?? this.continuousPlayback,
     resumePlayback: resumePlayback ?? this.resumePlayback,
     showCollapsedProgress: showCollapsedProgress ?? this.showCollapsedProgress,

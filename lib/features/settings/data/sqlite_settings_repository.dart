@@ -13,6 +13,7 @@ class SqliteSettingsRepository implements SettingsRepository {
     this.defaultDanmakuArea = 0.75,
     this.defaultDanmakuFontScale = 1.0,
     this.defaultPlayerControlsMode = PlayerControlsMode.click,
+    this.defaultVideoCardHoverPlayback = true,
   });
   final AppDatabase database;
   final WorkspaceNavigationMode defaultNavigationMode;
@@ -20,6 +21,7 @@ class SqliteSettingsRepository implements SettingsRepository {
   final double defaultDanmakuArea;
   final double defaultDanmakuFontScale;
   final PlayerControlsMode defaultPlayerControlsMode;
+  final bool defaultVideoCardHoverPlayback;
 
   AppSettings get defaults => AppSettings.defaults(
     navigationMode: defaultNavigationMode,
@@ -27,6 +29,7 @@ class SqliteSettingsRepository implements SettingsRepository {
     danmakuArea: defaultDanmakuArea,
     danmakuFontScale: defaultDanmakuFontScale,
     playerControlsMode: defaultPlayerControlsMode,
+    videoCardHoverPlayback: defaultVideoCardHoverPlayback,
   );
 
   @override
@@ -88,6 +91,10 @@ class SqliteSettingsRepository implements SettingsRepository {
           ? danmakuFontScale
           : defaultDanmakuFontScale,
       autoPlay: boolean('autoPlay', true),
+      videoCardHoverPlayback: boolean(
+        'videoCardHoverPlayback',
+        defaultVideoCardHoverPlayback,
+      ),
       continuousPlayback: boolean('continuousPlayback', false),
       resumePlayback: boolean('resumePlayback', true),
       showCollapsedProgress: boolean('showCollapsedProgress', true),
@@ -186,7 +193,7 @@ class SqliteSettingsRepository implements SettingsRepository {
     return database.writeSetting(
       'preferences.v1',
       jsonEncode({
-        'schemaVersion': 22,
+        'schemaVersion': 23,
         'navigationMode': value.navigationMode.name,
         'allowConcurrentPlayback': value.allowConcurrentPlayback,
         'cacheImages': value.cacheImages,
@@ -200,6 +207,7 @@ class SqliteSettingsRepository implements SettingsRepository {
         'danmakuOpacity': value.danmakuOpacity,
         'danmakuFontScale': value.danmakuFontScale,
         'autoPlay': value.autoPlay,
+        'videoCardHoverPlayback': value.videoCardHoverPlayback,
         'continuousPlayback': value.continuousPlayback,
         'resumePlayback': value.resumePlayback,
         'showCollapsedProgress': value.showCollapsedProgress,

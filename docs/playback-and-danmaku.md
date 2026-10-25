@@ -240,6 +240,8 @@ estimatedPosition = anchorPosition + (monotonicNow - anchorTime) × playbackRate
 
 列表视频卡另使用真实视频悬停播放：复用 Web/WBI 点播源接口请求低清晰度，通过独立、静音的临时 PlayerEngine/VideoSurface 播放。预览不属于正式播放标签，不访问进度存储或上报；进程级管理器最多保留一个预览，切换前等待释放，离开/隐藏/后台/账号转换均取消。网页实际请求、容量与原生验证见 [视频卡悬停播放](validation/video-card-hover.md)。
 
+2026-10-26 增加独立的“设置 → 播放 → 视频卡悬停播放”选项，Android 默认关闭、其他平台默认开启，保留用户已保存的有效选择。预览组件只在开启且卡片实际悬停、页面可见时挂载；关闭或未悬停时跳过预览专用生命周期／滚动监听、定时器和播放器组件。关闭后取消已有等待、请求和预览；重新开启后仍按前台、滚动状态及 200 毫秒等待启动。该选项不改变正式视频的自动播放，迁移、资源收益及验收边界见[悬停播放设置](validation/video-card-hover.md#2026-10-26悬停播放设置)。
+
 ## 6. 直播媒体与消息
 
 直播使用同一个 PlayerEngine，但独立 `LivePlaybackPolicy`：选择服务端提供且后端可播的 HLS/HTTP-FLV 等组合；协议、容器、codec、线路是不同维度。M0 同时验证 HLS 与 HTTP-FLV，正式默认选通过验证且稳定的线路组合。
