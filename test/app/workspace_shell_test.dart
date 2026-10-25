@@ -270,6 +270,8 @@ void main() {
       ('/', 1280.0),
       ('/?channel=dynamic', 390.0),
       ('/?channel=dynamic', 1280.0),
+      ('/?channel=videoDynamic', 390.0),
+      ('/?channel=videoDynamic', 1280.0),
     ]) {
       _workspaceTestWidgets(
         'dynamic entry preserves explicit and chosen channels from $initial at $entryWidth in $mode',
@@ -282,6 +284,11 @@ void main() {
           final navigationPrefix = entryWidth < 600
               ? 'workspace-bottom'
               : 'workspace-nav';
+          final initialChannel =
+              Uri.parse(initial).queryParameters['channel'] ?? 'dynamic';
+          final chosenChannel = initialChannel == 'dynamic'
+              ? 'videoDynamic'
+              : 'dynamic';
           final router = _router(
             (_, tab) => _CounterPage(tab: tab, onDispose: disposed.add),
             navigationMode: mode,
@@ -302,7 +309,7 @@ void main() {
                   .value
                   .uri
                   .queryParameters['channel'],
-              'dynamic',
+              initialChannel,
             );
             await tester.tap(find.byKey(ValueKey('$navigationPrefix-home')));
             await tester.pumpAndSettle();
@@ -315,9 +322,9 @@ void main() {
                 .value
                 .uri
                 .queryParameters['channel'],
-            initial == '/' ? 'videoDynamic' : 'dynamic',
+            initialChannel,
           );
-          await tester.tap(find.byKey(const ValueKey('channel-dynamic')));
+          await tester.tap(find.byKey(ValueKey('channel-$chosenChannel')));
           await tester.pumpAndSettle();
           expect(
             router
@@ -325,7 +332,7 @@ void main() {
                 .value
                 .uri
                 .queryParameters['channel'],
-            'dynamic',
+            chosenChannel,
           );
           await tester.tap(find.byKey(ValueKey('$navigationPrefix-home')));
           await tester.pumpAndSettle();
@@ -341,7 +348,7 @@ void main() {
                 .value
                 .uri
                 .queryParameters['channel'],
-            'dynamic',
+            chosenChannel,
           );
           expect(find.byIcon(Icons.account_circle), findsNothing);
           expect(find.byKey(const ValueKey('workspace-search')), findsNothing);

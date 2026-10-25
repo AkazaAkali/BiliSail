@@ -1247,13 +1247,13 @@ void main() {
               .position;
           final prefix = width < 600 ? 'workspace-bottom' : 'workspace-nav';
           for (final (section, channel) in [
-            ('dynamic', HomeChannel.videoDynamic),
+            ('dynamic', HomeChannel.dynamic),
             ('home', HomeChannel.recommended),
-            ('dynamic', HomeChannel.videoDynamic),
+            ('dynamic', HomeChannel.dynamic),
             ('mine', null),
             ('home', HomeChannel.recommended),
             ('settings', null),
-            ('dynamic', HomeChannel.videoDynamic),
+            ('dynamic', HomeChannel.dynamic),
             ('home', HomeChannel.recommended),
           ]) {
             await tester.tap(find.byKey(ValueKey('$prefix-$section')));
@@ -1290,9 +1290,7 @@ void main() {
           await tester.pump();
           await tester.pump();
           expect(
-            tester.getRect(
-              find.byKey(const ValueKey(HomeChannel.videoDynamic)),
-            ),
+            tester.getRect(find.byKey(const ValueKey(HomeChannel.dynamic))),
             tester.getRect(surface),
           );
           expect(position().isScrollingNotifier.value, isFalse);

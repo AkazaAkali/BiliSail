@@ -804,7 +804,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
       case WorkspaceSection.home:
         _selectChannel(_lastChannels[section] ?? HomeChannel.recommended);
       case WorkspaceSection.dynamic:
-        _selectChannel(_lastChannels[section] ?? HomeChannel.videoDynamic);
+        _selectChannel(_lastChannels[section] ?? HomeChannel.dynamic);
       case WorkspaceSection.live:
         _selectChannel(HomeChannel.live);
       case WorkspaceSection.mine:
