@@ -114,7 +114,14 @@ class _WorkspacePlaybackWindowState extends State<WorkspacePlaybackWindow> {
   }
 
   CommandOutcome _command(Object command, InputStroke stroke) {
-    if (stroke.phase == InputPhase.up) return CommandOutcome.noOp;
+    // Closing/activating another native window while a side button is held
+    // can start a second Down in that view. Keep the frozen target until Up
+    // so the handoff happens after release; Cancel/blur never executes it.
+    if (stroke.device == InputDevice.mouse) {
+      if (stroke.phase != InputPhase.up) return CommandOutcome.noOp;
+    } else if (stroke.phase == InputPhase.up) {
+      return CommandOutcome.noOp;
+    }
     _input.beforeNavigation();
     switch (command) {
       case ShortcutAction.closeTab:
