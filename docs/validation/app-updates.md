@@ -8,12 +8,15 @@
 
 2026-10-24 调整自动提醒规则：按 `major.minor.patch` 持久化最后自动提醒的版本，同一版本跨日、重启或仅增加 `+N` 构建号均不再自动弹窗；例如已提醒 `1.1.1+3` 后，`1.1.1+4` 保持安静，发现 `1.1.2` 时再次提醒。记录只向更新的版本推进，远端候选回退不会重新提醒旧版本。每日查询仍照常进行；手动点击“检查更新”绕过自动提醒记录，每次仍可提示包含最新构建号的新版本，合并进自动请求的手动检查也遵守此规则。
 
-新版本弹窗显示版本、预览标记与更新说明；“稍后再说”关闭弹窗，“前往 Release”调用系统浏览器打开该版本页面。只有用户点击才打开外部页面，不自动下载、安装或打开浏览器。提示由进程级宿主管理，切换或关闭设置标签不会取消整个应用的更新检查；同一请求不产生重复弹窗。退出或请求超时会取消网络读取，迟到响应不更新状态。
+2026-10-25 调整版本渠道：手动与每日自动检查均排除 GitHub 标记为 `prerelease: true` 的预览版本和 `draft: true` 的草稿，只从正式 Release 中选择候选；即使预览版使用普通 `v1.2.3+4` 标签也会排除。只有草稿／预览版时不报协议错误，手动检查提示“暂无已发布的正式版本”，自动检查保持安静，也不写入自动版本提醒记录。
+
+新版本弹窗显示版本与更新说明；“稍后再说”关闭弹窗，“前往 Release”调用系统浏览器打开该版本页面。只有用户点击才打开外部页面，不自动下载、安装或打开浏览器。提示由进程级宿主管理，切换或关闭设置标签不会取消整个应用的更新检查；同一请求不产生重复弹窗。退出或请求超时会取消网络读取，迟到响应不更新状态。
 
 ## 协议、版本与存储
 
 - 独立无凭据 `HttpClient`，单次 GET `https://api.github.com/repos/CKopoer/BiliSail/releases?per_page=100`；`Accept: application/vnd.github+json`、`X-GitHub-Api-Version: 2026-03-10`。不附 Bilibili Cookie/token，不跟随重定向、不自动重试，保留系统 TLS 验证。
-- 检查最近最多 100 个 Release，排除草稿，包含已公开的预览版本，按版本大小选候选。空列表表示暂无发布，错误格式不伪装成“已是最新”。依据 [GitHub Releases REST 文档](https://docs.github.com/en/rest/releases/releases#list-releases) 使用列表端点，兼容本项目的 prerelease 发布流程。
+- 检查列表第一页最多 100 个 Release，要求 `draft`、`prerelease` 为 JSON 布尔值，且二者均为 `false` 才参与版本比较；不根据标签名称推断 GitHub 的预览标记。空列表或全部被渠道筛选排除表示暂无正式发布；存在正式候选但格式错误时不伪装成“已是最新”。仍保留最多 100 项的查询上限，不继续翻页查找更早的正式版。
+- 2026-10-25 核对 [GitHub List releases 官方协议（API 2026-03-10）](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10#list-releases)：公开资源可匿名读取，响应为 Release 数组，分页参数只有 `per_page`（最多 100）和 `page`，不提供服务端排除预览版的查询参数，因此在客户端检查 `draft`／`prerelease`。另有 [Get the latest release](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10#get-the-latest-release) 返回单个非草稿、非预览版对象；官方说明其 latest 选择关联 `created_at`，不等同于本项目按语义版本和数字构建号取最大值，因此继续使用列表端点筛选正式版。
 - 版本先按 `major.minor.patch` 与预发布标识比较，再比较数字 Flutter `+N` 构建号，支持 `v0.1.0+2`。同一语义版本的不同数字构建仍被识别为更新，但自动弹窗按三段版本号去重，手动检查不受此限制；非数字构建元数据不改变优先级，不按字符串字典序比较。
 - `package_info_plus 10.2.2` 从已有锁定的传递依赖提升为直接依赖，BSD-3-Clause，支持 Android/Windows/macOS，未改变解析版本。常规运行读取平台包版本，[Release 脚本](../../tool/build-release.ps1) 通过 `BILISAIL_RELEASE_VERSION` 注入实际 `x.y.z+N`，避免 Android split APK 的 `versionCode +2000` 被当作 Release 构建号。自行执行 split APK 构建时应传相同 Dart define。
 - 网络总读取期限 12 秒，整个检查期限 20 秒；响应最多 2 MiB，展示说明最多 12000 字符。说明以纯文本显示；只接受本仓库的 HTTPS Release 链接，拒绝其他 host、仓库、端口、userinfo、query 或 fragment。
@@ -33,6 +36,8 @@
 ## 验证
 
 离线测试覆盖版本及构建号排序、预览/草稿、空列表、错误协议与链接、容量、SQLite 日期重开、跨日/失败后重启、手动合并、取消/超时与迟到结果、窄窗口、弹窗确认及浏览器打开失败。Windows 原生入口为 [windows_app_updates_test.dart](../../integration_test/windows_app_updates_test.dart)，在线读取需显式 `--dart-define=BILI_UPDATES_ONLINE=true`，正常检查不访问真实账号或外网。
+
+2026-10-25 正式版筛选：更新专项 33 项测试通过，覆盖高版本预览版不遮挡正式版、只有草稿／预览版时无候选、GitHub 布尔字段校验，以及实际 Repository 到手动／自动检查控制器的行为。`tool/check.ps1 -SkipPub` 通过格式、静态分析、打包边界和离线测试：根应用 2687、bili_api 456、bili_player 81、bili_danmaku 93、bili_mux 2 项通过；mux 另有 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过，日志 `artifacts/app-updates-stable-check-20261025.log`。另通过实际 `GitHubUpdateRepository` 的匿名 HTTP 请求取得正式版 `1.1.1+7`，确认 `prerelease: false`，日志 `artifacts/app-updates-stable-online-20261025.log`。Windows 集成测试 fixture 已加入更高版本的预览版并保留正式版提示断言，但本次未执行原生集成测试、构建或三端实机验收；未发现运行中的调试实例可供热重载。
 
 2026-10-24 自动提醒调整：更新专项 28 项离线测试通过，包含数据库重开后保留提醒记录、同版本跨日与构建号变化静默、下一三段版本再次弹窗、手动重复检查与合并请求仍提示、存储迟到响应不恢复弹窗。`tool/check.ps1 -SkipPub` 通过根应用与四个包的格式、静态分析、离线测试和打包边界检查；mux 的 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过，日志 `artifacts/app-updates-version-reminders-check.log`。此次未构建或进行 Windows／Android／macOS 实机验收，无运行中的调试实例可供热重载；下方为 2026-10-06 的历史验证记录。
 

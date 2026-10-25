@@ -46,9 +46,17 @@ void main() {
         versionLoader: loadInstalledAppVersion,
         fetcher: (_) async => jsonEncode([
           {
-            'tag_name': 'v$nextVersion',
+            'tag_name': 'v999.0.0',
             'draft': false,
             'prerelease': true,
+            'html_url':
+                'https://github.com/CKopoer/BiliSail/releases/tag/v999.0.0',
+            'body': '预览版本不参与更新提示。',
+          },
+          {
+            'tag_name': 'v$nextVersion',
+            'draft': false,
+            'prerelease': false,
             'html_url': releaseUrl.toString(),
             'body': 'Windows 原生更新提示验证：保留当前页面和播放状态，点击按钮前往 Release 查看详情。',
           },
@@ -133,6 +141,7 @@ void main() {
     addTearDown(repository.close);
     final release = await repository.latestRelease(RequestCancellation());
     expect(release?.url.host, anyOf('github.com', isNull));
-    debugPrint('Published Release: ${release?.version.label ?? "none"}');
+    expect(release?.prerelease, anyOf(isFalse, isNull));
+    debugPrint('Published full Release: ${release?.version.label ?? "none"}');
   }, skip: !online);
 }

@@ -120,7 +120,8 @@ final class GitHubUpdateRepository implements AppUpdateRepository {
             item['tag_name'] is! String) {
           throw const FormatException();
         }
-        if (item['draft'] == true) continue;
+        // GitHub release flags determine eligibility, not the tag spelling.
+        if (item['draft'] == true || item['prerelease'] == true) continue;
         final tag = item['tag_name'];
         if (tag is! String) throw const FormatException();
         final version = AppVersion.tryParse(tag);
@@ -150,7 +151,6 @@ final class GitHubUpdateRepository implements AppUpdateRepository {
           notes: text.length > 12000
               ? '${text.substring(0, 12000)}\n…完整说明请查看 Release 页面'
               : text,
-          prerelease: item['prerelease'] == true,
         );
         if (newest == null || version.compareTo(newest.version) > 0) {
           newest = release;
@@ -159,7 +159,10 @@ final class GitHubUpdateRepository implements AppUpdateRepository {
       if (newest == null &&
           decoded.isNotEmpty &&
           decoded.any(
-            (item) => item is Map<String, Object?> && item['draft'] == false,
+            (item) =>
+                item is Map<String, Object?> &&
+                item['draft'] == false &&
+                item['prerelease'] == false,
           )) {
         throw const FormatException();
       }

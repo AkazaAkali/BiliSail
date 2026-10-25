@@ -52,7 +52,7 @@ Map<String, Object?> _jsonRelease(
 };
 
 ProviderContainer _container(
-  _UpdateRepository repository,
+  AppUpdateRepository repository,
   _CheckStore store, {
   DateTime? now,
 }) {
@@ -128,33 +128,63 @@ void main() {
     }
   });
   test(
-    'select greatest published version, including preview and encoded + tag',
+    'select greatest full release, excluding draft and prerelease flags',
     () {
       final release = GitHubUpdateRepository.parseReleases(
         jsonEncode([
           _jsonRelease('v8.0.0', draft: true),
+          _jsonRelease('v9.0.0', prerelease: true),
           _jsonRelease('v0.2.0'),
           _jsonRelease('notes'),
           _jsonRelease(
-            'v0.3.0+2',
-            prerelease: true,
-            url: 'https://github.com/CKopoer/BiliSail/releases/tag/v0.3.0%2B2',
+            'v0.3.0+10',
+            url: 'https://github.com/CKopoer/BiliSail/releases/tag/v0.3.0%2B10',
           ),
+          _jsonRelease('v0.3.0+2'),
           _jsonRelease('v0.1.0+200'),
         ]),
       );
-      expect(release?.version.label, '0.3.0+2');
-      expect(release?.prerelease, isTrue);
+      expect(release?.version.label, '0.3.0+10');
+      expect(release?.prerelease, isFalse);
     },
   );
-  test('empty release list and draft-only list have no published version', () {
-    expect(GitHubUpdateRepository.parseReleases('[]'), isNull);
-    expect(
-      GitHubUpdateRepository.parseReleases(
-        jsonEncode([_jsonRelease('v9.0.0', draft: true)]),
-      ),
-      isNull,
-    );
+  test('empty and draft/prerelease-only lists have no full release', () {
+    for (final releases in [
+      <Map<String, Object?>>[],
+      [_jsonRelease('v9.0.0', draft: true)],
+      [_jsonRelease('v9.0.0', prerelease: true)],
+      [
+        _jsonRelease('v9.0.0', draft: true),
+        _jsonRelease('v8.0.0', prerelease: true),
+        _jsonRelease('nightly', prerelease: true),
+      ],
+    ]) {
+      expect(
+        GitHubUpdateRepository.parseReleases(jsonEncode(releases)),
+        isNull,
+      );
+    }
+  });
+  test('GitHub draft and prerelease fields must be JSON booleans', () {
+    for (final field in ['draft', 'prerelease']) {
+      for (final value in <Object?>[null, 'false', 'true', 0, 1]) {
+        expect(
+          () => GitHubUpdateRepository.parseReleases(
+            jsonEncode([
+              {..._jsonRelease('v1.0.0'), field: value},
+            ]),
+          ),
+          throwsA(
+            isA<AppFailure>().having(
+              (e) => e.kind,
+              'kind',
+              AppFailureKind.protocol,
+            ),
+          ),
+          reason: '$field: $value',
+        );
+      }
+    }
   });
   test('malformed and untrusted release responses are failures', () {
     for (final body in [
@@ -233,6 +263,43 @@ void main() {
     await expectation;
     repository.close();
   });
+  for (final automatic in [true, false]) {
+    for (final hasFullRelease in [true, false]) {
+      test('${automatic ? 'automatic' : 'manual'} check excludes prereleases '
+          'with full release available: $hasFullRelease', () async {
+        final repository = GitHubUpdateRepository(
+          versionLoader: () async => _version('0.1.0+1'),
+          fetcher: (_) async => jsonEncode([
+            _jsonRelease('v9.0.0', prerelease: true),
+            _jsonRelease('v8.0.0', draft: true),
+            if (hasFullRelease) _jsonRelease('v0.2.0+1'),
+          ]),
+        );
+        addTearDown(repository.close);
+        final store = _CheckStore();
+        final container = _container(repository, store);
+        final controller = container.read(appUpdateControllerProvider.notifier);
+        if (automatic) {
+          await controller.checkOnStartup();
+        } else {
+          await controller.checkManually();
+        }
+        final state = container.read(appUpdateControllerProvider);
+        expect(state.failure, isNull);
+        expect(
+          state.pendingRelease?.version.label,
+          hasFullRelease ? '0.2.0+1' : null,
+        );
+        expect(
+          store.promptedVersion,
+          automatic && hasFullRelease ? '0.2.0' : null,
+        );
+        if (!hasFullRelease) {
+          expect(state.message, automatic ? null : '暂无已发布的正式版本');
+        }
+      });
+    }
+  }
   test(
     'external links allow this project and reject other GitHub destinations',
     () {
@@ -359,7 +426,7 @@ void main() {
     expect(container.read(appUpdateControllerProvider).pendingRelease, isNull);
     repository.release = null;
     await controller.checkManually();
-    expect(container.read(appUpdateControllerProvider).message, '暂无已发布版本');
+    expect(container.read(appUpdateControllerProvider).message, '暂无已发布的正式版本');
   });
   test('manual checks bypass automatic version reminders every time', () async {
     final repository = _UpdateRepository()..release = _release('1.1.1+4');

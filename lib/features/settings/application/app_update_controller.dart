@@ -124,7 +124,7 @@ final class AppUpdateController extends Notifier<AppUpdateState> {
               : newer
               ? '发现新版本 ${release.version.label}'
               : release == null
-              ? '暂无已发布版本'
+              ? '暂无已发布的正式版本'
               : '当前已是最新版本（${installed.label}）',
         );
       })().timeout(const Duration(seconds: 20));
