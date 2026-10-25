@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:ui' show ViewFocusDirection, ViewFocusEvent, ViewFocusState;
 
 import 'package:bilisail/app/shell.dart';
+import 'package:bilisail/app/workspace_playback_window.dart';
+import 'package:bilisail/core/platform/detached_playback_window.dart';
 import 'package:bilisail/core/presentation/workspace_activity.dart';
 import 'package:bilisail/domain/comment_target.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
@@ -26,6 +29,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
+import '../support/detached_window_fake.dart';
 import '../support/input_test_app.dart';
 
 const _id = VideoId('BV1ab411c7mD');
@@ -140,6 +144,113 @@ void main() {
     }
   }
 
+  for (final pgc in [false, true]) {
+    testWidgets(
+      'desktop dual ${pgc ? 'PGC' : 'video'} detail consumes side and keyboard back before closing',
+      (tester) async {
+        final harness = await _mount(tester, pgc: pgc, detached: true);
+        final window = harness.windows.lastWindow!;
+        final composer = find.descendant(
+          of: find.byType(CommentsPanel),
+          matching: find.byType(TextField),
+        );
+        final player = tester.element(
+          find.byKey(const ValueKey('test-player')),
+        );
+        final location = harness.router.routeInformationProvider.value.uri;
+        expect(View.of(player).viewId, window.viewId);
+
+        for (final action in ['mouse', 'shortcut']) {
+          await _openDetail(tester);
+          await tester.enterText(composer, '保留草稿');
+          final dialog = showDialog<void>(
+            context: tester.element(find.byType(CommentsPanel)),
+            useRootNavigator: false,
+            barrierDismissible: false,
+            requestFocus: false,
+            builder: (_) => const AlertDialog(content: Text('模态窗口')),
+          );
+          await tester.pumpAndSettle();
+          expect(
+            find.text('评论详情'),
+            findsOneWidget,
+            reason: 'before modal input',
+          );
+          await _mouseBack(tester, viewId: window.viewId);
+          expect(find.text('评论详情'), findsOneWidget, reason: 'modal mouse');
+          await _closeShortcut(tester);
+          expect(find.text('评论详情'), findsOneWidget, reason: 'modal shortcut');
+          expect(find.text('模态窗口'), findsOneWidget);
+          expect(window.disposed, isFalse);
+          Navigator.of(tester.element(find.text('模态窗口'))).pop();
+          await tester.pumpAndSettle();
+          await dialog;
+          await tester.enterText(composer, '保留草稿');
+
+          if (action == 'mouse') {
+            await _mouseBack(tester, viewId: window.viewId);
+          } else {
+            await _closeShortcut(tester);
+          }
+          await tester.pumpAndSettle();
+          expect(find.text('评论详情'), findsNothing, reason: action);
+          expect(find.text('共 3 条回复 ›'), findsOneWidget);
+          expect(harness.router.routeInformationProvider.value.uri, location);
+          expect(window.disposed, isFalse);
+          expect(harness.windows.creationCount, 1);
+          expect(
+            tester.element(find.byKey(const ValueKey('test-player'))),
+            same(player),
+          );
+          expect(tester.widget<TextField>(composer).controller?.text, '保留草稿');
+        }
+
+        await _mouseBack(tester, viewId: window.viewId);
+        await tester.pumpAndSettle();
+        expect(window.disposed, isTrue);
+        expect(find.byKey(const ValueKey('test-player')), findsNothing);
+        expect(find.text('首页内容'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.windows),
+    );
+  }
+
+  testWidgets(
+    'desktop dual side back consumes comment detail before media history',
+    (tester) async {
+      final harness = await _mount(tester, detached: true);
+      final window = harness.windows.lastWindow!;
+      harness.router.go('/pgc/1');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('评论'));
+      await tester.pumpAndSettle();
+      await _openDetail(tester);
+
+      await _mouseBack(tester, viewId: window.viewId);
+      await tester.pumpAndSettle();
+      expect(find.text('评论详情'), findsNothing);
+      expect(harness.router.routeInformationProvider.value.uri.path, '/pgc/1');
+      expect(window.disposed, isFalse);
+
+      await _mouseBack(tester, viewId: window.viewId);
+      await tester.pumpAndSettle();
+      expect(
+        harness.router.routeInformationProvider.value.uri.path,
+        '/video/BV1ab411c7mD',
+      );
+      expect(window.disposed, isFalse);
+      expect(harness.windows.creationCount, 1);
+
+      await _mouseBack(tester, viewId: window.viewId);
+      await tester.pumpAndSettle();
+      expect(window.disposed, isTrue);
+      expect(find.text('首页内容'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
   testWidgets(
     'modal and inactive pages cannot consume the active workspace back',
     (tester) async {
@@ -226,10 +337,12 @@ void main() {
   );
 }
 
-Future<({GoRouter router, _Comments repo})> _mount(
+Future<({GoRouter router, _Comments repo, FakeDetachedWindowFactory windows})>
+_mount(
   WidgetTester tester, {
   TargetPlatform platform = TargetPlatform.windows,
   bool pgc = false,
+  bool detached = false,
 }) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = Size(
@@ -239,6 +352,7 @@ Future<({GoRouter router, _Comments repo})> _mount(
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(tester.view.resetPhysicalSize);
   final repo = _Comments();
+  final windows = FakeDetachedWindowFactory(tester.view);
   final shortcuts = const ShortcutSettings.defaults().withKeys(
     ShortcutAction.closeTab,
     ['Ctrl+W', 'MouseBack'],
@@ -251,9 +365,36 @@ Future<({GoRouter router, _Comments repo})> _mount(
         builder: (_, state, child) => BiliAppShell(
           location: state.uri.toString(),
           shortcuts: shortcuts,
-          navigationMode: platform == TargetPlatform.android
+          navigationMode: detached || platform == TargetPlatform.android
               ? WorkspaceNavigationMode.dualTabs
               : WorkspaceNavigationMode.multipleTabs,
+          playbackWindowBuilder: detached
+              ? (
+                  context, {
+                  required child,
+                  required playback,
+                  required activationToken,
+                  required onClose,
+                  required onBack,
+                  required onError,
+                }) => DesktopPlaybackWindow(
+                  windowFactory: windows.call,
+                  activationToken: activationToken,
+                  onCloseRequested: onClose,
+                  onError: onError,
+                  playback: playback == null
+                      ? null
+                      : WorkspacePlaybackWindow(
+                          theme: ThemeData(),
+                          shortcuts: shortcuts,
+                          onClose: onClose,
+                          onBack: onBack,
+                          onActivateBrowser: () {},
+                          child: playback,
+                        ),
+                  child: child,
+                )
+              : null,
           pageBuilder: (_, tab) => switch (tab.location.path) {
             '/video/BV1ab411c7mD' => VideoScreen(
               id: _id,
@@ -296,9 +437,19 @@ Future<({GoRouter router, _Comments repo})> _mount(
   await tester.pumpAndSettle();
   router.go(pgc ? '/pgc/1' : '/video/BV1ab411c7mD');
   await tester.pumpAndSettle();
+  if (detached) {
+    tester.binding.handleViewFocusChanged(
+      ViewFocusEvent(
+        viewId: windows.lastWindow!.viewId,
+        state: ViewFocusState.focused,
+        direction: ViewFocusDirection.undefined,
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
   await tester.tap(find.text('评论'));
   await tester.pumpAndSettle();
-  return (router: router, repo: repo);
+  return (router: router, repo: repo, windows: windows);
 }
 
 Future<void> _openDetail(WidgetTester tester) async {
@@ -314,13 +465,22 @@ Future<void> _closeShortcut(WidgetTester tester) async {
   await tester.pump();
 }
 
-Future<void> _mouseBack(WidgetTester tester) async {
-  final gesture = await tester.createGesture(
-    kind: PointerDeviceKind.mouse,
-    buttons: kBackMouseButton,
+Future<void> _mouseBack(WidgetTester tester, {int? viewId}) async {
+  tester.binding.handlePointerEvent(
+    PointerDownEvent(
+      viewId: viewId ?? tester.view.viewId,
+      kind: PointerDeviceKind.mouse,
+      buttons: kBackMouseButton,
+      position: const Offset(20, 200),
+    ),
   );
-  await gesture.down(const Offset(20, 200));
-  await gesture.up();
+  tester.binding.handlePointerEvent(
+    PointerUpEvent(
+      viewId: viewId ?? tester.view.viewId,
+      kind: PointerDeviceKind.mouse,
+      position: const Offset(20, 200),
+    ),
+  );
   await tester.pump();
 }
 

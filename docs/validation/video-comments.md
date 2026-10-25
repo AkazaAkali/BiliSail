@@ -53,6 +53,18 @@
 
 本次未执行平台构建、Windows 物理侧键或 Android／macOS 实机验收；Widget 注入事件不等于原生设备输入验证。
 
+## 双标签独立播放窗口返回（2026-10-25）
+
+双标签桌面播放窗口原先将“关闭当前标签页”命令直接交给窗口关闭回调，绕过工作区已有的 `PageBackScope`。因此绑定到该命令的鼠标侧键和 `Ctrl+W` 在评论详情中会直接关闭播放窗口；此前仅在单个视图内验证双／多标签返回的测试没有覆盖独立窗口输入宿主。
+
+[WorkspacePlaybackWindow](../../lib/app/workspace_playback_window.dart) 现在将该命令交给工作区统一返回回调：优先退出当前评论详情，再消费双标签媒体历史，历史为空时关闭播放窗口。标题栏的显式关闭操作仍直接关闭播放窗口。
+
+[评论详情导航回归](../../test/app/comment_detail_navigation_test.dart) 新增使用真实第二 Flutter 视图和独立播放窗口输入宿主的离线场景，覆盖视频／影视评论详情、鼠标侧键和键盘返回、弹窗隔离、草稿与播放器元素保留，以及详情 → 上一媒体 → 关闭窗口的连续返回顺序。
+
+验证：`tool/check.ps1 -SkipPub` 完整检查快照通过，根应用 2,218 项、`bili_api` 446 项、`bili_player` 81 项、`bili_danmaku` 93 项、`bili_mux` 2 项，共 2,840 项测试通过，格式、静态分析和打包边界检查通过。mux 的 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。随后同文件的同期侧键窗口交接改动落地后，补跑评论详情、独立窗口、窗口工作区及侧键交接定向回归 18 项和定向静态分析，均通过。日志为 `build/comment-detail-dual-targeted-2026-10-25.log` 和 `build/comment-detail-dual-check-2026-10-25.log`；本文本地链接和 `git diff --check` 通过。
+
+本轮未重新构建或进行 Windows 物理侧键、Android／macOS 实机验收；未发现可连接的 Flutter 调试进程，无法热重载现有 Release。独立视图的 Widget 回归不等于原生窗口输入验证。
+
 ## 回复中被 @ 用户的主页入口（2026-10-08）
 
 Web 评论正文中的被 @ 用户由 `content.at_name_to_mid_str`（用户名 → 十进制 UID 字符串）提供；缺少有效条目时依次使用 `at_name_to_mid` 和 `content.members[].uname/mid`。协议模型 `ApiVideoComment.mentionedUsers` 保留十进制文本，Repository 转换为 `CommentEntry.mentionedUsers` 的 `UserId`，单条评论最多保留 100 个引用。缺失、空白用户名、非法 UID、浮点 UID 或错误类型均忽略，不影响评论正文；点赞与更新回复列表保留映射。

@@ -118,7 +118,8 @@ class _WorkspacePlaybackWindowState extends State<WorkspacePlaybackWindow> {
     _input.beforeNavigation();
     switch (command) {
       case ShortcutAction.closeTab:
-        widget.onClose();
+        // The workspace handles page-local detail before media history/close.
+        widget.onBack();
       case ReservedShortcut.nextTab || ReservedShortcut.previousTab:
         widget.onActivateBrowser();
     }
