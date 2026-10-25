@@ -239,6 +239,7 @@ void main() {
   }
 
   for (final (platform, requestDetached) in [
+    (TargetPlatform.android, false),
     (TargetPlatform.windows, false),
     (TargetPlatform.windows, true),
     (TargetPlatform.macOS, true),
@@ -410,6 +411,8 @@ void main() {
         }
         if (detached) {
           await sendNativeWindowBack(tester, windows.lastWindow!.viewId);
+        } else if (platform == TargetPlatform.android) {
+          await tester.binding.handlePopRoute();
         } else {
           await tester.tap(find.byTooltip('返回上一视频'));
         }
@@ -437,6 +440,8 @@ void main() {
           // Once the previous media visit was consumed, native Back closes
           // the playback slot and releases its sole scoped session.
           await sendNativeWindowBack(tester, windows.lastWindow!.viewId);
+        } else if (platform == TargetPlatform.android) {
+          await tester.binding.handlePopRoute();
         } else {
           await tester.tap(find.byTooltip('关闭播放'));
         }

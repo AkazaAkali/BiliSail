@@ -897,7 +897,7 @@ void main() {
           expect((firstSession.engine as _FakeEngine).activeSurfaces, 1);
           await firstSession.pause();
           await firstSession.seek(const Duration(seconds: 24));
-          await tester.tap(find.byTooltip('返回上一视频'));
+          await tester.binding.handlePopRoute();
           await _pumpFrames(tester);
           expect(firstSession.detail?.summary.id, _detail.summary.id);
           expect(
@@ -936,7 +936,10 @@ void main() {
               isNot(PlaybackPhase.playing),
             );
           }
-          await tester.tap(find.byTooltip('关闭播放'));
+          await tester.binding.handlePopRoute();
+          await _pumpFrames(tester);
+          expect(firstSession.detail?.summary.id, _detail.summary.id);
+          await tester.binding.handlePopRoute();
           await _pumpFrames(tester);
           expect(find.byType(PlaybackPanel), findsNothing);
           expect(firstSession.media, isNull);

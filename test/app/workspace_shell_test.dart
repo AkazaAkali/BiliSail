@@ -187,6 +187,11 @@ void main() {
             await tester.pumpAndSettle();
             final playback = location.startsWith('/video/');
             final profile = location.startsWith('/user/');
+            final playbackHeader =
+                dual &&
+                mobile &&
+                platform != TargetPlatform.android &&
+                playback;
             playbackCreated |= playback;
             expect(
               find.byKey(const ValueKey('workspace-tab-strip')),
@@ -216,7 +221,11 @@ void main() {
             );
             expect(
               find.byTooltip('返回上一视频'),
-              dual && mobile && playback ? findsOneWidget : findsNothing,
+              playbackHeader ? findsOneWidget : findsNothing,
+            );
+            expect(
+              find.byTooltip('关闭播放'),
+              playbackHeader ? findsOneWidget : findsNothing,
             );
             expect(
               find.byTooltip('返回播放'),
@@ -235,7 +244,7 @@ void main() {
                 (dual
                         ? mobile
                               ? (playback
-                                    ? 44
+                                    ? (playbackHeader ? 44 : 0)
                                     : profile
                                     ? 42
                                     : 0)
@@ -417,7 +426,7 @@ void main() {
   }
 
   _workspaceTestWidgets(
-    'mobile dual returns to the retained playback page and closes it without tabs',
+    'Android dual playback hides its header and closes through system back',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(390, 844);
@@ -437,8 +446,8 @@ void main() {
       router.go('/video/BV1234567890');
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
-      expect(find.byTooltip('返回上一视频'), findsOneWidget);
-      expect(find.byTooltip('关闭播放'), findsOneWidget);
+      expect(find.byTooltip('返回上一视频'), findsNothing);
+      expect(find.byTooltip('关闭播放'), findsNothing);
       await tester.tap(find.text('count 0'));
       await tester.pump();
       final playback = tester.element(find.byType(_CounterPage));
@@ -456,6 +465,8 @@ void main() {
         );
         expect(tester.element(find.byType(_CounterPage)), same(playback));
         expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
+        expect(find.byTooltip('返回上一视频'), findsNothing);
+        expect(find.byTooltip('关闭播放'), findsNothing);
         expect(tester.takeException(), isNull);
       }
       tester.view.physicalSize = const Size(390, 844);
@@ -468,7 +479,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.element(find.byType(_CounterPage)), same(playback));
       expect(find.text('count 1'), findsOneWidget);
-      await tester.tap(find.byTooltip('关闭播放'));
+      await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(tester.element(find.byType(_CounterPage)), same(browse));
       expect(disposed, ['tab-1']);

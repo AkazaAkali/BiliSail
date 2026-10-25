@@ -605,7 +605,9 @@ final class _BiliAppShellState extends State<BiliAppShell>
                       if (_dualTabs) ...[
                         if (widget.windowControlsBuilder != null)
                           _dualWindowCaption(context)
-                        else if (!_desktopDual && _workspace.active.isPlayback)
+                        else if (!_android &&
+                            !_desktopDual &&
+                            _workspace.active.isPlayback)
                           _mobilePlaybackHeader(context),
                       ] else
                         _tabStrip(context),
