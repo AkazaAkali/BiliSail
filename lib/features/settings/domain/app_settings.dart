@@ -45,7 +45,7 @@ final class AppSettings {
   AppSettings({
     this.shortcuts = const ShortcutSettings.defaults(),
     this.theme = AppThemePreference.system,
-    this.navigationMode = WorkspaceNavigationMode.multipleTabs,
+    this.navigationMode = WorkspaceNavigationMode.dualTabs,
     this.allowConcurrentPlayback = false,
     this.font = AppFontPreference.harmonyOsSans,
     this.systemFontFamily = '',
@@ -97,7 +97,7 @@ final class AppSettings {
 
   /// Constant defaults have no caller-owned collection inputs.
   const AppSettings.defaults({
-    this.navigationMode = WorkspaceNavigationMode.multipleTabs,
+    this.navigationMode = WorkspaceNavigationMode.dualTabs,
     this.allowConcurrentPlayback = false,
     this.highEnergyProgressEnabled = false,
     this.danmakuArea = 0.75,

@@ -2,6 +2,14 @@ import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('navigation defaults to dual tabs', () {
+    expect(AppSettings().navigationMode, WorkspaceNavigationMode.dualTabs);
+    expect(
+      const AppSettings.defaults().navigationMode,
+      WorkspaceNavigationMode.dualTabs,
+    );
+  });
+
   test('wheel damping defaults, copies and normalizes independently', () {
     expect(const AppSettings.defaults().wheelDampingRatio, 1.3);
     expect(AppSettings().wheelDampingRatio, 1.3);

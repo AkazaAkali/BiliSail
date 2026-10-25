@@ -47,18 +47,15 @@ void main() {
       }
     },
   );
-  test('Windows/macOS default to multiple tabs and Android to dual tabs', () {
-    expect(
-      workspaceNavigationModeForPlatform(TargetPlatform.windows),
-      WorkspaceNavigationMode.multipleTabs,
-    );
-    expect(
-      workspaceNavigationModeForPlatform(TargetPlatform.macOS),
-      WorkspaceNavigationMode.multipleTabs,
-    );
-    expect(
-      workspaceNavigationModeForPlatform(TargetPlatform.android),
-      WorkspaceNavigationMode.dualTabs,
-    );
+  test('all platforms default to dual tabs', () {
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    for (final platform in TargetPlatform.values) {
+      debugDefaultTargetPlatformOverride = platform;
+      expect(
+        workspaceNavigationModeForPlatform(platform),
+        WorkspaceNavigationMode.dualTabs,
+      );
+      expect(defaultWorkspaceNavigationMode, WorkspaceNavigationMode.dualTabs);
+    }
   });
 }

@@ -8,7 +8,7 @@ import '../domain/settings_repository.dart';
 class SqliteSettingsRepository implements SettingsRepository {
   SqliteSettingsRepository(
     this.database, {
-    this.defaultNavigationMode = WorkspaceNavigationMode.multipleTabs,
+    this.defaultNavigationMode = WorkspaceNavigationMode.dualTabs,
     this.defaultHighEnergyProgressEnabled = false,
     this.defaultDanmakuArea = 0.75,
     this.defaultDanmakuFontScale = 1.0,

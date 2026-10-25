@@ -341,6 +341,10 @@ void main() {
     },
   );
   test('empty settings use the injected platform default', () async {
+    expect(
+      (await repository.load()).navigationMode,
+      WorkspaceNavigationMode.dualTabs,
+    );
     for (final mode in WorkspaceNavigationMode.values) {
       final settings = await SqliteSettingsRepository(
         database,
@@ -441,7 +445,7 @@ void main() {
       );
       final settings = await repository.load();
       expect(settings.theme, AppThemePreference.dark);
-      expect(settings.navigationMode, WorkspaceNavigationMode.multipleTabs);
+      expect(settings.navigationMode, WorkspaceNavigationMode.dualTabs);
       expect(settings.font, AppFontPreference.harmonyOsSans);
       expect(settings.cacheImages, isTrue);
       expect(settings.danmakuEnabled, isFalse);
@@ -483,7 +487,7 @@ void main() {
       jsonEncode({'navigationMode': 'unknown', 'theme': 'dark'}),
     );
     final reloaded = await repository.load();
-    expect(reloaded.navigationMode, WorkspaceNavigationMode.multipleTabs);
+    expect(reloaded.navigationMode, WorkspaceNavigationMode.dualTabs);
     expect(reloaded.theme, AppThemePreference.dark);
   });
   test('concurrent playback migrates with compatible defaults and retains its preference', () async {

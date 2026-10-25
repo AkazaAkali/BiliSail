@@ -598,7 +598,6 @@ void main() {
       (tester) async {
         tester.view.devicePixelRatio = 1;
         tester.view.physicalSize = const Size(420, 850);
-        final dual = platform == TargetPlatform.android;
         addTearDown(tester.view.resetDevicePixelRatio);
         addTearDown(tester.view.resetPhysicalSize);
         final disposed = <String>[];
@@ -615,30 +614,17 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('count 0'));
         await tester.pump();
-        expect(
-          find.byKey(const ValueKey('workspace-tab-strip')),
-          dual ? findsNothing : findsOneWidget,
-        );
+        expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
         tester.view.physicalSize = const Size(1280, 850);
         await tester.pumpAndSettle();
-        expect(
-          find.byKey(const ValueKey('workspace-tab-strip')),
-          dual ? findsNothing : findsOneWidget,
-        );
+        expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
         expect(find.text('count 1'), findsOneWidget);
         tester.view.physicalSize = const Size(420, 850);
         await tester.pumpAndSettle();
-        expect(
-          find.byKey(const ValueKey('workspace-tab-strip')),
-          dual ? findsNothing : findsOneWidget,
-        );
+        expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
         expect(find.text('count 1'), findsOneWidget);
         expect(disposed, isEmpty);
-        if (dual) {
-          await tester.binding.handlePopRoute();
-        } else {
-          await _back(tester);
-        }
+        await tester.binding.handlePopRoute();
         await tester.pumpAndSettle();
         expect(find.text('count 1'), findsOneWidget);
         expect(tester.takeException(), isNull);

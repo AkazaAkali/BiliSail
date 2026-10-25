@@ -815,6 +815,9 @@ void main() {
     'close shortcut works on every real workspace page after unfocus',
     (tester) async {
       final auth = _AuthRepository();
+      final settings = _SettingsRepository(
+        navigationMode: WorkspaceNavigationMode.multipleTabs,
+      );
       final router = createBiliRouter(
         playerBuilder: (_, _, _) => const SizedBox(),
       );
@@ -826,7 +829,7 @@ void main() {
         ProviderScope(
           overrides: [
             authRepositoryProvider.overrideWithValue(auth),
-            settingsRepositoryProvider.overrideWithValue(_SettingsRepository()),
+            settingsRepositoryProvider.overrideWithValue(settings),
             feedRepositoryProvider.overrideWithValue(_FeedRepository()),
             homeRepositoryProvider.overrideWithValue(_HomeRepository()),
             searchRepositoryProvider.overrideWithValue(_SearchRepository()),
@@ -1264,6 +1267,9 @@ void main() {
     (tester) async {
       final profiles = _ProfileRepository();
       final auth = _AuthRepository();
+      final settings = _SettingsRepository(
+        navigationMode: WorkspaceNavigationMode.multipleTabs,
+      );
       addTearDown(auth.dispose);
       final router = createBiliRouter(
         initialLocation: '/user/42',
@@ -1278,6 +1284,7 @@ void main() {
               FollowRepositoryFake(),
             ),
             profileRepositoryProvider.overrideWithValue(profiles),
+            settingsRepositoryProvider.overrideWithValue(settings),
             feedRepositoryProvider.overrideWithValue(_FeedRepository()),
             homeRepositoryProvider.overrideWithValue(_HomeRepository()),
           ],
@@ -1406,6 +1413,9 @@ void main() {
   _workspaceTestWidgets(
     'workspace shortcuts work after focusing a real channel section',
     (tester) async {
+      final settings = _SettingsRepository(
+        navigationMode: WorkspaceNavigationMode.multipleTabs,
+      );
       final router = createBiliRouter(
         playerBuilder: (_, detail, part) => const SizedBox(),
       );
@@ -1413,6 +1423,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            settingsRepositoryProvider.overrideWithValue(settings),
             feedRepositoryProvider.overrideWithValue(_FeedRepository()),
             homeRepositoryProvider.overrideWithValue(_HomeRepository()),
           ],
@@ -1460,6 +1471,9 @@ void main() {
   _workspaceTestWidgets(
     'selected video part survives switching to another tab',
     (tester) async {
+      final settings = _SettingsRepository(
+        navigationMode: WorkspaceNavigationMode.multipleTabs,
+      );
       final router = createBiliRouter(
         initialLocation: '/video/BV1abc123456',
         playerBuilder: (_, detail, part) => Text('正在播放 ${part.cid}'),
@@ -1468,6 +1482,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            settingsRepositoryProvider.overrideWithValue(settings),
             feedRepositoryProvider.overrideWithValue(_FeedRepository()),
             homeRepositoryProvider.overrideWithValue(_HomeRepository()),
             videoRepositoryProvider.overrideWithValue(_VideoRepository()),
@@ -1501,6 +1516,9 @@ void main() {
   _workspaceTestWidgets('browse tabs isolate their selected feed channel', (
     tester,
   ) async {
+    final settings = _SettingsRepository(
+      navigationMode: WorkspaceNavigationMode.multipleTabs,
+    );
     final router = createBiliRouter(
       playerBuilder: (_, detail, part) => const SizedBox(),
     );
@@ -1508,6 +1526,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          settingsRepositoryProvider.overrideWithValue(settings),
           feedRepositoryProvider.overrideWithValue(_FeedRepository()),
           homeRepositoryProvider.overrideWithValue(_HomeRepository()),
         ],
@@ -1548,6 +1567,9 @@ void main() {
     'at capacity new navigation preserves all existing tabs',
     (tester) async {
       final search = _SearchRepository();
+      final settings = _SettingsRepository(
+        navigationMode: WorkspaceNavigationMode.multipleTabs,
+      );
       final router = createBiliRouter(
         playerBuilder: (_, detail, part) => const SizedBox(),
       );
@@ -1555,6 +1577,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            settingsRepositoryProvider.overrideWithValue(settings),
             feedRepositoryProvider.overrideWithValue(_FeedRepository()),
             homeRepositoryProvider.overrideWithValue(_HomeRepository()),
             searchRepositoryProvider.overrideWithValue(search),
@@ -1596,6 +1619,9 @@ void main() {
     'deep links isolate cached search queries and close cancels their controller',
     (tester) async {
       final search = _SearchRepository();
+      final settings = _SettingsRepository(
+        navigationMode: WorkspaceNavigationMode.multipleTabs,
+      );
       final router = createBiliRouter(
         initialLocation: '/search?q=cat',
         playerBuilder: (_, detail, part) => const SizedBox(),
@@ -1604,6 +1630,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            settingsRepositoryProvider.overrideWithValue(settings),
             feedRepositoryProvider.overrideWithValue(_FeedRepository()),
             homeRepositoryProvider.overrideWithValue(_HomeRepository()),
             searchRepositoryProvider.overrideWithValue(search),
@@ -1647,6 +1674,9 @@ void main() {
     (tester) async {
       final search = _SearchRepository();
       final auth = _AuthRepository();
+      final settings = _SettingsRepository(
+        navigationMode: WorkspaceNavigationMode.multipleTabs,
+      );
       final router = createBiliRouter(
         initialLocation: '/search?q=cat',
         accountBuilder: (_) => const Text('account'),
@@ -1657,6 +1687,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            settingsRepositoryProvider.overrideWithValue(settings),
             feedRepositoryProvider.overrideWithValue(_FeedRepository()),
             homeRepositoryProvider.overrideWithValue(_HomeRepository()),
             searchRepositoryProvider.overrideWithValue(search),
@@ -1705,7 +1736,11 @@ final class _HistoryRepository implements LibraryRepository {
 }
 
 final class _SettingsRepository implements SettingsRepository {
-  AppSettings settings = const AppSettings.defaults();
+  _SettingsRepository({
+    WorkspaceNavigationMode navigationMode = WorkspaceNavigationMode.dualTabs,
+  }) : settings = AppSettings.defaults(navigationMode: navigationMode);
+
+  AppSettings settings;
   @override
   Future<AppSettings> load() async => settings;
   @override

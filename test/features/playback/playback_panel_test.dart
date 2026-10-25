@@ -784,7 +784,13 @@ void main() {
       final engine = _FakeEngine();
       final session = _session(engine);
       addTearDown(session.close);
-      await _focusRecommendation(tester, session);
+      await _focusRecommendation(
+        tester,
+        session,
+        settings: const AppSettings.defaults(
+          navigationMode: WorkspaceNavigationMode.multipleTabs,
+        ),
+      );
       await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
       await _pumpFrames(tester);
       expect(find.byTooltip('退出全屏（Esc）'), findsOneWidget);
