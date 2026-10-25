@@ -68,6 +68,7 @@ final class WorkspaceTabs {
   String _browseId = 'home';
   String? _playbackId;
   final List<Uri> _playbackHistory = [];
+  ({String id, Uri location, List<String> history})? _playbackEntry;
   ({String tabId, String browseId, Uri rootLocation, List<String> history})?
   _messagesReturnPoint;
 
@@ -154,6 +155,45 @@ final class WorkspaceTabs {
   }
 
   void clearPlaybackHistory() => _playbackHistory.clear();
+
+  /// Leave all media visits in single mode; other modes retain playback.
+  void returnFromPlayback() {
+    if (_dualMode) {
+      select(_browseId);
+      return;
+    }
+    if (!_singleMode) {
+      acceptRoute(Uri(path: '/'));
+      return;
+    }
+    final visits = [..._backHistory, _activeId];
+    final firstMedia = visits.indexWhere(
+      (id) => _tabs.any((tab) => tab.id == id && tab.isPlayback),
+    );
+    final retained = firstMedia < 0
+        ? <String>[]
+        : visits.take(firstMedia).toList();
+    final entry = _playbackEntry;
+    if (entry != null && _tabs.any((tab) => tab.id == entry.id)) {
+      _activeId = entry.id;
+      updateLocation(entry.id, entry.location);
+      retained
+        ..clear()
+        ..addAll(entry.history.where((id) => _tabs.any((tab) => tab.id == id)));
+    } else {
+      _activeId = retained.isEmpty ? 'home' : retained.removeLast();
+    }
+    _playbackEntry = null;
+    _browseId = _activeId;
+    _backHistory
+      ..clear()
+      ..addAll(retained);
+    for (final tab in _tabs.where((tab) => tab.isPlayback).toList()) {
+      close(tab.id);
+    }
+    _playbackHistory.clear();
+    _trimHistory();
+  }
 
   List<WorkspaceTab> get tabs => List.unmodifiable(_tabs);
   String get activeId => _activeId;
@@ -291,6 +331,18 @@ final class WorkspaceTabs {
     final parameters = {...route.queryParameters}..remove('tab');
     final location = route.replace(queryParameters: parameters);
     final target = WorkspaceTab(id: '', location: location);
+    if (_singleMode &&
+        target.isPlayback &&
+        !active.isPlayback &&
+        !_backHistory.any(
+          (id) => _tabs.any((tab) => tab.id == id && tab.isPlayback),
+        )) {
+      _playbackEntry = (
+        id: activeId,
+        location: active.location,
+        history: List.of(_backHistory),
+      );
+    }
     if (target.isMessages && !active.isMessages) {
       final root = _tabs.first;
       _messagesReturnPoint = (
@@ -310,7 +362,10 @@ final class WorkspaceTabs {
       // Primary destinations share one root identity. Moving between them is
       // a selection, not a visit to a new page in the transient Back stack.
       _activeId = _browseId = 'home';
-      if (_singleMode) _backHistory.clear();
+      if (_singleMode) {
+        _backHistory.clear();
+        _playbackEntry = null;
+      }
       _trimHistory();
       return true;
     }
@@ -360,7 +415,8 @@ final class WorkspaceTabs {
                   tab.id != _activeId &&
                   (!_dualMode ||
                       (tab.id != _browseId && tab.id != _playbackId)) &&
-                  (!_singleMode || tab.id != _playbackId),
+                  (!_singleMode ||
+                      (tab.id != _playbackId && tab.id != _playbackEntry?.id)),
             )
             .id,
       );

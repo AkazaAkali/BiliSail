@@ -40,6 +40,7 @@ class WindowService {
   bool? _normalWindowMaximized;
   Object? _backOwner;
   VoidCallback? _onBack;
+  VoidCallback? _onHome;
   bool _backEnabled = false;
   bool _handlesMainWindowClose = false;
   bool _requestingExit = false;
@@ -141,11 +142,12 @@ class WindowService {
   Future<void> bindTitleBarBack({
     required Object owner,
     required VoidCallback onBack,
+    VoidCallback? onHome,
     bool enabled = true,
   }) async {
     if (!hasNativePlaybackTitleBar || _isViewAvailable?.call() == false) return;
     _desktopChannel.setMethodCallHandler((call) async {
-      if (call.method != 'back') return;
+      if (call.method != 'back' && call.method != 'home') return;
       final arguments = call.arguments;
       if (arguments is! Map<Object?, Object?> || arguments['viewId'] is! int) {
         return;
@@ -153,11 +155,16 @@ class WindowService {
       final service = _backServices[arguments['viewId']];
       if (service?._backEnabled == true &&
           service?._isViewAvailable?.call() != false) {
-        service?._onBack?.call();
+        if (call.method == 'home') {
+          service?._onHome?.call();
+        } else {
+          service?._onBack?.call();
+        }
       }
     });
     _backOwner = owner;
     _onBack = onBack;
+    _onHome = onHome;
     _backEnabled = enabled;
     _backServices[viewId!] = this;
     try {
@@ -165,11 +172,13 @@ class WindowService {
         'viewId': viewId,
         'windowHandle': ?nativeWindowHandle,
         'enabled': enabled,
+        'showHome': onHome != null,
       });
     } catch (error) {
       if (identical(_backOwner, owner)) {
         _backOwner = null;
         _onBack = null;
+        _onHome = null;
         _backEnabled = false;
         if (identical(_backServices[viewId], this)) {
           _backServices.remove(viewId);
@@ -188,6 +197,7 @@ class WindowService {
     if (!identical(_backOwner, owner)) return;
     _backOwner = null;
     _onBack = null;
+    _onHome = null;
     _backEnabled = false;
     final id = viewId;
     if (id == null || !identical(_backServices[id], this)) return;

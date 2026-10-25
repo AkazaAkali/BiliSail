@@ -7,11 +7,13 @@ class PlaybackWindowChrome extends StatelessWidget {
     super.key,
     required this.window,
     required this.onBack,
+    required this.onHome,
     required this.onClose,
   });
 
   final WindowService window;
   final VoidCallback onBack;
+  final VoidCallback onHome;
   final VoidCallback onClose;
 
   @override
@@ -21,6 +23,7 @@ class PlaybackWindowChrome extends StatelessWidget {
     child: Row(
       children: [
         _button('返回上一视频', Icons.arrow_back_rounded, onBack),
+        _button('回到主页', Icons.home_outlined, onHome),
         Expanded(
           child: GestureDetector(
             key: const ValueKey('playback-window-drag-region'),

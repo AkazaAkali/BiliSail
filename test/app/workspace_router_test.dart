@@ -473,6 +473,7 @@ void main() {
                   required activationToken,
                   required onClose,
                   required onBack,
+                  required onHome,
                   required onError,
                 }) => DesktopPlaybackWindow(
                   windowFactory: windows.call,
@@ -486,6 +487,7 @@ void main() {
                           shortcuts: settings.settings.shortcuts,
                           onClose: onClose,
                           onBack: onBack,
+                          onHome: onHome,
                           onActivateBrowser: () {},
                           child: playback,
                         ),

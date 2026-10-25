@@ -5,6 +5,37 @@ import XCTest
 
 class RunnerTests: XCTestCase {
 
+  @MainActor
+  func testPlaybackCaptionHomeVisibilityAndCallbacks() {
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 360),
+                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
+    var backs = 0
+    var homes = 0
+    let caption = PlaybackTitlebarBack(window: window,
+                                      onBack: { backs += 1 }, onHome: { homes += 1 })
+    window.addTitlebarAccessoryViewController(caption)
+    defer { caption.detach() }
+    guard let home = caption.view.subviews.compactMap({ $0 as? NSButton })
+      .first(where: { $0.toolTip == "回到主页" }) else {
+      return XCTFail("Missing Home button")
+    }
+    caption.configure(enabled: true, showHome: false)
+    XCTAssertTrue(home.isHidden)
+    XCTAssertEqual(caption.view.frame.width, 36)
+    caption.configure(enabled: true, showHome: true)
+    XCTAssertFalse(home.isHidden)
+    XCTAssertEqual(caption.view.frame.width, 72)
+    home.performClick(nil)
+    caption.backButton.performClick(nil)
+    XCTAssertEqual(homes, 1)
+    XCTAssertEqual(backs, 1)
+    caption.configure(enabled: false, showHome: true)
+    XCTAssertFalse(home.isEnabled)
+    XCTAssertFalse(caption.backButton.isEnabled)
+    home.performClick(nil)
+    XCTAssertEqual(homes, 1)
+  }
+
   func testRepeatedQuitWaitsForCleanupApproval() {
     var scheduled: [() -> Void] = []
     let coordinator = ApplicationTerminationCoordinator(scheduleTermination: { scheduled.append($0) })

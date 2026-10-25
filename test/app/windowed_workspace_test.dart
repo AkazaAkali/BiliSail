@@ -16,6 +16,38 @@ import '../support/detached_window_fake.dart';
 
 void main() {
   testWidgets(
+    'player Home focuses the browser while preserving the detached playback view',
+    (tester) async {
+      final fixture = _WindowedWorkspace(tester);
+      addTearDown(fixture.dispose);
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      fixture.router.go('/user/123');
+      await tester.pumpAndSettle();
+      fixture.router.go('/video/BV1234567890');
+      await tester.pumpAndSettle();
+      final playback = tester.element(_page('tab-2'));
+      final view = View.of(playback);
+      final window = fixture.windows.lastWindow;
+      await tester.tap(find.byKey(const ValueKey('test-window-home')));
+      await tester.pumpAndSettle();
+      expect(fixture.browserActivations, 1);
+      expect(
+        fixture.router.routeInformationProvider.value.uri.path,
+        '/user/123',
+      );
+      expect(tester.element(_page('tab-2')), same(playback));
+      expect(View.of(playback), same(view));
+      expect(fixture.windows.lastWindow, same(window));
+      expect(fixture.disposedPages, isEmpty);
+      expect(WorkspaceActivity.isActive(playback), isTrue);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
     'macOS unprepared engine keeps dual playback in the main window safely',
     (tester) async {
       final fixture = _WindowedWorkspace(
@@ -457,6 +489,7 @@ class _WindowedWorkspace {
                     required activationToken,
                     required onClose,
                     required onBack,
+                    required onHome,
                     required onError,
                   }) => DesktopPlaybackWindow(
                     windowFactory: windows.call,
@@ -479,6 +512,11 @@ class _WindowedWorkspace {
                                         key: const ValueKey('test-window-back'),
                                         onPressed: onBack,
                                         icon: const Icon(Icons.arrow_back),
+                                      ),
+                                      IconButton(
+                                        key: const ValueKey('test-window-home'),
+                                        onPressed: onHome,
+                                        icon: const Icon(Icons.home_outlined),
                                       ),
                                       IconButton(
                                         key: const ValueKey(

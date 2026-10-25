@@ -1,5 +1,7 @@
 # 播放、直播与弹幕设计
 
+2026-10-25 播放器移除顶部标题及空降片段状态；Android 单／双标签在播放控件中显示返回／主页，其他平台单／双标签放在顶部导航行，多标签统一隐藏这两个按钮。主页分别恢复播放前页面或聚焦浏览窗口；UGC 右上显示服务端正在观看人数。来源、普通／全屏及刷新／取消边界见 [顶部导航与人数](validation/player-top-navigation.md)。
+
 日期：2026-10-05。首版已使用 `media_kit`，Windows 分轨与请求策略已验证，三端结论仍以完整 M0 为准。本文中的参数为初始预算，不是已测结果；当前证据见 [实测记录](validation/m0-results.md)。
 
 2026-10-16 按用户要求参考 PiliPlus，将 Android Surface load/unload 与相关核心扩展移植到用户 media-kit fork，并固定 Git 依赖；Android 自动解码优先 MediaCodec，弹幕减少无新候选时的重复轨道/缓存工作。来源、采用范围及验证见 [移植记录](validation/piliplus-media-kit-port.md)。

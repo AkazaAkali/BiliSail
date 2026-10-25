@@ -243,6 +243,7 @@ class _Harness {
                 required activationToken,
                 required onClose,
                 required onBack,
+                required onHome,
                 required onError,
               }) => DesktopPlaybackWindow(
                 windowFactory: windows.call,
@@ -255,6 +256,7 @@ class _Harness {
                         theme: ThemeData(),
                         shortcuts: shortcuts,
                         onBack: onBack,
+                        onHome: onHome,
                         onClose: onClose,
                         onActivateBrowser: activateBrowser,
                         child: playback,

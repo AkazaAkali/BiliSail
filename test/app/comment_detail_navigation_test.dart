@@ -376,6 +376,7 @@ _mount(
                   required activationToken,
                   required onClose,
                   required onBack,
+                  required onHome,
                   required onError,
                 }) => DesktopPlaybackWindow(
                   windowFactory: windows.call,
@@ -389,6 +390,7 @@ _mount(
                           shortcuts: shortcuts,
                           onClose: onClose,
                           onBack: onBack,
+                          onHome: onHome,
                           onActivateBrowser: () {},
                           child: playback,
                         ),

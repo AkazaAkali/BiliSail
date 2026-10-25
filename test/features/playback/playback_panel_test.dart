@@ -17,6 +17,8 @@ import 'package:bilisail/app/router.dart';
 import 'package:bilisail/app/theme.dart';
 import 'package:bilisail/shared/ui/app_notice.dart';
 import 'package:bilisail/shared/ui/playback_page_commands.dart';
+import 'package:bilisail/shared/ui/playback_navigation.dart';
+import 'package:bilisail/features/playback/application/playback_viewers_controller.dart';
 import 'package:bilisail/core/platform/window_service.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/domain/video.dart';
@@ -43,6 +45,116 @@ import 'package:flutter_test/flutter_test.dart';
 final _composerScopeProvider = Provider<String>((ref) => 'root');
 
 void main() {
+  testWidgets(
+    'workspace visibility updates player navigation inline and fullscreen without reopening',
+    (tester) async {
+      final engine = _FakeEngine();
+      final session = _session(engine);
+      final window = _FakeWindowService();
+      final viewers = _ViewerRepository();
+      addTearDown(session.close);
+      Widget app(bool show) => _app(
+        session,
+        window,
+        const AppSettings.defaults(),
+        viewers: viewers,
+        onBack: () {},
+        onHome: () {},
+        showNavigationInPlayer: show,
+      );
+      await tester.pumpWidget(app(false));
+      await _pumpFrames(tester);
+      final opens = engine.opens;
+      for (final fullscreen in [false, true]) {
+        if (fullscreen) {
+          await tester.tap(find.byTooltip('全屏（F）'));
+          await _pumpFrames(tester);
+        }
+        for (final show in [false, true, false]) {
+          await tester.pumpWidget(app(show));
+          await _pumpFrames(tester);
+          expect(
+            find.byKey(const ValueKey('player-back')),
+            show ? findsOneWidget : findsNothing,
+          );
+          expect(
+            find.byKey(const ValueKey('player-home')),
+            show ? findsOneWidget : findsNothing,
+          );
+          expect(find.text('92 人正在看'), findsOneWidget);
+          expect(engine.opens, opens);
+          expect(engine.maxSurfaces, 1);
+        }
+      }
+      await tester.tap(find.byTooltip('退出全屏（Esc）'));
+      await _pumpFrames(tester);
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+    },
+  );
+
+  testWidgets(
+    'top controls show navigation and viewers without title or skip status',
+    (tester) async {
+      final engine = _FakeEngine();
+      final session = _session(engine);
+      addTearDown(session.close);
+      var backs = 0;
+      var homes = 0;
+      final viewers = _ViewerRepository();
+      Widget app({bool active = true}) => _app(
+        session,
+        _FakeWindowService(),
+        const AppSettings.defaults(),
+        width: 320,
+        textScale: 2,
+        active: active,
+        viewers: viewers,
+        onBack: () => backs++,
+        onHome: () => homes++,
+        showNavigationInPlayer: true,
+      );
+      await tester.pumpWidget(app());
+      await _pumpFrames(tester);
+      final top = find.byKey(const ValueKey('player-control-title-layer'));
+      expect(
+        find.descendant(of: top, matching: find.text('测试视频')),
+        findsNothing,
+      );
+      expect(find.text('92 人正在看'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.text('92 人正在看')).textAlign,
+        TextAlign.end,
+      );
+      expect(viewers.reads, ['123']);
+      final opens = engine.opens;
+      await tester.tap(find.byKey(const ValueKey('player-back')));
+      await tester.pump();
+      expect(backs, 1);
+      await tester.tap(find.byTooltip('全屏（F）'));
+      await _pumpFrames(tester);
+      expect(find.text('92 人正在看'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('player-back')));
+      await _pumpFrames(tester);
+      expect(backs, 1);
+      expect(find.byType(Dialog), findsNothing);
+      await tester.tap(find.byTooltip('全屏（F）'));
+      await _pumpFrames(tester);
+      await tester.tap(find.byKey(const ValueKey('player-home')));
+      await _pumpFrames(tester);
+      expect(homes, 1);
+      expect(find.byType(Dialog), findsNothing);
+      expect(engine.opens, opens);
+      expect(engine.maxSurfaces, 1);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(app(active: false));
+      await _pumpFrames(tester);
+      final reads = viewers.reads.length;
+      await tester.pump(const Duration(seconds: 60));
+      expect(viewers.reads, hasLength(reads));
+    },
+  );
+
   testWidgets('detached fullscreen stays on its playback view and fills it', (
     tester,
   ) async {
@@ -1128,7 +1240,7 @@ void main() {
         final controls = find.byKey(const ValueKey('player-controls'));
         final target = find.byKey(const ValueKey('player-surface-tap-target'));
         for (final visible in [false, true, false, true]) {
-          await tester.tapAt(tester.getTopLeft(target) + const Offset(30, 50));
+          await tester.tapAt(tester.getTopLeft(target) + const Offset(130, 70));
           await _pumpSurfaceTap(tester);
           await tester.pump();
           expect(controls, visible ? findsOneWidget : findsNothing);
@@ -1176,7 +1288,7 @@ void main() {
         await session.pause();
         final target = find.byKey(const ValueKey('player-surface-tap-target'));
         if (!controlsVisible) {
-          await tester.tapAt(tester.getTopLeft(target) + const Offset(30, 50));
+          await tester.tapAt(tester.getTopLeft(target) + const Offset(130, 70));
           await _pumpSurfaceTap(tester);
         }
         session.danmaku.replaceEvents(const [
@@ -1219,7 +1331,7 @@ void main() {
         final layouts = session.danmaku.textLayoutCount;
         final inlineWidth = tester.getSize(find.byType(DanmakuOverlay)).width;
         for (final fullscreen in [true, false, true, false]) {
-          final point = tester.getTopLeft(target) + const Offset(30, 50);
+          final point = tester.getTopLeft(target) + const Offset(130, 70);
           await tester.tapAt(point);
           await tester.pump(const Duration(milliseconds: 50));
           await tester.tapAt(point);
@@ -1675,7 +1787,7 @@ void main() {
         tester.getTopLeft(
               find.byKey(const ValueKey('player-surface-tap-target')),
             ) +
-            const Offset(30, 50),
+            const Offset(130, 70),
       );
       await tester.pump(const Duration(milliseconds: 400));
       expect(
@@ -3094,7 +3206,7 @@ void main() {
           );
           final controls = find.byKey(const ValueKey('player-controls'));
           Offset surfacePoint() =>
-              tester.getTopLeft(target) + const Offset(30, 50);
+              tester.getTopLeft(target) + const Offset(130, 70);
 
           Future<void> singleTap() async {
             await tester.tapAt(surfacePoint(), kind: kind);
@@ -3983,7 +4095,7 @@ void main() {
     await _pumpFrames(tester);
     final target = find.byKey(const ValueKey('player-surface-tap-target'));
     final controls = find.byKey(const ValueKey('player-controls'));
-    final point = tester.getTopLeft(target) + const Offset(30, 50);
+    final point = tester.getTopLeft(target) + const Offset(130, 70);
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
     await tester.tapAt(point);
@@ -4029,11 +4141,11 @@ void main() {
       final target = find.byKey(const ValueKey('player-surface-tap-target'));
       final controls = find.byKey(const ValueKey('player-controls'));
       final playing = engine.currentSnapshot.desiredPlaying;
-      await tester.tapAt(tester.getTopLeft(target) + const Offset(30, 50));
+      await tester.tapAt(tester.getTopLeft(target) + const Offset(130, 70));
       await _pumpSurfaceTap(tester);
       expect(engine.currentSnapshot.desiredPlaying, playing);
       expect(controls, findsNothing);
-      await tester.tapAt(tester.getTopLeft(target) + const Offset(30, 50));
+      await tester.tapAt(tester.getTopLeft(target) + const Offset(130, 70));
       await _pumpSurfaceTap(tester);
       expect(engine.currentSnapshot.desiredPlaying, playing);
       expect(controls, findsOneWidget);
@@ -4055,7 +4167,7 @@ void main() {
       );
       await _pumpFrames(tester);
       final target = find.byKey(const ValueKey('player-surface-tap-target'));
-      await tester.tapAt(tester.getTopLeft(target) + const Offset(30, 50));
+      await tester.tapAt(tester.getTopLeft(target) + const Offset(130, 70));
       await _pumpSurfaceTap(tester);
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await _pumpFrames(tester);
@@ -4095,7 +4207,7 @@ void main() {
       tester.getTopLeft(
             find.byKey(const ValueKey('player-surface-tap-target')),
           ) +
-          const Offset(30, 50),
+          const Offset(130, 70),
     );
     await _pumpSurfaceTap(tester);
     final pauses = engine.pauses;
@@ -4137,7 +4249,7 @@ void main() {
         tester.getTopLeft(
               find.byKey(const ValueKey('player-surface-tap-target')),
             ) +
-            const Offset(30, 50),
+            const Offset(130, 70),
       );
       await _pumpSurfaceTap(tester);
       expect(find.byKey(const ValueKey('player-controls')), findsNothing);
@@ -4151,6 +4263,8 @@ void main() {
       await _pumpFrames(tester);
       expect(find.byKey(const ValueKey('player-controls')), findsOneWidget);
       expect(find.byTooltip('更多播放选项').hitTestable(), findsOneWidget);
+      expect(find.byKey(const ValueKey('player-back')), findsNothing);
+      expect(find.byKey(const ValueKey('player-home')), findsNothing);
       expect(find.byTooltip('全屏（F）').hitTestable(), findsOneWidget);
       expect(tester.takeException(), isNull);
       expect(find.text('重新加载'), findsNothing);
@@ -4789,10 +4903,15 @@ Widget _app(
   NavigatorObserver? navigatorObserver,
   ContentPlaybackTarget? target,
   VoidCallback? nextPart,
+  VoidCallback? onBack,
+  VoidCallback? onHome,
+  PlaybackViewerRepository? viewers,
+  bool showNavigationInPlayer = false,
 }) => ProviderScope(
   overrides: [
     playbackSessionProvider.overrideWithValue(session),
     settingsRepositoryProvider.overrideWithValue(_Settings()),
+    playbackViewerRepositoryProvider.overrideWithValue(viewers),
   ],
   child: InputTestApp(
     shortcuts: settings.shortcuts,
@@ -4844,12 +4963,30 @@ Widget _app(
         ),
         scopedComposer,
         nextPart: nextPart,
+        onBack: onBack,
+        onHome: onHome,
+        showNavigationInPlayer: showNavigationInPlayer,
       ),
     ),
   ),
 );
 
-Widget _pageScope(Widget child, bool scoped, {VoidCallback? nextPart}) {
+Widget _pageScope(
+  Widget child,
+  bool scoped, {
+  VoidCallback? nextPart,
+  VoidCallback? onBack,
+  VoidCallback? onHome,
+  bool showNavigationInPlayer = false,
+}) {
+  if (onBack != null && onHome != null) {
+    child = PlaybackNavigation(
+      onBack: onBack,
+      onHome: onHome,
+      showInPlayer: showNavigationInPlayer,
+      child: child,
+    );
+  }
   if (nextPart != null) {
     child = PlaybackPageCommands(
       previousPart: () {},
@@ -4869,7 +5006,7 @@ Widget _pageScope(Widget child, bool scoped, {VoidCallback? nextPart}) {
 
 Offset _surfacePoint(WidgetTester tester) =>
     tester.getTopLeft(find.byKey(const ValueKey('player-surface-tap-target'))) +
-    const Offset(30, 50);
+    const Offset(130, 70);
 
 void _resumeApp(WidgetTester tester) {
   if (tester.binding.lifecycleState == AppLifecycleState.paused) {
@@ -5330,5 +5467,18 @@ final class _Settings implements SettingsRepository {
   @override
   Future<void> save(AppSettings settings) async {
     value = settings;
+  }
+}
+
+class _ViewerRepository implements PlaybackViewerRepository {
+  final reads = <String>[];
+  @override
+  Future<String?> onlineViewers(
+    VideoId video,
+    String cid, {
+    required RequestCancellation cancellation,
+  }) async {
+    reads.add(cid);
+    return '92';
   }
 }

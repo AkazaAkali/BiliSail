@@ -5,6 +5,7 @@ import 'package:bilisail/app/platform_defaults.dart';
 import 'package:bilisail/features/feed/domain/home_channel.dart';
 import 'package:bilisail/features/feed/presentation/home_channel_swipe.dart';
 import 'package:bilisail/shared/ui/app_notice.dart';
+import 'package:bilisail/shared/ui/playback_navigation.dart';
 import 'package:bilisail/app/workspace_tabs.dart';
 import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
@@ -21,6 +22,56 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 void main() {
+  for (final mode in WorkspaceNavigationMode.values) {
+    _workspaceTestWidgets(
+      'player Home follows $mode and releases only single-page media',
+      (tester) async {
+        final disposed = <String>[];
+        final router = _router(
+          (context, tab) => Column(
+            children: [
+              _CounterPage(tab: tab, onDispose: disposed.add),
+              if (tab.isPlayback)
+                TextButton(
+                  onPressed: () => PlaybackNavigation.maybeOf(
+                    tester.element(find.text('player Home')),
+                  )?.onHome(),
+                  child: const Text('player Home'),
+                ),
+            ],
+          ),
+          navigationMode: mode,
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+        await tester.pumpAndSettle();
+        router.go('/search?q=cat');
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('count 0'));
+        await tester.pump();
+        router.go('/video/BV1234567890');
+        await tester.pumpAndSettle();
+        router.go('/video/BV0987654321');
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('player Home'));
+        await tester.pumpAndSettle();
+        expect(
+          router.routeInformationProvider.value.uri.path,
+          mode == WorkspaceNavigationMode.multipleTabs ? '/' : '/search',
+        );
+        if (mode == WorkspaceNavigationMode.singlePage) {
+          expect(disposed, containsAll(['tab-2', 'tab-3']));
+          expect(find.text('player Home', skipOffstage: false), findsNothing);
+          expect(find.text('count 1'), findsOneWidget);
+        } else {
+          expect(disposed, isEmpty);
+          expect(find.text('player Home', skipOffstage: false), findsWidgets);
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   _workspaceTestWidgets(
     'single page shortcuts keep navigation and pop visits',
     (tester) async {
@@ -187,6 +238,8 @@ void main() {
     TargetPlatform.iOS,
     TargetPlatform.windows,
     TargetPlatform.macOS,
+    TargetPlatform.linux,
+    TargetPlatform.fuchsia,
   ]) {
     for (final mode in WorkspaceNavigationMode.values) {
       _workspaceTestWidgets('$platform workspace chrome in $mode', (
@@ -229,6 +282,13 @@ void main() {
                 mobile &&
                 platform != TargetPlatform.android &&
                 playback;
+            final body = tester.element(
+              find.byKey(ValueKey('body-${Uri.parse(location).path}')),
+            );
+            expect(
+              PlaybackNavigation.maybeOf(body)?.showInPlayer,
+              platform == TargetPlatform.android && (single || dual),
+            );
             playbackCreated |= playback;
             expect(
               find.byKey(const ValueKey('workspace-tab-strip')),
@@ -267,6 +327,18 @@ void main() {
               find.byTooltip('关闭播放'),
               playbackHeader ? findsOneWidget : findsNothing,
             );
+            expect(
+              find.byKey(const ValueKey('workspace-playback-home')),
+              (single || dual) && platform != TargetPlatform.android && playback
+                  ? findsOneWidget
+                  : findsNothing,
+            );
+            if (platform == TargetPlatform.android && playback) {
+              expect(
+                find.byKey(const ValueKey('workspace-playback-header')),
+                findsNothing,
+              );
+            }
             expect(
               find.byTooltip('返回播放'),
               dual && playbackCreated && !playback

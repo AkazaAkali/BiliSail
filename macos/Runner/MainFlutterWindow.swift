@@ -225,13 +225,18 @@ private final class DesktopWindowController {
           return
         }
         if self.captions[viewID] == nil {
-          let caption = PlaybackTitlebarBack(window: window) { [weak self] in
-            self?.channel.invokeMethod("back", arguments: ["viewId": viewID])
-          }
+          let caption = PlaybackTitlebarBack(
+            window: window,
+            onBack: { [weak self] in
+              self?.channel.invokeMethod("back", arguments: ["viewId": viewID])
+            },
+            onHome: { [weak self] in
+              self?.channel.invokeMethod("home", arguments: ["viewId": viewID])
+            })
           self.captions[viewID] = caption
           window.addTitlebarAccessoryViewController(caption)
         }
-        self.captions[viewID]?.backButton.isEnabled = enabled
+        self.captions[viewID]?.configure(enabled: enabled, showHome: args["showHome"] as? Bool ?? false)
         result(nil)
       default:
         result(FlutterMethodNotImplemented)
@@ -329,15 +334,18 @@ private final class PlaybackGeometryTracker {
   deinit { detach() }
 }
 
-private final class PlaybackTitlebarBack: NSTitlebarAccessoryViewController {
+final class PlaybackTitlebarBack: NSTitlebarAccessoryViewController {
   let backButton = NSButton(title: "‹", target: nil, action: nil)
+  private let homeButton = NSButton(title: "⌂", target: nil, action: nil)
   private weak var playbackWindow: NSWindow?
   private let onBack: () -> Void
+  private let onHome: () -> Void
   private var observers: [NSObjectProtocol] = []
 
-  init(window: NSWindow, onBack: @escaping () -> Void) {
+  init(window: NSWindow, onBack: @escaping () -> Void, onHome: @escaping () -> Void) {
     self.playbackWindow = window
     self.onBack = onBack
+    self.onHome = onHome
     super.init(nibName: nil, bundle: nil)
     layoutAttribute = .left
     view = NSView(frame: NSRect(x: 0, y: 0, width: 36, height: 28))
@@ -349,6 +357,16 @@ private final class PlaybackTitlebarBack: NSTitlebarAccessoryViewController {
     backButton.target = self
     backButton.action = #selector(back)
     view.addSubview(backButton)
+    homeButton.frame = NSRect(x: 37, y: 3, width: 30, height: 22)
+    homeButton.bezelStyle = .texturedRounded
+    homeButton.image = NSImage(systemSymbolName: "house", accessibilityDescription: "回到主页")
+    homeButton.imagePosition = .imageOnly
+    homeButton.setAccessibilityLabel("回到主页")
+    homeButton.toolTip = "回到主页"
+    homeButton.target = self
+    homeButton.action = #selector(home)
+    homeButton.isHidden = true
+    view.addSubview(homeButton)
     let center = NotificationCenter.default
     observers.append(center.addObserver(forName: NSWindow.willEnterFullScreenNotification,
                                        object: window, queue: .main) { [weak self] _ in
@@ -362,12 +380,26 @@ private final class PlaybackTitlebarBack: NSTitlebarAccessoryViewController {
 
   required init?(coder: NSCoder) { return nil }
 
+  func configure(enabled: Bool, showHome: Bool) {
+    backButton.isEnabled = enabled
+    homeButton.isEnabled = enabled
+    homeButton.isHidden = !showHome
+    view.setFrameSize(NSSize(width: showHome ? 72 : 36, height: 28))
+  }
+
   @objc private func back() {
     // A double click is one navigation action, matching the Windows caption.
     if let event = NSApp.currentEvent,
        event.type == .leftMouseDown || event.type == .leftMouseUp,
        event.clickCount > 1 { return }
     onBack()
+  }
+
+  @objc private func home() {
+    if let event = NSApp.currentEvent,
+       event.type == .leftMouseDown || event.type == .leftMouseUp,
+       event.clickCount > 1 { return }
+    onHome()
   }
 
   func detach() {

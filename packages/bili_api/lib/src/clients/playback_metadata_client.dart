@@ -46,6 +46,37 @@ final class PlaybackMetadataClient {
   const PlaybackMetadataClient(this.api);
   final BiliApiClient api;
 
+  Future<String?> onlineViewers(
+    String bvid,
+    String cid, {
+    ApiRequestContext? context,
+  }) async {
+    if (!RegExp(r'^BV[0-9A-Za-z]{10}$').hasMatch(bvid)) {
+      throw ArgumentError('Invalid video ID');
+    }
+    _id(cid);
+    const endpoint = 'player_online';
+    final data = await api.requestJson(
+      Uri.https('api.bilibili.com', '/x/player/online/total', {
+        'bvid': bvid,
+        'cid': cid,
+      }),
+      endpoint,
+      context: api.boundedReadContext(context),
+    );
+    final visibility = data['show_switch'];
+    if (visibility is Map && visibility['total'] == false) return null;
+    final total = data['total'];
+    if (total == null || total == '') return null;
+    final text = total is int && total >= 0 ? '$total' : total;
+    if (text is! String ||
+        text.length > 24 ||
+        !RegExp(r'^\d+(?:\.\d+)?(?:万|亿)?\+?$').hasMatch(text)) {
+      throw const ApiFailure(ApiFailureCategory.protocol, endpoint);
+    }
+    return text;
+  }
+
   Future<ApiPlaybackMetadata> load(
     String aid,
     String cid, {

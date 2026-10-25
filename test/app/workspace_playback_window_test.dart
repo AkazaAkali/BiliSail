@@ -35,6 +35,7 @@ void main() {
         );
       }
       var backs = 0;
+      var homes = 0;
       final service = FakePlaybackWindowService(
         viewId: 42,
         setFullScreen: (_) async {},
@@ -47,6 +48,7 @@ void main() {
             shortcuts: const ShortcutSettings.defaults(),
             theme: ThemeData(),
             onBack: () => backs++,
+            onHome: () => homes++,
             onClose: () {},
             onActivateBrowser: () {},
             child: const SizedBox.expand(key: ValueKey('playback-content')),
@@ -68,6 +70,8 @@ void main() {
       expect(calls.any((call) => call.method == 'setBackButton'), isTrue);
       await sendNativeWindowBack(tester, 42);
       expect(backs, 1);
+      await sendNativeWindowHome(tester, 42);
+      expect(homes, 1);
 
       unawaited(
         showDialog<void>(
@@ -79,7 +83,9 @@ void main() {
       );
       await tester.pumpAndSettle();
       await sendNativeWindowBack(tester, 42);
+      await sendNativeWindowHome(tester, 42);
       expect(backs, 1);
+      expect(homes, 1);
       expect(find.text('modal'), findsOneWidget);
       Navigator.of(tester.element(find.text('modal'))).pop();
       await tester.pumpAndSettle();
@@ -94,11 +100,15 @@ void main() {
         );
         await tester.tap(find.byTooltip('返回上一视频'));
         expect(backs, 3);
+        await tester.tap(find.byTooltip('回到主页'));
+        expect(homes, 2);
       }
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
       await sendNativeWindowBack(tester, 42);
+      await sendNativeWindowHome(tester, 42);
       expect(backs, Platform.isWindows ? 3 : 2);
+      expect(homes, Platform.isWindows ? 2 : 1);
       expect(calls.any((call) => call.method == 'removeBackButton'), isTrue);
       expect(tester.takeException(), isNull);
     },

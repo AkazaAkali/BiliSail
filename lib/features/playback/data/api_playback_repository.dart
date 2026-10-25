@@ -18,6 +18,7 @@ class ApiPlaybackRepository
     implements
         PlaybackRepository,
         PlaybackMetadataRepository,
+        PlaybackViewerRepository,
         HighEnergyRepository,
         VoicePlaybackRepository {
   ApiPlaybackRepository(
@@ -31,6 +32,18 @@ class ApiPlaybackRepository
   final Future<MediaCdnPreference> Function()? cdnPreference;
   final Future<({int width, int height})> Function(Uri)? imageDimensions;
   late final _highEnergyCache = HighEnergyCache(requests);
+
+  @override
+  Future<String?> onlineViewers(
+    VideoId video,
+    String cid, {
+    required RequestCancellation cancellation,
+  }) => requests.run(
+    (context) =>
+        PlaybackMetadataClient(api)
+            .onlineViewers(video.value, cid, context: context),
+    cancellation: cancellation,
+  );
 
   @override
   Future<HighEnergyTrend?> highEnergy(

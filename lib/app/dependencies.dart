@@ -92,6 +92,7 @@ import '../features/settings/data/sqlite_update_check_store.dart';
 import '../features/settings/application/system_fonts_controller.dart';
 import '../features/settings/data/sqlite_settings_repository.dart';
 import 'platform_defaults.dart';
+import '../features/playback/application/playback_viewers_controller.dart';
 
 class AppDependencies {
   AppDependencies._(
@@ -304,6 +305,9 @@ class AppDependencies {
         downloadRepositoryProvider.overrideWithValue(downloads),
         downloadSourceRepositoryProvider.overrideWithValue(downloadSources),
         sessionEpochProvider.overrideWithValue(() => requests.sessionEpoch),
+        playbackViewerRepositoryProvider.overrideWithValue(
+          ApiPlaybackRepository(api, requests),
+        ),
         appUpdateRepositoryProvider.overrideWithValue(updates),
         updateCheckStoreProvider.overrideWithValue(
           SqliteUpdateCheckStore(database),

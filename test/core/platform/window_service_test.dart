@@ -494,13 +494,31 @@ void main() {
     final first = service(21), second = service(22);
     final firstOwner = Object(), secondOwner = Object();
     var firstBacks = 0, secondBacks = 0;
-    await first.bindTitleBarBack(owner: firstOwner, onBack: () => firstBacks++);
+    var firstHomes = 0, secondHomes = 0;
+    await first.bindTitleBarBack(
+      owner: firstOwner,
+      onBack: () => firstBacks++,
+      onHome: () => firstHomes++,
+    );
     await second.bindTitleBarBack(
       owner: secondOwner,
       onBack: () => secondBacks++,
+      onHome: () => secondHomes++,
+    );
+    expect(
+      calls
+          .where((call) => call.method == 'setBackButton')
+          .every(
+            (call) =>
+                (call.arguments as Map<Object?, Object?>)['showHome'] == true,
+          ),
+      isTrue,
     );
     await sendNativeWindowBack(tester, 21);
     expect([firstBacks, secondBacks], [1, 0]);
+    await sendNativeWindowHome(tester, 21);
+    await sendNativeWindowHome(tester, 22);
+    expect([firstHomes, secondHomes], [1, 1]);
     await first.unbindTitleBarBack(Object());
     await sendNativeWindowBack(tester, 21);
     expect(firstBacks, 2);
@@ -508,18 +526,26 @@ void main() {
       owner: firstOwner,
       onBack: () => firstBacks++,
       enabled: false,
+      onHome: () => firstHomes++,
     );
     await sendNativeWindowBack(tester, 21);
     await sendNativeWindowBack(tester, 22);
     expect([firstBacks, secondBacks], [2, 1]);
+    await sendNativeWindowHome(tester, 21);
+    expect(firstHomes, 1);
     available = false;
     await sendNativeWindowBack(tester, 22);
     expect(secondBacks, 1);
+    await sendNativeWindowHome(tester, 22);
+    expect(secondHomes, 1);
     await first.unbindTitleBarBack(firstOwner);
     await second.unbindTitleBarBack(secondOwner);
     await sendNativeWindowBack(tester, 21);
     await sendNativeWindowBack(tester, 22);
     expect([firstBacks, secondBacks], [2, 1]);
+    await sendNativeWindowHome(tester, 21);
+    await sendNativeWindowHome(tester, 22);
+    expect([firstHomes, secondHomes], [1, 1]);
     expect(
       calls.where((call) => call.method == 'removeBackButton'),
       hasLength(2),

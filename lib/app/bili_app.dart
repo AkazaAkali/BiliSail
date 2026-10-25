@@ -102,6 +102,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
               required activationToken,
               required onClose,
               required onBack,
+              required onHome,
               required onError,
             }) => DesktopPlaybackWindow(
               activationToken: activationToken,
@@ -117,6 +118,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
                               .shortcuts,
                       onClose: onClose,
                       onBack: onBack,
+                      onHome: onHome,
                       onActivateBrowser: () =>
                           unawaited(widget.dependencies.window.activate()),
                       child: playback,

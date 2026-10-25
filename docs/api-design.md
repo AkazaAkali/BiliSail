@@ -91,6 +91,7 @@ ApiPage<T> { items, nextCursor, hasMore }
 | 视频标签 M2 | `/x/tag/archive/tags` | U `Models/Requests/Api/VideoAPI.cs`、VideoDetailPageViewModel | VideoExtrasRepository；独立只读、BV 身份隔离和点击关键词搜索，见 [视频标签与搜索](validation/video-tags.md) |
 | 视频播放 M0/M2 | `/x/player/playurl`、`GetVideoPlayDetailWithRestAsync` | K PlayerClient | PlaybackResolver；参考调用混有 App 参数，须独立验证 Web profile |
 | 字幕/章节附加信息 M2 | `/x/player/wbi/v2` | K `Services/Services.Media/Core/SubtitleClient.cs` 与 PlayerClient；PiliPlus `view_points` 字段 | PlaybackMetadataRepository；合并一次 WBI 读取，字幕/章节故障独立；见 [实现验证](validation/playback-timeline.md) |
+| 视频正在观看人数 | `api.bilibili.com` GET `/x/player/online/total`；`bvid/cid` | UWP `PlayerAPI.GetPlayerOnline`／`PlayerVM.GetOnline` 与本机游客响应 | Web Cookie 可选，无签名；JSON `total/show_switch.total`，无分页；共享 deadline 和至多 3 次读尝试，页面可见时 30 秒刷新；见 [顶部导航与人数](validation/player-top-navigation.md) |
 | 高能趋势（公开只读） | `bvc.bilivideo.com` GET `/pbp/data`；`aid/cid/bvid/r=loader` | 2026-10-11 官网实际游客请求 | 不带 Cookie/WBI；`modules` 包装；6 秒总 deadline、至多 2 次网络尝试；流式 256 KiB 解压后上限；确认无章节后读取，失败普通进度条；见 [实现方案](high-energy-progress-design.md) |
 | 视频悬停缩略图 M2 | `/x/player/videoshot` → `pvdata` CDN 二进制 | 官网大端 uint16 时间索引；来源/采用范围见 [实现验证](validation/playback-timeline.md) | PlaybackMetadataRepository；移入／拖动懒加载，失败在新交互补试、每步单次请求，共用 deadline／epoch；索引上限 40002 字节、公开 CDN 无凭据 |
 | 视频弹幕 M0/M2 | `/x/v2/dm/web/view`、`/x/v2/dm/web/seg.so` | K `Services/Services.Media/Core/DanmakuClient.cs` | DanmakuRepository；Protobuf、分段数、毫秒进度、空分段 |

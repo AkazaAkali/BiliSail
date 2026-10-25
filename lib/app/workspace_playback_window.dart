@@ -25,6 +25,7 @@ class WorkspacePlaybackWindow extends StatefulWidget {
     required this.onBack,
     required this.onClose,
     required this.onActivateBrowser,
+    this.onHome,
     required this.theme,
   });
 
@@ -33,6 +34,7 @@ class WorkspacePlaybackWindow extends StatefulWidget {
   final VoidCallback onBack;
   final VoidCallback onClose;
   final VoidCallback onActivateBrowser;
+  final VoidCallback? onHome;
   final ThemeData theme;
 
   @override
@@ -52,6 +54,12 @@ class _WorkspacePlaybackWindowState extends State<WorkspacePlaybackWindow> {
     if (_input.routes.modal || _input.barriers != 0) return;
     _input.beforeNavigation();
     widget.onBack();
+  }
+
+  void _nativeHome() {
+    if (_input.routes.modal || _input.barriers != 0) return;
+    _input.beforeNavigation();
+    (widget.onHome ?? widget.onActivateBrowser)();
   }
 
   void _unbindBack(WindowService window) {
@@ -88,7 +96,11 @@ class _WorkspacePlaybackWindowState extends State<WorkspacePlaybackWindow> {
         if (!mounted || !identical(_window, window)) return;
         unawaited(
           window
-              .bindTitleBarBack(owner: _backOwner, onBack: _nativeBack)
+              .bindTitleBarBack(
+                owner: _backOwner,
+                onBack: _nativeBack,
+                onHome: _nativeHome,
+              )
               .catchError((Object error, StackTrace stack) {
                 if (!mounted) return;
                 FlutterError.reportError(
@@ -176,6 +188,7 @@ class _WorkspacePlaybackWindowState extends State<WorkspacePlaybackWindow> {
                 PlaybackWindowChrome(
                   window: window,
                   onBack: _nativeBack,
+                  onHome: _nativeHome,
                   onClose: widget.onClose,
                 ),
               Expanded(child: widget.child),

@@ -9,6 +9,7 @@ void main() {
   ) async {
     final window = _Window();
     var backs = 0;
+    var homes = 0;
     var closes = 0;
     await tester.pumpWidget(
       MaterialApp(
@@ -18,6 +19,7 @@ void main() {
             child: PlaybackWindowChrome(
               window: window,
               onBack: () => backs++,
+              onHome: () => homes++,
               onClose: () => closes++,
             ),
           ),
@@ -30,11 +32,12 @@ void main() {
           .height,
       44,
     );
-    for (final tooltip in ['返回上一视频', '最小化', '最大化', '关闭播放']) {
+    for (final tooltip in ['返回上一视频', '回到主页', '最小化', '最大化', '关闭播放']) {
       expect(tester.getSize(find.byTooltip(tooltip)).height, 44);
       await tester.tap(find.byTooltip(tooltip));
     }
     expect(backs, 1);
+    expect(homes, 1);
     expect(closes, 1);
     expect(window.minimizes, 1);
     expect(window.maximizes, 1);

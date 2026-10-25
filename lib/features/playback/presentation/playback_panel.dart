@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/platform/window_service.dart';
 import '../../../core/presentation/workspace_activity.dart';
 import '../../../shared/ui/playback_page_commands.dart';
+import '../../../shared/ui/playback_navigation.dart';
 import '../../../shared/ui/width_layout_builder.dart';
 import '../../../domain/video.dart';
 import '../../../domain/playback_rates.dart';
@@ -18,6 +19,7 @@ import '../../../core/input/shortcut_dispatcher.dart';
 import '../../../core/presentation/input_scope.dart';
 import '../application/playback_shortcut_controller.dart';
 import '../application/playback_session.dart';
+import '../application/playback_viewers_controller.dart';
 import '../domain/playback_repository.dart';
 import '../domain/content_playback.dart';
 import 'player_settings_dialog.dart';
@@ -62,6 +64,7 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
   late final PlaybackShortcutController _shortcuts;
   late final ValueNotifier<AppSettings> _settings;
   final _pageCommands = ValueNotifier<PlaybackPageCommands?>(null);
+  final _navigation = ValueNotifier<PlaybackNavigation?>(null);
   int? _handledCompletionGeneration;
   // Inline and fullscreen views are recreated, but share the page's intent.
   final _controlsVisible = ValueNotifier(true);
@@ -108,8 +111,12 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
   void didChangeDependencies() {
     super.didChangeDependencies();
     final commands = PlaybackPageCommands.maybeOf(context);
+    final navigation = PlaybackNavigation.maybeOf(context);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _pageCommands.value = commands;
+      if (mounted) {
+        _pageCommands.value = commands;
+        _navigation.value = navigation;
+      }
     });
     final active = WorkspaceActivity.isActive(context);
     if (_active == active) return;
@@ -241,6 +248,7 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
     _settings.dispose();
     _controlsVisible.dispose();
     _pageCommands.dispose();
+    _navigation.dispose();
     super.dispose();
   }
 
@@ -383,6 +391,8 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
                         widget.danmakuOverlayBuilder?.call(context) ??
                         const SizedBox.shrink(),
               pageCommands: _pageCommands,
+              navigation: _navigation,
+              onNavigate: _navigateFromPlayer,
               fullScreen: true,
               onFullScreen: () {
                 if (identical(_fullScreenRoute, ModalRoute.of(dialogContext))) {
@@ -431,10 +441,18 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
             danmakuOverlayBuilder: widget.danmakuOverlayBuilder,
             onFullScreen: _enterFullScreen,
             pageCommands: _pageCommands,
+            navigation: _navigation,
+            onNavigate: _navigateFromPlayer,
             fullScreen: false,
             active: _active && _surfaceReady,
           ),
   );
+
+  void _navigateFromPlayer(VoidCallback action) {
+    _shortcuts.cancel();
+    _dismissFullScreen();
+    action();
+  }
 }
 
 class _PlayerView extends StatefulWidget {
@@ -447,6 +465,8 @@ class _PlayerView extends StatefulWidget {
     required this.onFullScreen,
     required this.fullScreen,
     required this.pageCommands,
+    required this.navigation,
+    required this.onNavigate,
     this.active = true,
     this.danmakuComposerBuilder,
     this.danmakuOverlayBuilder,
@@ -459,6 +479,8 @@ class _PlayerView extends StatefulWidget {
   final VoidCallback onFullScreen;
   final bool fullScreen;
   final ValueListenable<PlaybackPageCommands?> pageCommands;
+  final ValueListenable<PlaybackNavigation?> navigation;
+  final ValueChanged<VoidCallback> onNavigate;
   final bool active;
   final WidgetBuilder? danmakuComposerBuilder;
   final WidgetBuilder? danmakuOverlayBuilder;
@@ -577,6 +599,7 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _appLifecycleState = state;
+    if (mounted) setState(() {});
     _syncHighEnergyVisibility();
     _pressedPointers.clear();
     _scheduleControlsHide();
@@ -999,80 +1022,28 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                   ),
                                 ),
                               ),
-                            if (session.error == null)
-                              Positioned(
-                                key: const ValueKey(
-                                  'player-control-title-layer',
-                                ),
-                                left: 0,
-                                right: 0,
-                                top: 0,
-                                child: _controlsVisibility(
+                            Positioned(
+                              key: const ValueKey('player-control-title-layer'),
+                              left: 0,
+                              right: 0,
+                              top: 0,
+                              child: _PlaybackViewers(
+                                request: _appVisible
+                                    ? _viewerRequest(session)
+                                    : null,
+                                builder: (viewers) => _controlsVisibility(
                                   visible: controls,
                                   hoverRegion: 'title',
-                                  child: Container(
-                                    color: Colors.black54,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 8,
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        const Icon(
-                                          Icons.play_circle_outline,
-                                          color: Colors.white70,
-                                          size: 18,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Text(
-                                            session.title,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ),
-                                        if (settings.sponsorBlockMode !=
-                                                SponsorBlockMode.disabled &&
-                                            (session.sponsorLoading ||
-                                                session.sponsorMessage != null))
-                                          Flexible(
-                                            child: Padding(
-                                              padding: const EdgeInsets.only(
-                                                left: 10,
-                                              ),
-                                              child: Text(
-                                                session.sponsorLoading
-                                                    ? '正在查询空降片段…'
-                                                    : (session.sponsorMessage ??
-                                                          ''),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                  color: Colors.white70,
-                                                  fontSize: 11,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        if ((session.detail?.parts.length ??
-                                                0) >
-                                            1)
-                                          Text(
-                                            'P${session.part?.page ?? 1}',
-                                            style: const TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                      ],
-                                    ),
+                                  child: _PlayerTopBar(
+                                    navigation: widget.navigation,
+                                    fullScreen: widget.fullScreen,
+                                    onExitFullScreen: _toggleFullScreen,
+                                    onNavigate: widget.onNavigate,
+                                    viewers: viewers,
                                   ),
                                 ),
                               ),
+                            ),
                             PlaybackSnapshotBuilder(
                               snapshots: session.snapshots,
                               select: (_) => session.currentSponsor,
@@ -2370,4 +2341,106 @@ String _quality(int? quality) => switch (quality) {
 class _WindowFullScreenState {
   Object? owner;
   Future<void> commands = Future.value();
+}
+
+class _PlaybackViewers extends ConsumerWidget {
+  const _PlaybackViewers({required this.request, required this.builder});
+  final PlaybackViewerRequest? request;
+  final Widget Function(String?) builder;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final identity = request;
+    return builder(
+      identity == null
+          ? null
+          : ref.watch(playbackViewersProvider(identity)).asData?.value,
+    );
+  }
+}
+
+PlaybackViewerRequest? _viewerRequest(PlaybackSession session) {
+  final detail = session.detail;
+  final part = session.part;
+  if (session.contentTarget != null || detail == null || part == null) {
+    return null;
+  }
+  return (
+    video: detail.summary.id,
+    cid: part.cid,
+    epoch: session.sessionEpoch(),
+  );
+}
+
+class _PlayerTopBar extends StatelessWidget {
+  const _PlayerTopBar({
+    required this.navigation,
+    required this.fullScreen,
+    required this.onExitFullScreen,
+    required this.onNavigate,
+    required this.viewers,
+  });
+  final ValueListenable<PlaybackNavigation?> navigation;
+  final bool fullScreen;
+  final VoidCallback onExitFullScreen;
+  final ValueChanged<VoidCallback> onNavigate;
+  final String? viewers;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: const BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Colors.black54, Colors.transparent],
+      ),
+    ),
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    constraints: const BoxConstraints(minHeight: 52),
+    child: ValueListenableBuilder<PlaybackNavigation?>(
+      valueListenable: navigation,
+      builder: (context, actions, _) => Row(
+        children: [
+          if (actions?.showInPlayer ?? false) ...[
+            IconButton(
+              key: const ValueKey('player-back'),
+              tooltip: '返回',
+              color: Colors.white,
+              onPressed: fullScreen
+                  ? onExitFullScreen
+                  : actions == null
+                  ? null
+                  : () => onNavigate(actions.onBack),
+              icon: const Icon(Icons.arrow_back_rounded),
+            ),
+            IconButton(
+              key: const ValueKey('player-home'),
+              tooltip: '回到主页',
+              color: Colors.white,
+              onPressed: actions == null
+                  ? null
+                  : () => onNavigate(actions.onHome),
+              icon: const Icon(Icons.home_outlined),
+            ),
+          ],
+          if (viewers != null)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  '$viewers 人正在看',
+                  key: const ValueKey('player-online-viewers'),
+                  textAlign: TextAlign.end,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ),
+            )
+          else
+            const Spacer(),
+        ],
+      ),
+    ),
+  );
 }

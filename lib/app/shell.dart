@@ -24,6 +24,7 @@ import '../features/settings/domain/app_settings.dart';
 import '../shared/ui/smooth_scroll_behavior.dart';
 import '../shared/ui/bili_icons.dart';
 import '../shared/ui/app_notice.dart';
+import '../shared/ui/playback_navigation.dart';
 import '../shared/ui/app_dialog.dart';
 import '../shared/ui/paging_tab_strip.dart';
 import '../shared/ui/page_tab_style.dart';
@@ -47,6 +48,7 @@ typedef WorkspaceWindowBuilder = Widget Function(
   required Object? activationToken,
   required VoidCallback onClose,
   required VoidCallback onBack,
+  required VoidCallback onHome,
   required ValueChanged<Object> onError,
 });
 
@@ -498,6 +500,14 @@ final class _BiliAppShellState extends State<BiliAppShell>
     showAppNotice(context, '独立播放窗口未能打开，已保留当前播放页面，请重试或切换导航模式');
   }
 
+  void _playbackHome() {
+    _workspace.returnFromPlayback();
+    _prunePages();
+    setState(() {});
+    _commitWorkspace();
+    if (_desktopDual) widget.onActivateBrowser?.call();
+  }
+
   void _cycleTabs({bool backwards = false}) {
     if (_singlePage) return;
     if (_desktopDual) {
@@ -644,6 +654,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
       activationToken: _windowActivation,
       onClose: _closePlaybackWindow,
       onBack: _playbackWindowBack,
+      onHome: _playbackHome,
       onError: _playbackWindowError,
     );
   }
@@ -679,10 +690,10 @@ final class _BiliAppShellState extends State<BiliAppShell>
               return Column(
                 children: [
                   if (_dualTabs || _singlePage) ...[
-                    if (widget.windowControlsBuilder != null)
+                    if (!_android && widget.windowControlsBuilder != null)
                       _dualWindowCaption(context)
                     else if (!_android && !_desktopDual && tab.isPlayback)
-                      _mobilePlaybackHeader(context),
+                      _playbackHeader(context),
                   ] else
                     _tabStrip(context),
                   Expanded(
@@ -776,6 +787,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
     child: Row(
       children: [
         if (_frameShowsBack(context)) _backButton(),
+        if (!_android && _frameTab(context).isPlayback) _homeButton(),
         Expanded(
           child:
               widget.dragRegionBuilder?.call(
@@ -795,7 +807,8 @@ final class _BiliAppShellState extends State<BiliAppShell>
     ),
   );
 
-  Widget _mobilePlaybackHeader(BuildContext context) => SizedBox(
+  Widget _playbackHeader(BuildContext context) => SizedBox(
+    key: const ValueKey('workspace-playback-header'),
     height: 44,
     child: Row(
       children: [
@@ -807,6 +820,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
             onPressed: _playbackWindowBack,
             icon: const Icon(Icons.arrow_back),
           ),
+        _homeButton(),
         Expanded(
           child: Text(
             _workspace.active.title,
@@ -1006,9 +1020,19 @@ final class _BiliAppShellState extends State<BiliAppShell>
                                 final page =
                                     widget.pageBuilder?.call(context, view) ??
                                     widget.child;
-                                return _android
-                                    ? _workspaceFrame(context, view, page)
-                                    : page;
+                                return PlaybackNavigation(
+                                  onBack: _desktopDual
+                                      ? _playbackWindowBack
+                                      : () {
+                                          _goBack();
+                                        },
+                                  onHome: _playbackHome,
+                                  showInPlayer:
+                                      _android && (_singlePage || _dualTabs),
+                                  child: _android
+                                      ? _workspaceFrame(context, view, page)
+                                      : page,
+                                );
                               },
                             ),
                           ),
@@ -1497,6 +1521,13 @@ final class _BiliAppShellState extends State<BiliAppShell>
     tooltip: '返回上一页',
     onPressed: _canGoBack ? _goBack : null,
     icon: const Icon(Icons.arrow_back, size: 20),
+  );
+
+  Widget _homeButton() => IconButton(
+    key: const ValueKey('workspace-playback-home'),
+    tooltip: '回到主页',
+    onPressed: _playbackHome,
+    icon: const Icon(Icons.home_outlined, size: 20),
   );
 
   Widget _horizontalTabs({

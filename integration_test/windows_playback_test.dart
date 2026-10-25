@@ -1091,6 +1091,7 @@ void main() {
                       required activationToken,
                       required onClose,
                       required onBack,
+                      required onHome,
                       required onError,
                     }) => DesktopPlaybackWindow(
                       activationToken: activationToken,
@@ -1102,6 +1103,7 @@ void main() {
                               theme: BiliTheme.light(),
                               shortcuts: const AppSettings.defaults().shortcuts,
                               onBack: onBack,
+                              onHome: onHome,
                               onClose: onClose,
                               onActivateBrowser: () =>
                                   unawaited(window.activate()),

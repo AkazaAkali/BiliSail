@@ -153,6 +153,14 @@ abstract interface class PlaybackMetadataRepository {
   });
 }
 
+abstract interface class PlaybackViewerRepository {
+  Future<String?> onlineViewers(
+    VideoId video,
+    String cid, {
+    required RequestCancellation cancellation,
+  });
+}
+
 abstract interface class PlaybackRepository {
   Future<PlaybackMedia> resolve(
     VideoId video,

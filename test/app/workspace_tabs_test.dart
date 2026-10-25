@@ -2,6 +2,66 @@ import 'package:bilisail/app/workspace_tabs.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('single player Home closes media and restores the entry search', () {
+    final workspace = WorkspaceTabs()..setSingleMode(true);
+    workspace.acceptRoute(Uri.parse('/?channel=popular'));
+    workspace.acceptRoute(Uri.parse('/search?q=cat'));
+    final entry = workspace.active;
+    workspace.acceptRoute(Uri.parse('/video/A'));
+    workspace.acceptRoute(Uri.parse('/user/42'));
+    workspace.acceptRoute(Uri.parse('/video/B'));
+    for (var index = 0; index < 100; index++) {
+      workspace.acceptRoute(Uri.parse(index.isEven ? '/user/42' : '/video/B'));
+    }
+    workspace.returnFromPlayback();
+    expect(workspace.activeId, entry.id);
+    expect(workspace.active.location, entry.location);
+    expect(workspace.tabs.where((tab) => tab.isPlayback), isEmpty);
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.active.location, Uri.parse('/?channel=popular'));
+  });
+
+  test('single player Home protects its entry page at capacity', () {
+    final workspace = WorkspaceTabs()..setSingleMode(true);
+    workspace.acceptRoute(Uri.parse('/search?q=cat'));
+    final entry = workspace.active;
+    workspace.acceptRoute(Uri.parse('/video/A'));
+    for (var index = 0; index < 40; index++) {
+      workspace.acceptRoute(Uri.parse('/user/$index'));
+    }
+    workspace.acceptRoute(Uri.parse('/video/B'));
+    workspace.returnFromPlayback();
+    expect(workspace.activeId, entry.id);
+    expect(workspace.tabs.where((tab) => tab.isPlayback), isEmpty);
+  });
+
+  test('dual player Home preserves media and the browsing destination', () {
+    final workspace = WorkspaceTabs()..setDualMode(true);
+    workspace.acceptRoute(Uri.parse('/search?q=cat'));
+    final entry = workspace.active;
+    workspace.acceptRoute(Uri.parse('/video/A'));
+    workspace.acceptRoute(Uri.parse('/video/B'));
+    final media = workspace.active;
+    final history = workspace.playbackHistory;
+    workspace.returnFromPlayback();
+    expect(workspace.activeId, entry.id);
+    expect(workspace.tabs, contains(media));
+    expect(workspace.playbackHistory, history);
+    expect(workspace.playbackId, media.id);
+  });
+
+  test('multiple player Home opens the home root and retains media tabs', () {
+    final workspace = WorkspaceTabs();
+    workspace.acceptRoute(Uri.parse('/me'));
+    workspace.acceptRoute(Uri.parse('/video/A'));
+    workspace.acceptRoute(Uri.parse('/video/B'));
+    final media = workspace.tabs.where((tab) => tab.isPlayback).toList();
+    workspace.returnFromPlayback();
+    expect(workspace.activeId, 'home');
+    expect(workspace.active.location.path, '/');
+    expect(workspace.tabs, containsAll(media));
+  });
+
   test('single page can always return home after bounded repeated visits', () {
     final workspace = WorkspaceTabs()..setSingleMode(true);
     workspace.acceptRoute(Uri.parse('/video/A'));
