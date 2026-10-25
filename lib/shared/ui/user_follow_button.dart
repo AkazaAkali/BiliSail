@@ -36,60 +36,87 @@ final class UserFollowButton extends ConsumerWidget {
         state.uncertain || (author == null && state.message != null);
     final Widget button;
     if (following && state.signedIn && !needsRefresh) {
-      button = PopupMenuButton<String>(
-        tooltip: '关注操作',
-        enabled:
-            !state.busy &&
-            !state.loading &&
-            !state.groupsLoading &&
-            !state.groupsBusy,
-        position: PopupMenuPosition.under,
-        onSelected: (action) {
-          final controller = ref.read(provider.notifier);
-          if (action == 'groups') {
-            unawaited(controller.loadGroups());
-            unawaited(
-              showDialog<void>(
-                context: context,
-                builder: (_) => _FollowGroupsDialog(id: VideoAuthorId(mid)),
+      final enabled =
+          !state.busy &&
+          !state.loading &&
+          !state.groupsLoading &&
+          !state.groupsBusy;
+      void onSelected(String action) {
+        final controller = ref.read(provider.notifier);
+        if (action == 'groups') {
+          unawaited(controller.loadGroups());
+          unawaited(
+            showDialog<void>(
+              context: context,
+              builder: (_) => _FollowGroupsDialog(id: VideoAuthorId(mid)),
+            ),
+          );
+        } else if (action == 'unfollow') {
+          unawaited(controller.toggleFollow());
+        }
+      }
+
+      const menuItems = [
+        PopupMenuItem(value: 'groups', child: Text('设置分组')),
+        PopupMenuItem(value: 'unfollow', child: Text('取消关注')),
+      ];
+      button = iconOnly
+          ? PopupMenuButton<String>(
+              tooltip: '关注操作',
+              enabled: enabled,
+              position: PopupMenuPosition.under,
+              onSelected: onSelected,
+              itemBuilder: (_) => menuItems,
+              child: _avatarIcon(context, state, Icons.check),
+            )
+          : Builder(
+              builder: (context) => Tooltip(
+                message: '关注操作',
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: Size(80, compact ? 32 : 40),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: compact ? 10 : 12,
+                      vertical: compact ? 6 : 8,
+                    ),
+                    tapTargetSize: compact
+                        ? MaterialTapTargetSize.shrinkWrap
+                        : MaterialTapTargetSize.padded,
+                  ),
+                  onPressed: enabled
+                      ? () async {
+                          final button =
+                              context.findRenderObject() as RenderBox;
+                          final overlay =
+                              Overlay.of(context).context.findRenderObject()
+                                  as RenderBox;
+                          final origin = button.localToGlobal(
+                            Offset(0, button.size.height),
+                            ancestor: overlay,
+                          );
+                          final action = await showMenu<String>(
+                            context: context,
+                            position: RelativeRect.fromRect(
+                              origin & Size(button.size.width, 0),
+                              Offset.zero & overlay.size,
+                            ),
+                            items: menuItems,
+                          );
+                          if (action != null && context.mounted) {
+                            onSelected(action);
+                          }
+                        }
+                      : null,
+                  icon: state.busy
+                      ? const SizedBox.square(
+                          dimension: 14,
+                          child: CircularProgressIndicator(strokeWidth: 1.5),
+                        )
+                      : const Icon(Icons.expand_more, size: 18),
+                  label: Text(state.busy ? '处理中' : '已关注'),
+                ),
               ),
             );
-          } else if (action == 'unfollow') {
-            unawaited(controller.toggleFollow());
-          }
-        },
-        itemBuilder: (_) => const [
-          PopupMenuItem(value: 'groups', child: Text('设置分组')),
-          PopupMenuItem(value: 'unfollow', child: Text('取消关注')),
-        ],
-        child: iconOnly
-            ? _avatarIcon(context, state, Icons.check)
-            : Container(
-                constraints: BoxConstraints(minHeight: compact ? 32 : 48),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(compact ? 6 : 4),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (state.busy)
-                      const SizedBox.square(
-                        dimension: 14,
-                        child: CircularProgressIndicator(strokeWidth: 1.5),
-                      )
-                    else
-                      const Icon(Icons.menu, size: 16),
-                    const SizedBox(width: 5),
-                    Text(state.busy ? '处理中' : '已关注'),
-                  ],
-                ),
-              ),
-      );
     } else {
       final onPressed = state.busy || state.loading
           ? null
