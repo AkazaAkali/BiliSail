@@ -28,6 +28,8 @@
 - 工作区当前页面与媒体历史 UI 共用 16 页上限，URI 视图及滚动存储随淘汰释放，不增加无界页面缓存。同槽根页面切换或容量限制下没有保留目标视图时，沿正常返回路径处理，不展示 BV 文字占位。缓存淘汰、账号变化及显式刷新后的数据仍按原规则读取。
 - 实际路由组件回归检查：返回预览、取消和确认后，VideoScreen、CommentsPanel 及评论 Scrollable 保持同一实例与滚动位置，详情／评论请求计数不增加；播放器仅在确认后重新创建。首页搜索与底栏在预览及提交后保持同一实例及几何位置。连续 22 个媒体访问保持 UI 数量不超过 16。
 - “我的 → 视频／UP 空间 → 返回”曾多出公共头像与搜索框：工具行显隐错误读取外壳 State 的 context，使隐藏／预览页面使用了当前视频或空间页的导航配置。`_navigationToolsVisible` 改为接收该页面框架的 BuildContext；导航工具按各自页面身份判断。三种导航模式的六组回归在旧代码均复现，在修正后验证预览与提交均无额外工具行，且“我的”内容实例和位置不变。
+- 最终组件专项 30 项通过，日志 `build/predictive-back-live-preview-targeted-final.log`；路由／账号／启动恢复专项 122 项通过，日志 `build/predictive-back-live-preview-routing.log`。`tool/check.ps1 -SkipPub` 通过：根应用 2693、bili_api 456、bili_player 81、bili_danmaku 93、bili_mux 2，共 3325 项测试通过，格式／静态分析及打包边界检查通过。10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。最终完整日志为 `build/predictive-back-live-preview-check-final.log`；这是包含同期导航修改的共享工作区快照。
+- Android arm64 封装组件准备及 Profile APK 构建通过，日志为 `build/predictive-back-live-preview-android-mux.log`、`build/predictive-back-live-preview-android-profile-final.log`，产物为 `build/app/outputs/flutter-apk/app-profile.apk`（约 118.5 MB、调试签名）。保留已有 CupertinoIcons 字体提示。本轮未连接 Android 实机或调试进程，未进行手机手感／原生解码画面与性能验收，热重载请求因无活动应用未能执行；未构建 Windows/macOS。
 
 ## 实现与来源
 
