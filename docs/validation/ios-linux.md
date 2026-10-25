@@ -1,6 +1,6 @@
 # iOS 与 Linux 工程、CI 和预览包
 
-日期：2026-10-26。按用户要求增加平台工程及 GitHub Actions，本地不构建 iOS／Linux 应用或安装包。新流程尚未在远端执行，不能将本节视作 CI 构建通过或设备验收。
+日期：2026-10-26。按用户要求增加平台工程及 GitHub Actions；首次接入时未在本地构建 iOS／Linux 应用或安装包。后续 Linux 远端首次失败及修复见文末，构建和设备验收分别记录。
 
 ## 平台与产物
 
@@ -63,4 +63,36 @@ Windows x64／Flutter 3.47.6 本轮验证：
 - actionlint 1.7.12、PowerShell／Bash 解析、Python 编译检查、全部 32 种平台选择组合、两个新目标的错误主机拒绝、19 条 iOS 图标尺寸／RGB 配置、plist／entitlement／生成插件选择、Flatpak 权限、文档链接与 `git diff --check` 通过。根锁文件只替换 Linux WebView 平台适配来源，依赖版本及其他四份锁文件保持。
 - 没有可连接的 DTD／调试应用，未执行热重载。
 
-未执行 iOS／Linux 本地构建、远端新工作流、签名安装、图形启动、DASH 双轨、PGC／直播、下载封装、账号恢复、退出释放、硬解或性能验收。两个新平台的工程／CI 接入不代表这些设备能力已通过。
+上述首次接入验证未执行 iOS／Linux 本地构建、远端新工作流、签名安装、图形启动、DASH 双轨、PGC／直播、下载封装、账号恢复、退出释放、硬解或性能验收。两个新平台的工程／CI 接入不代表这些设备能力已通过。
+
+## 2026-10-26：Linux 许可证归属误匹配与依赖缓存
+
+[CI 40214248464 的 Linux job](https://github.com/CKopoer/BiliSail/actions/runs/40214248464/job/121233229596) 在提交 `db982b7aaa545506e5484fae03f0ddef07778b01` 上完成 Flutter Release 编译，随后公共 AppDir 的许可证收集报错：`Distro license text missing: google-chrome-stable`。失败前约 5 分 21 秒，不是两个安装包构建成功的耗时，也不是 Flutter 编译失败。
+
+原脚本按 `*/<库文件名>` 查询 dpkg 归属，同名库会把 runner 预装应用的私有副本也算入依赖，例如 `/opt/google/chrome/` 中的库。修复将归属查询限制为 Ubuntu x64 的 `/usr/lib/x86_64-linux-gnu/`、`/lib/x86_64-linux-gnu/`，再匹配包中实际库名；保留嵌套 GTK 模块和多归属解析，忽略 diversion 说明行。真实系统依赖仍必须附版权文本、binary/source 包名及版本，缺失时继续失败；没有通过忽略 Chrome 错误或关闭许可证校验放行。
+
+[依赖安装脚本](../../tool/setup-linux-build.sh) 将 apt 包列表与网络重试／连接超时集中管理，从 Flatpak manifest 读取 Runtime／SDK 分支。[下载辅助脚本](../../tool/linux-downloads.sh) 保留原有固定版本及哈希，缓存命中重新校验，损坏条目重新下载，错误下载不发布为缓存。CI 对 `.deb`、固定打包工具和 Flatpak Runtime／SDK 分别恢复并在应用构建前保存；每周生成新键并允许同配置回退，缓存恢复后仍核对上游包和 Runtime 更新。缓存范围与失效条件见 [CI/CD](ci-cd.md)。
+
+离线回归包含 Chrome／其他应用同名库排除、usrmerge 路径、嵌套模块、多归属、查询失败、真实许可证缺失，以及工具缓存首次下载、命中、损坏重下和哈希错误拒绝；已加入 CI 的 Lint job。
+
+本轮验证：
+
+- Windows 与 WSL 内实际 Ubuntu 24.04.4 的 12 项 Python 回归、4 项本地文件下载／缓存回归通过；Python 标准库 trace 统计校验脚本行覆盖率 93%。Ubuntu 真实 dpkg 查询和 Vulkan 版权文本／source 版本收集通过。
+- 固定 linuxdeploy 下载通过，三份固定资源的 SHA-256 和缓存读取通过。WSL／Windows 直连 `raw.githubusercontent.com` 的文本下载遇到 TLS 连接中断，文本改由 GitHub 只读连接取得后核对既有固定哈希，没有关闭 TLS 或修改哈希。
+- actionlint 1.7.12、Bash 语法、Python 编译、40 条相对文档链接与 `git diff --check` 通过。
+- `tool/check.ps1 -SkipPub` 重跑完整通过格式、分析、打包边界脚本和 3430 项测试（根应用 2791、API 460、播放器 81、弹幕 93、mux 5）；10 项 mux 原生测试因未配置 `BILI_MUX_LIBRARY` 跳过。首轮根检查曾因 `build/native_assets/windows/sqlite3.dll` 缺失产生 46 项数据库测试失败；随后设置仓储文件的 42 项定向复测及全套重跑通过，没有为此修改应用或 SQLite 源码。
+
+尚未复跑修复后的远端 CI、完整 AppImage／Flatpak 构建及设备启动；apt／Flatpak 缓存上传、命中和实际提速需新 CI 验证。本地脚本回归不替代这些验收。
+
+## 同日补查：Linux 依赖下载偶发长时间低速
+
+对照同一源码提交的两条运行：
+
+- [push CI 的 Linux job](https://github.com/CKopoer/BiliSail/actions/runs/40214248464/job/121233229596)：apt 共新增 335 个包、升级 18 个包，175 MB 的 `.deb` 在 14 秒内下载完成（日志约 12.3 MB/s）；随后完成解包／配置。Flatpak Runtime、GL／Locale 扩展及 SDK 安装约 45 秒；依赖整个步骤从 UTC 17:05:12 到 17:06:54，约 1 分 42 秒。
+- [Release 的 Linux job](https://github.com/CKopoer/BiliSail/actions/runs/40214401648/job/121233826103)：该依赖步骤从北京时间 01:07:42 到 01:37:43，实际耗时 30 分 1 秒。任务后续取消，日志归档后确认 apt 明确报告 `Fetched 173 MB in 28min 32s (101 kB/s)`；下载源为 `http://azure.archive.ubuntu.com/ubuntu`，`libsystemd-shared` 出现重试。其后 Flatpak 安装仍只约 45 秒，耗时差异几乎全在 apt 下载链路。28 分 32 秒中持续有包下载进度：例如 11.2 MB 的 cmake 相邻下载记录间隔约 141 秒，13.6 MB 的 libflite1 间隔约 186 秒。日志能确认低吞吐，不能进一步区分镜像节点与具体 runner 网络路由。
+
+主要问题落在 apt 到 Azure 镜像的下载链路，额外的重复下载由此前缺失 Linux 依赖缓存放大。GitHub runner-images 维护者在 [issue 12949](https://github.com/actions/runner-images/issues/12949) 中确认过该镜像偶发低速；[官方 runner 配置](https://github.com/actions/runner-images/blob/main/images/ubuntu/scripts/build/configure-apt-sources.sh) 将 Azure 设为 priority 1、Ubuntu archive 为 2、security 为 3。[APT 镜像选择](https://manpages.ubuntu.com/manpages/noble/man1/apt-transport-mirror.1.html) 优先数值较低的条目，[HTTP 超时](https://manpages.ubuntu.com/manpages/noble/man1/apt-transport-http.1.html) 是连接／数据超时，不能作为整个下载的总时限。
+
+因此在刚增加的缓存之外，加入 [镜像优先级调整](../../tool/linux-apt-mirrors.py)：仅在 hosted CI 的既有镜像列表上将官方 archive／security 提前、Azure 后移，保留签名验证、其他镜像和元数据，不安装额外第三方 Action。安装脚本增加四个阶段的分组和耗时输出。新增 6 项镜像优先级回归，与原有 12 项 Python 和 4 项下载缓存回归在 Windows／Ubuntu 24.04 均通过；actionlint、Python 编译、Bash 语法和更新后的 41 条相对文档链接通过。`tool/check.ps1 -SkipPub` 再次完整通过 3430 项测试，10 项 mux 原生测试按配置跳过。实际新镜像链路及缓存提速仍须新 CI 验证。
+
+提交前另运行 `tool/check.ps1 -Stage Lint -EnforceLockfile`，五份锁文件的解析、格式、静态分析和打包边界检查通过。按用户后续要求，本次以源码版本 `1.2.1+3` 触发 Release，仅选择 Android、Windows、macOS、iOS，明确关闭 Linux；Linux 修复的远端完整打包与缓存命中继续保留为未验项。本次提交跳过重复的 push 矩阵，由手动 Release 运行全部检查及选中的四端构建，不修改工作流的平台默认值。

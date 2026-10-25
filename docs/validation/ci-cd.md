@@ -1,6 +1,6 @@
 # GitHub Actions CI/CD 与安装包
 
-更新日期：2026-10-26。配置覆盖 Android arm64、Windows x64、macOS arm64、iOS arm64、Linux x64；新增平台的首次远端构建与设备验收待完成，详见[iOS／Linux 接入记录](ios-linux.md)。本地验证结果与远端、设备未测项分别记录。此流程交付预览构建，不表示各平台验收或 M5 正式发行完成。
+更新日期：2026-10-26。配置覆盖 Android arm64、Windows x64、macOS arm64、iOS arm64、Linux x64；新增平台的远端构建进展与设备未验项详见[iOS／Linux 接入记录](ios-linux.md)。本地验证结果与远端、设备未测项分别记录。此流程交付预览构建，不表示各平台验收或 M5 正式发行完成。
 
 ## 入口与分工
 
@@ -24,6 +24,10 @@ PowerShell 7 是跨平台 shell；Ubuntu 上复用 `.ps1` 不要求 Windows。Wi
 Flutter 固定 **3.47.6 stable / Dart 3.13.5**；升级需同时调整工作流、检查/构建脚本并重新验证。根及各包保留各自 `pubspec.lock`，pub 缓存键包含锁文件哈希。Actions 使用已查询的提交 SHA，并以注释标明主版本。Android SDK/NDK 由该 SDK 的 Flutter Gradle 配置选择，AGP/Gradle 版本沿用工程；Xcode/系统映像仍由对应 runner 提供，不能据此宣称完全可重现的原生工具链。
 
 SDK 缓存沿用 `flutter-action` 的默认键，按系统、SDK 架构、版本和 revision 隔离。Pub 缓存键只配置系统、架构和版本前缀，由当前固定的 Action 追加所有 `pubspec.lock` 的哈希，避免重复追加。Gradle 缓存键覆盖 Android Gradle 脚本、`android/gradle.properties`、Wrapper 配置、所有 Pub 锁文件和 `.flutter-version`，使插件、SDK 或构建配置变化后保存新的依赖缓存。Release 复用 CI 的同一套缓存配置；安装包仍通过本次运行的 artifacts 传递。
+
+Linux 另用固定 SHA 的 `actions/cache/restore`／`save` 缓存 apt 下载的 `.deb`、经 SHA-256 校验的 linuxdeploy／GTK hook，以及用户级 Flatpak Runtime／SDK。键包含 Ubuntu 24.04 x64、相关安装脚本／manifest 哈希和 UTC 周次，允许恢复同配置前一周的缓存；仍执行 apt 索引更新、包验证和 Flatpak `--or-update`，工具每次读取缓存也校验固定哈希，损坏条目重新下载。依赖安装后、应用构建前单独保存，避免后续打包失败丢失缓存，也不把安装后的 BiliSail Flatpak 混进 Runtime 缓存。不缓存整个 `build/`、`.dart_tool/`、apt 索引或签名材料；首次运行仍需完整下载，缓存实际命中及耗时须由新 CI 确认。
+
+GitHub hosted runner 存在 `/etc/apt/apt-mirrors.txt` 时，Linux 安装入口将该列表中的 Ubuntu 官方 archive／security 提到 Azure 镜像之前，保留其他条目及镜像回退；只在 `GITHUB_ACTIONS=true` 时执行，不修改本机开发环境。APT 连接／无数据超时不能保证终止持续低速传输，故调整镜像优先级与缓存配合使用。索引、apt 包安装、Flatpak Runtime／SDK 和固定打包工具分别打印分组及墙钟耗时，便于从下一次 CI 区分下载、安装和打包耗时。
 
 CI 在工作流顶层显式设置 `PUB_HOSTED_URL=https://pub.dev`，与根应用及 `bili_api`、`bili_player`、`bili_danmaku`、`bili_mux` 五份锁文件的官方 hosted 源一致；检查、三端构建和 Release 复用流程均使用此源。Dependabot 的 Pub 更新也使用官方源。严格检查和提交前，本地应先设置 `$env:PUB_HOSTED_URL = 'https://pub.dev'`（PowerShell）或 `export PUB_HOSTED_URL=https://pub.dev`（sh），再执行 `pwsh ./tool/check.ps1 -EnforceLockfile`。
 

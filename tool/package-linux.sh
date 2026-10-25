@@ -23,25 +23,8 @@ cp "$repo/linux/packaging/AppRun" "$work/AppDir/AppRun"
 cp "$repo/linux/packaging/flatpak-launcher" "$work/AppDir/"
 chmod +x "$work/AppDir/AppRun" "$work/AppDir/flatpak-launcher"
 
-download_verified() {
-  local url="$1" sha="$2" destination="$3"
-  curl --fail --location --retry 3 --connect-timeout 30 --max-time 600 "$url" -o "$destination"
-  echo "$sha  $destination" | sha256sum --check --status
-}
-# Pin both executable and GTK deployment hook; never execute a moving release.
-download_verified \
-  https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage \
-  c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d \
-  "$work/tools/linuxdeploy-x86_64.AppImage"
-download_verified \
-  https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/7a3fbc31a9e5075073ff8790f26effbac5f84453/linuxdeploy-plugin-gtk.sh \
-  b0f4cbc684a0103a9651f0955b635eaea0096b3a66c0f5a2c2aa337960375171 \
-  "$work/tools/linuxdeploy-plugin-gtk.sh"
-download_verified \
-  https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/7a3fbc31a9e5075073ff8790f26effbac5f84453/LICENSE.txt \
-  0718f6cadf38d2662f397591b777884c5389e65b9919aae6aca2bea87a52eac4 \
-  "$work/tools/gtk-LICENSE.txt"
-chmod +x "$work/tools/linuxdeploy-x86_64.AppImage" "$work/tools/linuxdeploy-plugin-gtk.sh"
+source "$repo/tool/linux-downloads.sh"
+prepare_linux_packaging_tools "$work/tools"
 gtk_notices="$work/AppDir/usr/share/doc/bilisail/linuxdeploy-gtk"
 mkdir -p "$gtk_notices"
 cp "$work/tools/gtk-LICENSE.txt" "$work/tools/linuxdeploy-plugin-gtk.sh" "$gtk_notices/"
