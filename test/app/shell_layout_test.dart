@@ -561,6 +561,98 @@ void main() {
     }
   }
 
+  for (final mode in WorkspaceNavigationMode.values) {
+    for (final disableAnimations in [false, true]) {
+      testWidgets(
+        'bottom navigation reveals smoothly and hides immediately in $mode with disableAnimations=$disableAnimations',
+        (tester) async {
+          tester.view.devicePixelRatio = 1;
+          tester.view.physicalSize = const Size(390, 844);
+          tester.platformDispatcher.accessibilityFeaturesTestValue =
+              FakeAccessibilityFeatures(disableAnimations: disableAnimations);
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(tester.view.resetViewInsets);
+          addTearDown(
+            tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+          );
+          await tester.pumpWidget(
+            MaterialApp(
+              home: BiliAppShell(
+                location: '/',
+                navigationMode: mode,
+                child: const SizedBox.expand(key: ValueKey('retained-content')),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final navigation = find.byKey(
+            const ValueKey('workspace-bottom-navigation'),
+          );
+          final content = find.byKey(const ValueKey('retained-content'));
+          final search = find.byKey(const ValueKey('workspace-search'));
+          final before = tester.getSize(content).height;
+          final navigationHeight = tester.getSize(navigation).height;
+          await tester.enterText(search, '保留草稿');
+          tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+          await tester.pumpAndSettle();
+          expect(navigation, findsNothing);
+
+          tester.view.viewInsets = const FakeViewPadding();
+          await tester.pump();
+          if (disableAnimations) {
+            expect(tester.getSize(content).height, before);
+            expect(navigation.hitTestable(), findsOneWidget);
+          } else {
+            expect(tester.getSize(content).height, before + navigationHeight);
+            await tester.pump(const Duration(milliseconds: 60));
+            expect(
+              tester.getSize(content).height,
+              inExclusiveRange(before, before + navigationHeight),
+            );
+            expect(
+              tester
+                  .widget<Opacity>(
+                    find
+                        .ancestor(
+                          of: navigation,
+                          matching: find.byType(Opacity),
+                        )
+                        .first,
+                  )
+                  .opacity,
+              inExclusiveRange(0.0, 1.0),
+            );
+            expect(navigation.hitTestable(), findsNothing);
+          }
+
+          // Reopening the keyboard must cancel even an unfinished reveal.
+          tester.view.viewInsets = const FakeViewPadding(bottom: 160);
+          await tester.pump();
+          expect(navigation, findsNothing);
+          expect(
+            tester.getSize(content).height,
+            before + navigationHeight - 160,
+          );
+          tester.view.viewInsets = const FakeViewPadding();
+          await tester.pumpAndSettle();
+          expect(tester.getSize(content).height, before);
+          expect(navigation.hitTestable(), findsOneWidget);
+          expect(tester.widget<TextField>(search).controller?.text, '保留草稿');
+          expect(
+            tester
+                .widget<EditableText>(find.byType(EditableText))
+                .focusNode
+                .hasFocus,
+            isTrue,
+          );
+          expect(tester.takeException(), isNull);
+        },
+        variant: TargetPlatformVariant.only(TargetPlatform.android),
+      );
+    }
+  }
+
   testWidgets('keyboard height changes retain active and hidden page widgets', (
     tester,
   ) async {

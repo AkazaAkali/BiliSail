@@ -68,3 +68,13 @@
 - `test/app/shell_layout_test.dart` 共 29 项通过；新增 12 项 Android Widget 回归覆盖首页／搜索页、双／多标签及 320／390／800 逻辑像素宽度，检查多个键盘高度和收起后的恢复、内容区高度、草稿、焦点和页面实例保留。修复前窄屏 8 项均因底栏仍显示而失败。
 - `tool/check.ps1 -SkipPub` 通过：根应用 2301、bili_api 456、bili_player 81、bili_danmaku 93、bili_mux 2，共 2933 项通过；五处格式、静态分析及打包边界检查通过。mux 的 10 项原生测试因未配置 `BILI_MUX_LIBRARY` 跳过，不算原生封装通过。日志：`build/android-search-keyboard-check.log`。
 - 当前未连接 Android 设备，也没有运行中的调试应用；未完成 Android 实机输入法动画、构建或热重载验收。以上为 Widget 布局验证，不是设备或性能测量。
+
+### 后续调整：底栏平滑恢复
+
+键盘关闭后，底栏改为 180 毫秒的高度展开与淡入，使用 `easeOutCubic` 曲线，内容区高度随之过渡；首次展示不播放恢复动画。键盘重新弹出时立即隐藏并中断未完成的展开。动画期间暂不接受底栏点击，系统开启“减少动画”时立即恢复。
+
+补充双／多标签、普通／减少动画共 4 项 Android Widget 回归，检查恢复首帧、中途高度与透明度、动画期间点击隔离、再次弹出键盘的即时隐藏及最终恢复，并确认搜索草稿与焦点保留。原有缓存页面工厂、宽屏侧栏和搜索页回归继续保留。
+
+- 最终键盘与底栏定向 17 项通过（`build/android-search-keyboard-reveal-tests.log`）；此前完整布局文件 33 项通过。
+- 本轮 `tool/check.ps1 -SkipPub` 的打包边界、根格式和静态分析通过；根应用测试 2299 项通过、16 项失败，随后停止，未继续执行四包检查。失败位于同期导航改动相关的 `workspace_router_test.dart`（12 项根页面分组滑动边界）与 `workspace_shell_test.dart`（4 项 Windows 直播入口／底栏数量），本任务保留这些改动。完整日志：`build/android-search-keyboard-reveal-check.log`。
+- 仍无连接的 Android 设备或调试应用，本轮未构建、实机验证或完成热重载；实际输入法动画与过渡手感需运行构建确认。

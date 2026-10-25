@@ -654,13 +654,10 @@ final class _BiliAppShellState extends State<BiliAppShell>
                           ],
                         ),
                       ),
-                      // Scaffold clears MediaQuery's body insets. Read this
-                      // view's inset so navigation can hide during IME resizing.
                       if (compact &&
-                          View.of(context).viewInsets.bottom == 0 &&
                           !_displayTab.isPlayback &&
                           !_displayTab.isProfile)
-                        _bottomNavigation(context),
+                        _animatedBottomNavigation(context),
                     ],
                   );
                 },
@@ -1048,6 +1045,38 @@ final class _BiliAppShellState extends State<BiliAppShell>
               ),
             ),
           ],
+        );
+      },
+    );
+  }
+
+  Widget _animatedBottomNavigation(BuildContext context) {
+    // Scaffold clears MediaQuery's body insets. Read this view's inset to
+    // hide immediately on keyboard opening and animate only the return.
+    final visible = View.of(context).viewInsets.bottom == 0;
+    final disableAnimations = MediaQuery.disableAnimationsOf(context);
+    final target = visible ? 1.0 : 0.0;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: target, end: target),
+      duration: visible && !disableAnimations
+          ? const Duration(milliseconds: 180)
+          : Duration.zero,
+      curve: Curves.easeOutCubic,
+      child: _bottomNavigation(context),
+      builder: (context, value, child) {
+        final progress = disableAnimations ? 1.0 : value;
+        if (!visible || progress == 0) {
+          return const SizedBox.shrink();
+        }
+        return IgnorePointer(
+          ignoring: progress < 1,
+          child: ClipRect(
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              heightFactor: progress,
+              child: Opacity(opacity: progress, child: child),
+            ),
+          ),
         );
       },
     );
