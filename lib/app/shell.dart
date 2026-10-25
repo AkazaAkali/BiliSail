@@ -780,6 +780,10 @@ final class _BiliAppShellState extends State<BiliAppShell>
     final destination = _workspace.backDestination(
       fromMessages: _canReturnFromMessages,
     );
+    bool isPreview(WorkspaceTab tab) =>
+        tab.id != _displayTab.id &&
+        tab.id == destination?.id &&
+        tab.location == destination?.location;
     return PredictiveBackRegion(
       enabled:
           _android &&
@@ -804,13 +808,20 @@ final class _BiliAppShellState extends State<BiliAppShell>
           if (previewing && destination != null)
             // Replaced media/root locations have no second live page. Preview
             // their identity without loading another source or starting audio.
-            ColoredBox(
-              color: Theme.of(context).colorScheme.surfaceContainerLow,
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text('返回 ${destination.title}'),
+            ExcludeSemantics(
+              child: PredictiveBackPageTransition(
+                progress: progress,
+                edge: edge,
+                incoming: true,
+                child: ColoredBox(
+                  color: Theme.of(context).colorScheme.surfaceContainerLow,
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text('返回 ${destination.title}'),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -823,12 +834,9 @@ final class _BiliAppShellState extends State<BiliAppShell>
                 context,
                 tab,
                 active: tab.id == _displayTab.id,
-                preview:
-                    previewing &&
-                    tab.id != _displayTab.id &&
-                    tab.id == destination?.id &&
-                    tab.location == destination?.location,
-                backProgress: previewing && tab.id == _displayTab.id
+                preview: previewing && isPreview(tab),
+                backProgress:
+                    previewing && (tab.id == _displayTab.id || isPreview(tab))
                     ? progress
                     : kAlwaysDismissedAnimation,
                 backEdge: edge,
@@ -851,6 +859,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
     child: PredictiveBackPageTransition(
       progress: backProgress,
       edge: backEdge,
+      incoming: preview,
       child: IgnorePointer(
         ignoring: preview,
         child: ExcludeSemantics(

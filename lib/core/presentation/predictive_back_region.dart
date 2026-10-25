@@ -142,7 +142,9 @@ class _PredictiveBackRegionState extends State<PredictiveBackRegion>
     ModalRoute.isCurrentOf(context);
     return IgnorePointer(
       ignoring: _previewing,
-      child: widget.builder(context, _progress, _edge, _previewing),
+      child: ClipRect(
+        child: widget.builder(context, _progress, _edge, _previewing),
+      ),
     );
   }
 }
@@ -153,11 +155,13 @@ class PredictiveBackPageTransition extends StatelessWidget {
     super.key,
     required this.progress,
     required this.edge,
+    this.incoming = false,
     required this.child,
   });
 
   final Animation<double> progress;
   final SwipeEdge edge;
+  final bool incoming;
   final Widget child;
 
   @override
@@ -168,18 +172,14 @@ class PredictiveBackPageTransition extends StatelessWidget {
       final value = progress.value;
       final reduced = MediaQuery.disableAnimationsOf(context);
       final direction = edge == SwipeEdge.left ? 1.0 : -1.0;
-      return Transform.translate(
-        offset: Offset(reduced ? 0 : direction * 24 * value, 0),
-        child: Transform.scale(
-          scale: reduced ? 1 : 1 - 0.1 * value,
-          child: Opacity(
-            opacity: 1 - Curves.easeIn.transform(value) * 0.25,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(reduced ? 0 : 28 * value),
-              child: child,
-            ),
-          ),
+      // Adjacent full-size pages share a moving edge. Fractional translation
+      // follows the viewport width without relayout or resizing video surfaces.
+      return FractionalTranslation(
+        translation: Offset(
+          reduced ? 0 : direction * (value - (incoming ? 1 : 0)),
+          0,
         ),
+        child: child,
       );
     },
   );

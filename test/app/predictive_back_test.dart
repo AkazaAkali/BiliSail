@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:bilisail/app/shell.dart';
 import 'package:bilisail/app/workspace_tabs.dart';
 import 'package:bilisail/core/presentation/page_back_scope.dart';
+import 'package:bilisail/core/presentation/predictive_back_region.dart';
 import 'package:bilisail/core/presentation/workspace_activity.dart';
 import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:bilisail/shared/ui/app_dialog.dart';
@@ -15,6 +16,88 @@ import '../support/input_test_app.dart';
 import '../support/system_back_gesture.dart';
 
 void main() {
+  for (final size in const [Size(390, 844), Size(844, 390), Size(1080, 844)]) {
+    for (final edge in SwipeEdge.values) {
+      testWidgets(
+        'video Back keeps two full-size pages adjacent at $size from $edge',
+        (tester) async {
+          tester.view.devicePixelRatio = 1;
+          tester.view.physicalSize = size;
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(tester.view.resetPhysicalSize);
+          final disposed = <String>[];
+          final router = _router(
+            builder: (_, tab) => _PageProbe(tab: tab, disposed: disposed),
+          );
+          addTearDown(router.dispose);
+          await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+          await tester.pumpAndSettle();
+          router.go('/video/A');
+          await tester.pumpAndSettle();
+          final video = find.byKey(const ValueKey('page-surface-/video/A'));
+          final previous = find.byKey(const ValueKey('page-surface-/'));
+          final original = tester.getRect(video);
+          expect(original, tester.getRect(find.byType(PredictiveBackRegion)));
+          final videoElement = tester.element(video);
+          final direction = edge == SwipeEdge.left ? 1.0 : -1.0;
+          await systemBackGesture(tester, 'startBackGesture', edge: edge);
+          await tester.pump();
+          for (final progress in [0.2, 0.5, 0.8, 0.3]) {
+            await systemBackGesture(
+              tester,
+              'updateBackGestureProgress',
+              progress: progress,
+              edge: edge,
+            );
+            await tester.pump();
+            final outgoing = tester.getRect(video);
+            final incoming = tester.getRect(previous);
+            for (final rect in [outgoing, incoming]) {
+              expect(rect.width, closeTo(original.width, 0.001));
+              expect(rect.height, closeTo(original.height, 0.001));
+            }
+            expect(outgoing.top, original.top);
+            expect(incoming.top, original.top);
+            expect(
+              outgoing.left,
+              closeTo(
+                original.left + direction * original.width * progress,
+                0.001,
+              ),
+            );
+            if (edge == SwipeEdge.left) {
+              expect(incoming.right, closeTo(outgoing.left, 0.001));
+            } else {
+              expect(incoming.left, closeTo(outgoing.right, 0.001));
+            }
+            expect(disposed, isEmpty);
+            expect(router.routeInformationProvider.value.uri.path, '/video/A');
+          }
+          final clipping = find.ancestor(
+            of: video,
+            matching: find.byType(ClipRect),
+          );
+          expect(clipping, findsWidgets);
+          expect(tester.getRect(clipping.first), original);
+          await systemBackGesture(tester, 'cancelBackGesture');
+          await tester.pumpAndSettle();
+          expect(tester.element(video), same(videoElement));
+          expect(tester.getRect(video), original);
+          expect(previous, findsNothing);
+          expect(disposed, isEmpty);
+          await systemBackGesture(tester, 'startBackGesture', edge: edge);
+          await systemBackGesture(tester, 'commitBackGesture');
+          await tester.pumpAndSettle();
+          expect(router.routeInformationProvider.value.uri.path, '/');
+          expect(disposed, ['tab-1']);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+        variant: TargetPlatformVariant.only(TargetPlatform.android),
+      );
+    }
+  }
+
   for (final mode in WorkspaceNavigationMode.values) {
     testWidgets('Android confirmed exit waits for cleanup in $mode', (
       tester,
@@ -396,6 +479,7 @@ class _PageProbeState extends State<_PageProbe> {
       builds.update(widget.tab.id, (n) => n + 1, ifAbsent: () => 1);
     }
     return ColoredBox(
+      key: ValueKey('page-surface-${widget.tab.location.path}'),
       color: Colors.white,
       child: Center(child: Text('page ${widget.tab.location.path}')),
     );
