@@ -27,3 +27,15 @@
 [双窗口回归](../../test/app/workspace_image_viewer_test.dart) 启用 SDK 多窗口开关，用 fake 次级 view 和原图仓储点击评论第二张图片，核对查看器仍属于播放 view／Navigator、浏览窗不增加路由、不注册原生对话窗口；切图和缩放正常，原生标题栏返回被模态隔离，Esc 仅关闭图片且保留原页面与播放窗口。旧实现已复现原生对话框创建路径及查看器落到主 view 的失败。此测试使用真实 Flutter 组件和模拟窗口，不代表 Windows／macOS 原生窗口实测。
 
 本轮 `tool/check.ps1 -SkipPub` 完整通过：根应用 2,209、`bili_api` 446、`bili_player` 81、`bili_danmaku` 93、`bili_mux` 2 项，共 2,831 项；五处格式、静态分析和打包边界检查通过。mux 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。日志为本机忽略目录 `build/validation/image-viewer-window-check.log`。未构建或执行三端实机验收；DTD 未发现运行中的调试应用，热重载因无连接未能执行。
+
+## 2026-10-25 双标签原图加载状态修复
+
+原图已读完仍显示“正在加载原图…”的原因是 `DialogRoute.builder` 每次执行都会创建新的 `ImageViewerRequest`。该对象同时作为 family provider 的身份，而查看器只在 `initState` 中启动首次加载。播放窗口触发路由页面重建时，查看器 State 沿用，订阅却切到另一个初始加载态的控制器，原请求的完成结果无法显示；手动切图会对当前控制器调用 `load`，因此切走再切回能够恢复。
+
+共享入口现于推入路由前创建请求，同一次预览的路由重建始终沿用该身份。加载中的读取、已完成图片、当前图片序号和缩放状态均可保留，关闭与账号变化的取消边界仍由原控制器管理。
+
+[双窗口回归](../../test/app/workspace_image_viewer_test.dart) 使用可手动完成的原图仓储，分别覆盖单图／多图在加载中及完成后触发 `ModalRoute.changedExternalState`，断言原读取不被取消、无需切图即可显示原图、不会额外下载；继续检查所属 view／Navigator、缩放、切图、原生返回隔离与 Esc 关闭。旧代码在路由重建后已复现加载提示重新出现的断言失败；固定请求身份后，这 4 项及原图控制器、普通宽／窄屏查看器和评论富内容的共 25 项定向测试通过。
+
+本次 `tool/check.ps1 -SkipPub` 首次被同期改动的 `test/app/comment_detail_navigation_test.dart` 格式检查阻断；后续全根目录格式复查通过，根应用与四个包的静态分析、四包格式及测试、打包边界脚本通过。根应用全量测试为 2,216 项通过、2 项失败：同期新增的桌面双标签视频／PGC 评论详情模态测试找不到“评论详情”文本，均位于该文件，本任务未修改它。四包分别为 446／81／93／2 项通过，mux 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。日志保存在本机忽略目录 `build/validation/image-viewer-loading-{check,root-format,root-analyze,root-tests,packages}.log`，未将全量检查记为通过。
+
+本次未构建或执行 Windows／Android／macOS 实机验收。DTD 未发现运行中的调试应用，热重载调用因无活动连接未能执行；上述双窗口验证使用真实 Flutter 组件与 fake view，不代表真实原生窗口验收。

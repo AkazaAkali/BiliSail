@@ -20,12 +20,15 @@ Future<void> showImageViewer(
 ) {
   if (images.isEmpty) return Future.value();
   final navigator = Navigator.of(context);
+  // The request identifies the controller for this preview. Route rebuilds
+  // must keep it stable because the viewer starts loading only in initState.
+  final request = ImageViewerRequest(images, index);
   // showDialog creates a native window when desktop windowing is enabled in
   // the pinned SDK. Keep the shared viewer on its owning window's Navigator.
   return navigator.push<void>(
     DialogRoute<void>(
       context: context,
-      builder: (_) => ImageViewer(request: ImageViewerRequest(images, index)),
+      builder: (_) => ImageViewer(request: request),
       themes: InheritedTheme.capture(from: context, to: navigator.context),
       barrierColor:
           DialogTheme.of(context).barrierColor ??
