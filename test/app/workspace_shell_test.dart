@@ -377,6 +377,23 @@ void main() {
       await tester.tap(find.text('count 0'));
       await tester.pump();
       final playback = tester.element(find.byType(_CounterPage));
+      for (final size in const [
+        Size(390, 844),
+        Size(844, 390),
+        Size(1080, 844),
+      ]) {
+        tester.view.physicalSize = size;
+        await tester.pumpAndSettle();
+        expect(find.byType(_CounterPage), findsOneWidget);
+        expect(
+          find.byType(_CounterPage, skipOffstage: false),
+          findsNWidgets(2),
+        );
+        expect(tester.element(find.byType(_CounterPage)), same(playback));
+        expect(find.byKey(const ValueKey('workspace-tab-strip')), findsNothing);
+        expect(tester.takeException(), isNull);
+      }
+      tester.view.physicalSize = const Size(390, 844);
       router.go('/');
       await tester.pumpAndSettle();
       expect(tester.element(find.byType(_CounterPage)), same(browse));
@@ -1242,7 +1259,7 @@ void main() {
           final bottom = find.byKey(
             const ValueKey('workspace-bottom-navigation'),
           );
-          expect(tester.getSize(bottom).height, 64);
+          expect(tester.getSize(bottom).height, 52);
           if (selected == 'messages' || selected == 'downloads') {
             expect(find.byType(NavigationBar), findsNothing);
             final flags = tester

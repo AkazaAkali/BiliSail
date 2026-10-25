@@ -31,6 +31,7 @@ import '../features/messages/application/messages_controller.dart';
 import '../features/messages/data/api_message_repository.dart';
 import '../features/image_viewer/application/image_viewer_controller.dart';
 import '../features/image_viewer/data/network_original_image_repository.dart';
+import '../core/platform/image_export_service.dart';
 import '../features/auth/data/session_repository.dart';
 import '../features/profile/application/profile_controller.dart';
 import '../features/profile/data/api_profile_repository.dart';
@@ -460,6 +461,9 @@ class AppDependencies {
         authRepositoryProvider.overrideWithValue(session),
         originalImageRepositoryProvider.overrideWithValue(
           NetworkOriginalImageRepository(),
+        ),
+        imageExportServiceProvider.overrideWithValue(
+          const NativeImageExportService(),
         ),
         imageViewerSessionProvider.overrideWith(
           (ref) => ref.watch(

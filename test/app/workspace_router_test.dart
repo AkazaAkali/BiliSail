@@ -14,6 +14,7 @@ import 'package:bilisail/features/playback/application/playback_manager.dart';
 import 'package:bilisail/features/playback/application/playback_session.dart';
 import 'package:bilisail/features/playback/domain/playback_repository.dart';
 import 'package:bilisail/features/video/presentation/video_screen.dart';
+import 'package:bilisail/shared/ui/playback_info_tabs.dart';
 
 import 'dart:async';
 
@@ -173,8 +174,21 @@ void main() {
         await tester.pumpAndSettle();
         final session = sessions.last;
         final scope = scopes.last;
+        final videoState = tester.state(find.byType(VideoScreen));
+        await tester.tap(find.text('评论'));
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<PlaybackInfoTabs>(find.byType(PlaybackInfoTabs)).value,
+          1,
+        );
         router.go('/video/BV0987654321');
         await tester.pumpAndSettle();
+        expect(tester.state(find.byType(VideoScreen)), same(videoState));
+        expect(
+          tester.widget<PlaybackInfoTabs>(find.byType(PlaybackInfoTabs)).value,
+          0,
+        );
+        expect(find.text('正在加载…').hitTestable(), findsNothing);
         expect(sessions.last, same(session));
         expect(scopes.last, same(scope));
         expect(engines, hasLength(1));

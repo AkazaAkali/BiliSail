@@ -408,7 +408,10 @@ class _FlutterDetachedPlaybackWindow extends DetachedPlaybackWindow {
   bool get isOpen => _open;
 
   @override
-  Future<void> prepare() => windowService.restorePlaybackGeometry();
+  Future<void> prepare() async {
+    await windowService.configurePlaybackTitleBar();
+    await windowService.restorePlaybackGeometry();
+  }
 
   @override
   Future<void> saveGeometry() => windowService.savePlaybackGeometry();

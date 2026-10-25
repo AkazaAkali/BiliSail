@@ -5,6 +5,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../core/input/input_stroke.dart';
 import '../core/input/shortcut_dispatcher.dart';
+import '../core/platform/playback_window_chrome.dart';
 import '../core/platform/window_service.dart';
 import '../core/presentation/app_input_host.dart';
 import '../core/presentation/input_scope.dart';
@@ -167,7 +168,21 @@ class _WorkspacePlaybackWindowState extends State<WorkspacePlaybackWindow> {
           ),
         ),
       ),
-      home: Scaffold(body: SafeArea(child: widget.child)),
+      home: Scaffold(
+        body: SafeArea(
+          child: Column(
+            children: [
+              if (window != null && window.hasCustomPlaybackTitleBar)
+                PlaybackWindowChrome(
+                  window: window,
+                  onBack: _nativeBack,
+                  onClose: widget.onClose,
+                ),
+              Expanded(child: widget.child),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

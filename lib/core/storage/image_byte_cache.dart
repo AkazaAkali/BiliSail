@@ -16,6 +16,10 @@ final class ImageQueueFull extends HttpException {
   const ImageQueueFull() : super('Image queue is full');
 }
 
+final class ImageResponseTooLarge extends HttpException {
+  const ImageResponseTooLarge() : super('Image response too large');
+}
+
 final class ImageLoadCancelled implements Exception {
   const ImageLoadCancelled();
   @override
@@ -136,15 +140,17 @@ final class PublicImageTransport {
             await response.listen((_) {}).cancel();
             continue;
           }
-          if (response.statusCode != HttpStatus.ok ||
-              response.contentLength > limits.maxBytes) {
+          if (response.statusCode != HttpStatus.ok) {
             throw const HttpException('Image response rejected');
+          }
+          if (response.contentLength > limits.maxBytes) {
+            throw const ImageResponseTooLarge();
           }
           final bytes = BytesBuilder(copy: false);
           await for (final chunk in response) {
             limits.check();
             if (bytes.length + chunk.length > limits.maxBytes) {
-              throw const HttpException('Image response too large');
+              throw const ImageResponseTooLarge();
             }
             bytes.add(chunk);
           }

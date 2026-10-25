@@ -11,6 +11,8 @@ void main() {
   var value = 0;
   var active = true;
   var changes = 0;
+  var visible = true;
+  var slot = 0;
 
   Future<void> mount(
     WidgetTester tester, {
@@ -19,6 +21,8 @@ void main() {
     value = 0;
     active = true;
     changes = 0;
+    visible = true;
+    slot = 0;
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(390, 700);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -33,21 +37,26 @@ void main() {
                 update = setState;
                 return WorkspaceActivity(
                   active: active,
-                  child: PlaybackInfoTabs(
-                    labels: const [Text('简介'), Text('评论')],
-                    value: value,
-                    onChanged: (tab) => setState(() {
-                      value = tab;
-                      changes++;
-                    }),
-                    viewKey: const ValueKey('playback-test-pager'),
-                    pageBuilder: (_, tab, _) => ListView.builder(
-                      key: ValueKey('playback-test-list-$tab'),
-                      itemCount: 40,
-                      itemBuilder: (_, index) =>
-                          SizedBox(height: 60, child: Text('$tab/$index')),
-                    ),
-                  ),
+                  child: !visible
+                      ? const SizedBox()
+                      : PlaybackInfoTabs(
+                          key: PageStorageKey('playback-slot-$slot'),
+                          labels: const [Text('简介'), Text('评论')],
+                          value: value,
+                          onChanged: (tab) => setState(() {
+                            value = tab;
+                            changes++;
+                          }),
+                          viewKey: const ValueKey('playback-test-pager'),
+                          pageBuilder: (_, tab, _) => ListView.builder(
+                            key: PageStorageKey('playback-test-list-$tab'),
+                            itemCount: 40,
+                            itemBuilder: (_, index) => SizedBox(
+                              height: 60,
+                              child: Text('$tab/$index'),
+                            ),
+                          ),
+                        ),
                 );
               },
             ),
@@ -57,6 +66,75 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('remounted info uses the selected tab over a saved page offset', (
+    tester,
+  ) async {
+    await mount(tester);
+    await tester.tap(find.text('评论'));
+    await tester.pumpAndSettle();
+    expect(find.text('1/0').hitTestable(), findsOneWidget);
+    update(() => visible = false);
+    await tester.pumpAndSettle();
+    update(() {
+      visible = true;
+      value = 0;
+    });
+    await tester.pumpAndSettle();
+    expect(value, 0);
+    expect(find.text('0/0').hitTestable(), findsOneWidget);
+    expect(find.text('正在加载…').hitTestable(), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pager isolation preserves descendant list scroll storage', (
+    tester,
+  ) async {
+    await mount(tester);
+    final list = find.byKey(const PageStorageKey('playback-test-list-0'));
+    ScrollPosition position() => tester
+        .state<ScrollableState>(
+          find.descendant(of: list, matching: find.byType(Scrollable)).first,
+        )
+        .position;
+    position().jumpTo(240);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('评论'));
+    await tester.pumpAndSettle();
+    update(() => visible = false);
+    await tester.pumpAndSettle();
+    update(() {
+      visible = true;
+      value = 0;
+    });
+    await tester.pumpAndSettle();
+    expect(position().pixels, 240);
+    expect(find.text('0/4').hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('retained pages keep separate workspace scroll namespaces', (
+    tester,
+  ) async {
+    await mount(tester);
+    final list = find.byKey(const PageStorageKey('playback-test-list-0'));
+    ScrollPosition position() => tester
+        .state<ScrollableState>(
+          find.descendant(of: list, matching: find.byType(Scrollable)).first,
+        )
+        .position;
+    position().jumpTo(240);
+    await tester.pumpAndSettle();
+    update(() => slot = 1);
+    await tester.pumpAndSettle();
+    expect(position().pixels, 0);
+    position().jumpTo(480);
+    await tester.pumpAndSettle();
+    update(() => slot = 0);
+    await tester.pumpAndSettle();
+    expect(position().pixels, 240);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('short, cancelled and mouse drags keep playback info selection', (
     tester,

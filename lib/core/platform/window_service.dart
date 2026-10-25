@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
@@ -36,6 +37,37 @@ class WindowService {
   VoidCallback? _onBack;
   bool _backEnabled = false;
 
+  final _maximized = ValueNotifier(false);
+  ValueListenable<bool> get maximized => _maximized;
+
+  bool get hasCustomPlaybackTitleBar => Platform.isWindows && viewId != null;
+
+  Future<void> configurePlaybackTitleBar() =>
+      _playbackCaptionCall('setPlaybackTitleBar');
+
+  Future<void> startDraggingPlaybackWindow() =>
+      _playbackCaptionCall('startDragging');
+
+  Future<void> togglePlaybackWindowMaximized() =>
+      _playbackCaptionCall('toggleMaximized');
+
+  Future<void> minimizePlaybackWindow() => _playbackCaptionCall('minimize');
+
+  Future<void> _playbackCaptionCall(String method) async {
+    if (!hasCustomPlaybackTitleBar || _isViewAvailable?.call() == false) return;
+    try {
+      await _desktopChannel
+          .invokeMethod<void>(method, {'viewId': viewId})
+          .timeout(_geometryTimeout);
+    } on PlatformException catch (error) {
+      if (error.code == 'window_unavailable' &&
+          _isViewAvailable?.call() == false) {
+        return;
+      }
+      rethrow;
+    }
+  }
+
   bool get hasNativePlaybackTitleBar =>
       viewId != null && (Platform.isWindows || Platform.isMacOS);
 
@@ -53,6 +85,7 @@ class WindowService {
     required bool fullScreen,
   }) {
     if (!minimized && !fullScreen) _normalWindowMaximized = maximized;
+    _maximized.value = maximized;
   }
 
   /// Restore this app session's normal rectangle and zoom before its first view.

@@ -75,6 +75,7 @@
 | [播放页与评论交互](validation/video-comments.md) | 官方桌面风格双标签、折叠合集、评论与楼中楼验证 |
 | [播放页信息区滑动](validation/playback-info-swipe.md) | 视频／影视简介评论、直播聊天／SC 共用分页、状态保留与手势验证 |
 | [评论图片与作者装扮](validation/comment-images-decorations.md) | 共用动态原图预览、右侧装扮图片与粉丝编号、验证边界 |
+| [图片查看器保存、复制与长图](validation/image-viewer-export-long-images.md) | 三端默认图片目录、图片剪贴板、长图限制原因与有界解码预览 |
 | [播放页简介侧栏](validation/video-sidebar.md) | UP 统计与关注、合集卡片、常驻推荐与分隔线 |
 | [合作视频创作团队](validation/video-collaboration.md) | Web staff 成员、正式桌面客户端式头像／角色／展开与共享关注入口 |
 | [视频标签与搜索](validation/video-tags.md) | 简介中的真实标签、点击搜索、独立重试与导航保留 |

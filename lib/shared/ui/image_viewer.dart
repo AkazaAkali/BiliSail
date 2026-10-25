@@ -64,9 +64,19 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
 
   void _evict(OriginalImage? image) {
     if (image == null) return;
-    MemoryImage(image.bytes).evict();
-    ResizeImage(MemoryImage(image.bytes), width: 256).evict();
+    _imageProvider(image).evict();
+    _imageProvider(image, background: true).evict();
   }
+
+  ImageProvider<Object> _imageProvider(
+    OriginalImage image, {
+    bool background = false,
+  }) => ResizeImage(
+    MemoryImage(image.bytes),
+    width: background ? 256 : image.previewWidth,
+    height: background ? 256 : image.previewHeight,
+    policy: ResizeImagePolicy.fit,
+  );
 
   @override
   void dispose() {
@@ -79,7 +89,7 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
   void _scale(double scale) {
     final image = _shown;
     if (image == null || _viewport.isEmpty) return;
-    final clamped = scale.clamp(.01, 8.0);
+    final clamped = scale.clamp(.0001, 8.0);
     _transform.value = Matrix4.identity()
       ..translateByDouble(
         (_viewport.width - image.width * clamped) / 2,
@@ -95,7 +105,7 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
     if (image == null) return;
     final width = _viewport.width / image.width;
     final height = _viewport.height / image.height;
-    _scale((width < height ? width : height).clamp(.01, 1));
+    _scale((width < height ? width : height).clamp(.0001, 1));
   }
 
   void _zoom(double factor) =>
@@ -149,6 +159,7 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(imageViewerControllerProvider(widget.request));
+    final canExport = ref.watch(imageExportServiceProvider).supported;
     final image = state.image;
     if (!identical(image, _shown)) {
       _evict(_shown);
@@ -194,103 +205,219 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
                           sigmaX: 28,
                           sigmaY: 28,
                         ),
-                        child: Image.memory(
-                          image.bytes,
+                        child: Image(
+                          image: _imageProvider(image, background: true),
                           fit: BoxFit.cover,
-                          cacheWidth: 256,
                           excludeFromSemantics: true,
                         ),
                       ),
                     ),
                   ),
                 Positioned.fill(
-                  bottom: 112,
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final size = constraints.biggest;
-                        if (_viewport != size) {
-                          _viewport = size;
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (mounted) _fit();
-                          });
-                        }
-                        if (state.loading) {
-                          return const Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CircularProgressIndicator(),
-                                SizedBox(height: 16),
-                                Text('正在加载原图…'),
-                              ],
-                            ),
-                          );
-                        }
-                        if (image == null) {
-                          return Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(state.message ?? '图片加载失败'),
-                                const SizedBox(height: 12),
-                                TextButton(
-                                  onPressed: () => ref
-                                      .read(
-                                        imageViewerControllerProvider(
-                                          widget.request,
-                                        ).notifier,
-                                      )
-                                      .load(),
-                                  child: const Text('重试'),
-                                ),
-                              ],
-                            ),
-                          );
-                        }
-                        return Listener(
-                          onPointerSignal: (event) {
-                            if (event is PointerScrollEvent &&
-                                InputModifierScope.anyPressedOf(context, const [
-                                  LogicalKeyboardKey.controlLeft,
-                                  LogicalKeyboardKey.controlRight,
-                                ])) {
-                              GestureBinding.instance.pointerSignalResolver
-                                  .register(
-                                    event,
-                                    (_) => _zoom(
-                                      event.scrollDelta.dy < 0 ? 1.25 : .8,
+                  child: SafeArea(
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 48),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final size = constraints.biggest;
+                                if (_viewport != size) {
+                                  _viewport = size;
+                                  WidgetsBinding.instance.addPostFrameCallback((
+                                    _,
+                                  ) {
+                                    if (mounted) _fit();
+                                  });
+                                }
+                                if (state.loading) {
+                                  return const Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        CircularProgressIndicator(),
+                                        SizedBox(height: 16),
+                                        Text('正在加载原图…'),
+                                      ],
                                     ),
                                   );
-                            }
-                          },
-                          child: InteractiveViewer(
-                            transformationController: _transform,
-                            constrained: false,
-                            minScale: .01,
-                            maxScale: 8,
-                            boundaryMargin: const EdgeInsets.all(
-                              double.infinity,
-                            ),
-                            // The hit area follows the transformed image, leaving
-                            // the surrounding viewport available for dismissal.
-                            child: GestureDetector(
-                              excludeFromSemantics: true,
-                              onTap: () {},
-                              child: Image.memory(
-                                image.bytes,
-                                width: image.width.toDouble(),
-                                height: image.height.toDouble(),
-                                fit: BoxFit.fill,
-                                semanticLabel: '原图 ${state.index + 1}',
-                                errorBuilder: (_, _, _) =>
-                                    const Center(child: Text('原图解码失败')),
-                              ),
+                                }
+                                if (image == null) {
+                                  return Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(state.message ?? '图片加载失败'),
+                                        const SizedBox(height: 12),
+                                        TextButton(
+                                          onPressed: () => ref
+                                              .read(
+                                                imageViewerControllerProvider(
+                                                  widget.request,
+                                                ).notifier,
+                                              )
+                                              .load(),
+                                          child: const Text('重试'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                                return Listener(
+                                  onPointerSignal: (event) {
+                                    if (event is PointerScrollEvent &&
+                                        InputModifierScope.anyPressedOf(
+                                          context,
+                                          const [
+                                            LogicalKeyboardKey.controlLeft,
+                                            LogicalKeyboardKey.controlRight,
+                                          ],
+                                        )) {
+                                      GestureBinding
+                                          .instance
+                                          .pointerSignalResolver
+                                          .register(
+                                            event,
+                                            (_) => _zoom(
+                                              event.scrollDelta.dy < 0
+                                                  ? 1.25
+                                                  : .8,
+                                            ),
+                                          );
+                                    }
+                                  },
+                                  child: InteractiveViewer(
+                                    transformationController: _transform,
+                                    constrained: false,
+                                    minScale: .0001,
+                                    maxScale: 8,
+                                    boundaryMargin: const EdgeInsets.all(
+                                      double.infinity,
+                                    ),
+                                    // The hit area follows the transformed image, leaving
+                                    // the surrounding viewport available for dismissal.
+                                    child: GestureDetector(
+                                      excludeFromSemantics: true,
+                                      onTap: () {},
+                                      child: Image(
+                                        image: _imageProvider(image),
+                                        width: image.width.toDouble(),
+                                        height: image.height.toDouble(),
+                                        fit: BoxFit.fill,
+                                        semanticLabel: '原图 ${state.index + 1}',
+                                        errorBuilder: (_, _, _) =>
+                                            const Center(child: Text('原图解码失败')),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                           ),
-                        );
-                      },
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                spacing: 10,
+                                runSpacing: 8,
+                                children: [
+                                  if (canExport)
+                                    _group([
+                                      _button(
+                                        '保存图片',
+                                        Icons.save_alt,
+                                        image == null || state.exporting
+                                            ? null
+                                            : () => ref
+                                                  .read(
+                                                    imageViewerControllerProvider(
+                                                      widget.request,
+                                                    ).notifier,
+                                                  )
+                                                  .export(save: true),
+                                      ),
+                                      _button(
+                                        '复制图片',
+                                        Icons.copy_outlined,
+                                        image == null || state.exporting
+                                            ? null
+                                            : () => ref
+                                                  .read(
+                                                    imageViewerControllerProvider(
+                                                      widget.request,
+                                                    ).notifier,
+                                                  )
+                                                  .export(save: false),
+                                      ),
+                                    ]),
+                                  _group([
+                                    _button(
+                                      '适应窗口',
+                                      Icons.fit_screen,
+                                      image == null ? null : _fit,
+                                    ),
+                                    _button(
+                                      '原始大小',
+                                      Icons.photo_size_select_actual_outlined,
+                                      image == null ? null : () => _scale(1),
+                                    ),
+                                    _button(
+                                      '缩小',
+                                      Icons.remove_circle_outline,
+                                      image == null ? null : () => _zoom(.8),
+                                    ),
+                                    ValueListenableBuilder<Matrix4>(
+                                      valueListenable: _transform,
+                                      builder: (_, matrix, _) => SizedBox(
+                                        width: 54,
+                                        child: Text(
+                                          '${(matrix.getMaxScaleOnAxis() * 100).round()}%',
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    _button(
+                                      '放大',
+                                      Icons.add_circle_outline,
+                                      image == null ? null : () => _zoom(1.25),
+                                    ),
+                                  ]),
+                                  _group([
+                                    _button(
+                                      '上一张',
+                                      Icons.skip_previous_outlined,
+                                      state.index <= 0 ? null : () => _move(-1),
+                                    ),
+                                    Text(
+                                      '${state.index + 1} / ${widget.request.images.length}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    _button(
+                                      '下一张',
+                                      Icons.skip_next_outlined,
+                                      state.index + 1 >=
+                                              widget.request.images.length
+                                          ? null
+                                          : () => _move(1),
+                                    ),
+                                  ]),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -303,74 +430,17 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
                     icon: const Icon(Icons.close),
                   ),
                 ),
-                Positioned(
-                  left: 12,
-                  right: 12,
-                  bottom: 16,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Wrap(
-                        alignment: WrapAlignment.center,
-                        spacing: 10,
-                        runSpacing: 8,
-                        children: [
-                          _group([
-                            _button(
-                              '适应窗口',
-                              Icons.fit_screen,
-                              image == null ? null : _fit,
-                            ),
-                            _button(
-                              '原始大小',
-                              Icons.photo_size_select_actual_outlined,
-                              image == null ? null : () => _scale(1),
-                            ),
-                            _button(
-                              '缩小',
-                              Icons.remove_circle_outline,
-                              image == null ? null : () => _zoom(.8),
-                            ),
-                            ValueListenableBuilder<Matrix4>(
-                              valueListenable: _transform,
-                              builder: (_, matrix, _) => SizedBox(
-                                width: 54,
-                                child: Text(
-                                  '${(matrix.getMaxScaleOnAxis() * 100).round()}%',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(color: Colors.white),
-                                ),
-                              ),
-                            ),
-                            _button(
-                              '放大',
-                              Icons.add_circle_outline,
-                              image == null ? null : () => _zoom(1.25),
-                            ),
-                          ]),
-                          _group([
-                            _button(
-                              '上一张',
-                              Icons.skip_previous_outlined,
-                              state.index <= 0 ? null : () => _move(-1),
-                            ),
-                            Text(
-                              '${state.index + 1} / ${widget.request.images.length}',
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                            _button(
-                              '下一张',
-                              Icons.skip_next_outlined,
-                              state.index + 1 >= widget.request.images.length
-                                  ? null
-                                  : () => _move(1),
-                            ),
-                          ]),
-                        ],
-                      ),
-                    ],
+                if (state.exportMessage != null || image?.scaledPreview == true)
+                  Positioned(
+                    top: 12,
+                    left: 16,
+                    right: 64,
+                    child: Text(
+                      state.exportMessage ?? '大图采用缩小预览，保存和复制使用原图',
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
               ],
             ),
           ),

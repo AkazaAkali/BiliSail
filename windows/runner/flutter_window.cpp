@@ -27,6 +27,9 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   system_fonts_channel_ =
       RegisterSystemFonts(flutter_controller_->engine()->messenger());
+  image_export_channel_ = std::make_unique<ImageExportChannel>(
+      flutter_controller_->engine()->messenger(),
+      flutter_controller_->view()->GetNativeWindow());
   const auto text_input_registrar =
       flutter_controller_->engine()->GetRegistrarForPlugin("BiliSailTextInput");
   const auto resolve_view = [text_input_registrar](int64_t view_id) -> HWND {
@@ -55,6 +58,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  image_export_channel_.reset();
   desktop_window_channel_.reset();
   text_input_channel_.reset();
   system_fonts_channel_.reset();

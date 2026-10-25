@@ -6,7 +6,7 @@ function Confirm-MacOSReleaseEntitlements([string]$EntitlementsXml) {
   $dict = $document.SelectSingleNode('/plist/dict')
   if (!$dict) { throw 'Signed macOS entitlements must contain a plist dictionary.' }
   $nodes = @($dict.ChildNodes | Where-Object { $_.NodeType -eq 'Element' })
-  $required = @('com.apple.security.app-sandbox', 'com.apple.security.network.client')
+  $required = @('com.apple.security.app-sandbox', 'com.apple.security.network.client', 'com.apple.security.assets.pictures.read-write')
   $seen = @()
   for ($index = 0; $index -lt $nodes.Count; $index += 2) {
     $key = $nodes[$index]
@@ -17,7 +17,7 @@ function Confirm-MacOSReleaseEntitlements([string]$EntitlementsXml) {
     if ($nodes[$index + 1].Name -ne 'true') { throw "Required entitlement is not enabled: $($key.InnerText)" }
     $seen += $key.InnerText
   }
-  if ($seen.Count -ne $required.Count) { throw 'Signed macOS entitlements are missing Sandbox or network access.' }
+  if ($seen.Count -ne $required.Count) { throw 'Signed macOS entitlements are missing Sandbox, network or Pictures access.' }
 }
 
 function Confirm-MacOSReleaseSignature([string]$App, [string]$WorkingDirectory) {
@@ -104,7 +104,7 @@ function Test-MacOSReleaseApp([string]$App, [string]$WorkingDirectory) {
   Confirm-MacOSReleaseSignature $App $WorkingDirectory
   return [ordered]@{
     signature = 'passed'
-    entitlements = 'sandbox-network-client-only'
+    entitlements = 'sandbox-network-client-pictures-only'
     startup = 'first-frame-and-3-seconds'
     credentials = 'write-read-restart-read-delete-restart-absent'
   }

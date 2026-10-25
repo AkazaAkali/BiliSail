@@ -106,6 +106,7 @@ final class _RetainedTabViewState<T extends Object>
     with TickerProviderStateMixin {
   TabController? _tabs;
   TabPagingProgress? _progress;
+  final _pagerStorage = PageStorageBucket();
   bool _publishPending = false;
   late final _selection = ValueNotifier<T>(widget.value);
   bool _dragging = false;
@@ -239,41 +240,63 @@ final class _RetainedTabViewState<T extends Object>
   }
 
   @override
-  Widget build(BuildContext context) => Listener(
-    onPointerCancel: _cancelPointer,
-    child: NotificationListener<ScrollNotification>(
-      onNotification: _onScroll,
-      child: ScrollConfiguration(
-        behavior: ScrollConfiguration.of(context).copyWith(
-          dragDevices: const {
-            PointerDeviceKind.touch,
-            PointerDeviceKind.stylus,
-            PointerDeviceKind.invertedStylus,
-          },
-          scrollbars: false,
-        ),
-        child: TabBarView(
-          key: widget.viewKey,
-          controller: _tabs,
-          physics: _active && widget.swipeEnabled
-              ? TabPagingMotion.physics
-              : const NeverScrollableScrollPhysics(),
-          dragStartBehavior: DragStartBehavior.down,
-          children: [
-            for (final tab in widget.tabs)
-              _RetainedTabPage<T>(
-                key: ValueKey(tab),
-                tab: tab,
-                selection: _selection,
-                pageBuilder: widget.pageBuilder,
-                preload: widget.preloadPages,
-                scrollBehavior: ScrollConfiguration.of(context),
-              ),
-          ],
+  Widget build(BuildContext context) {
+    final pageStorage = PageStorage.maybeOf(context) ?? _pagerStorage;
+    // A nested PageStorage stops key collection. Carry the outer page's keys
+    // into the list scope so different workspace pages cannot share offsets.
+    Object storageScope = (widget.key, widget.viewKey);
+    context.visitAncestorElements((element) {
+      if (element.widget.key case final PageStorageKey<Object?> key) {
+        storageScope = (storageScope, key);
+      }
+      return element.widget is! PageStorage;
+    });
+    return Listener(
+      onPointerCancel: _cancelPointer,
+      child: NotificationListener<ScrollNotification>(
+        onNotification: _onScroll,
+        child: ScrollConfiguration(
+          behavior: ScrollConfiguration.of(context).copyWith(
+            dragDevices: const {
+              PointerDeviceKind.touch,
+              PointerDeviceKind.stylus,
+              PointerDeviceKind.invertedStylus,
+            },
+            scrollbars: false,
+          ),
+          // Selection owns the page position. A remounted pager must not restore
+          // another media item's offset from the workspace PageStorage bucket.
+          child: PageStorage(
+            bucket: _pagerStorage,
+            child: TabBarView(
+              key: widget.viewKey,
+              controller: _tabs,
+              physics: _active && widget.swipeEnabled
+                  ? TabPagingMotion.physics
+                  : const NeverScrollableScrollPhysics(),
+              dragStartBehavior: DragStartBehavior.down,
+              children: [
+                for (final tab in widget.tabs)
+                  // Descendant lists still use the workspace's scroll storage.
+                  PageStorage(
+                    key: PageStorageKey((storageScope, tab)),
+                    bucket: pageStorage,
+                    child: _RetainedTabPage<T>(
+                      key: ValueKey(tab),
+                      tab: tab,
+                      selection: _selection,
+                      pageBuilder: widget.pageBuilder,
+                      preload: widget.preloadPages,
+                      scrollBehavior: ScrollConfiguration.of(context),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   @override
   void dispose() {

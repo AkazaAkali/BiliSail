@@ -11,6 +11,60 @@ import '../../support/native_window_events.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  testWidgets(
+    'playback caption calls target one view and stop after retirement',
+    (tester) async {
+      const channel = MethodChannel('bilisail/desktop_window');
+      final calls = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) async {
+        calls.add(call);
+        return null;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      var available = true;
+      final window = WindowService.forView(
+        viewId: 71,
+        setFullScreen: (_) async {},
+        activate: () async {},
+        isAvailable: () => available,
+      );
+      await window.configurePlaybackTitleBar();
+      await window.startDraggingPlaybackWindow();
+      await window.togglePlaybackWindowMaximized();
+      await window.minimizePlaybackWindow();
+      expect(
+        calls.map((call) => call.method),
+        Platform.isWindows
+            ? [
+                'setPlaybackTitleBar',
+                'startDragging',
+                'toggleMaximized',
+                'minimize',
+              ]
+            : isEmpty,
+      );
+      for (final call in calls) {
+        expect(call.arguments, {'viewId': 71});
+      }
+      calls.clear();
+      available = false;
+      await window.configurePlaybackTitleBar();
+      await window.startDraggingPlaybackWindow();
+      await window.togglePlaybackWindowMaximized();
+      await window.minimizePlaybackWindow();
+      expect(calls, isEmpty);
+      await WindowService().configurePlaybackTitleBar();
+      expect(calls, isEmpty);
+    },
+  );
+
   testWidgets('geometry remembers zoom through minimize and fullscreen', (
     tester,
   ) async {

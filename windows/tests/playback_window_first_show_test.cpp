@@ -1,4 +1,5 @@
 #include "../runner/playback_window_geometry_win32.h"
+#include "../runner/playback_window_frame.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -65,6 +66,55 @@ void RequireBounds(HWND window, const playback_window::Bounds& expected) {
               std::abs(actual.width - expected.width) <= 1 &&
               std::abs(actual.height - expected.height) <= 1,
           "User Restore lost the remembered normal rectangle.");
+}
+
+void RunFrameTests() {
+  const TestWindow test;
+  const HWND window = test.get();
+  RECT original{}, frame{};
+  Require(GetClientRect(window, &original) != FALSE, "Cannot read original client.");
+  Require(GetWindowRect(window, &frame) != FALSE, "Cannot read original frame.");
+  const UINT dpi = GetDpiForWindow(window);
+  {
+    const playback_window::PlaybackWindowFrame caption(window);
+    Require(caption.ready(), "Cannot install playback frame.");
+    RECT client{};
+    Require(GetClientRect(window, &client) != FALSE, "Cannot read custom client.");
+    Require(client.bottom - original.bottom ==
+                GetSystemMetricsForDpi(SM_CYCAPTION, dpi),
+            "Custom frame did not remove exactly the native caption.");
+    RequireBounds(window, playback_window::RectBounds(frame));
+    POINT origin{};
+    ClientToScreen(window, &origin);
+    Require(SendMessage(window, WM_NCHITTEST, 0,
+                        MAKELPARAM(frame.right - 30, origin.y + 22)) == HTCLIENT,
+            "Native caption buttons overlap Flutter controls.");
+    ShowWindow(window, SW_MAXIMIZE);
+    origin = {};
+    ClientToScreen(window, &origin);
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    Require(GetMonitorInfo(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST),
+                            &monitor) != FALSE, "Cannot read maximized work area.");
+    Require(origin.y == monitor.rcWork.top,
+            "Maximized client clipped the Flutter caption.");
+    ShowWindow(window, SW_RESTORE);
+    const LONG_PTR style = GetWindowLongPtr(window, GWL_STYLE);
+    SetWindowLongPtr(window, GWL_STYLE, style & ~WS_OVERLAPPEDWINDOW);
+    SetWindowPos(window, nullptr, 0, 0, 900, 700,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    Require(GetClientRect(window, &client) != FALSE &&
+                client.right == 900 && client.bottom == 700,
+            "Custom caption left a border in fullscreen.");
+    SetWindowLongPtr(window, GWL_STYLE, style);
+    SetWindowPos(window, nullptr, frame.left, frame.top,
+                 frame.right - frame.left, frame.bottom - frame.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+  }
+  RECT restored{};
+  Require(GetClientRect(window, &restored) != FALSE &&
+              restored.right == original.right && restored.bottom == original.bottom,
+          "Detaching the custom frame did not restore the native caption.");
 }
 
 void RunTests() {
@@ -181,8 +231,9 @@ int main() {
     window_class.lpszClassName = L"BiliSailGeometryTestWindow";
     Require(RegisterClassW(&window_class) != 0, "Cannot register test window class.");
     RunTests();
+    RunFrameTests();
     UnregisterClassW(window_class.lpszClassName, window_class.hInstance);
-    std::cout << "PASS native first show: SDK restore reproduction, maximized reopen, user Restore, normal bounds, minimize, pending close, stale owner, fullscreen\n";
+    std::cout << "PASS native first show and caption: SDK restore reproduction, maximized reopen, user Restore, normal bounds, minimize, pending close, stale owner, fullscreen, custom client frame and detach\n";
     return 0;
   } catch (const std::exception& error) {
     std::cerr << "FAIL native first show: " << error.what() << '\n';

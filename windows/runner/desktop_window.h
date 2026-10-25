@@ -12,6 +12,7 @@
 #include <unordered_map>
 
 #include "playback_window_geometry_win32.h"
+#include "playback_window_frame.h"
 
 class CaptionBackButton;
 
@@ -28,6 +29,8 @@ class DesktopWindowChannel {
   flutter::MethodChannel<flutter::EncodableValue> channel_;
   ViewResolver resolve_view_;
   playback_window::WindowGeometrySession geometry_;
+  int64_t frame_view_ = -1;
+  std::unique_ptr<playback_window::PlaybackWindowFrame> playback_frame_;
   std::unordered_map<int64_t, std::unique_ptr<CaptionBackButton>> captions_;
 };
 

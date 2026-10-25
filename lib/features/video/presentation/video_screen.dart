@@ -154,6 +154,8 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
     _syncQueue();
     if (oldWidget.id != widget.id) {
       _selectedCid = widget.initialCid;
+      _tab = 0;
+      _descriptionExpanded = false;
     }
     if (oldWidget.initialCid != widget.initialCid) {
       _selectedCid = widget.initialCid;
@@ -376,6 +378,7 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                         },
                         enabled: _tab == 1,
                         builder: (context, detailOpen) => PlaybackInfoTabs(
+                          key: ValueKey(video.summary.id),
                           showNavigation: !detailOpen,
                           value: _tab,
                           onChanged: (tab) => setState(() => _tab = tab),

@@ -9,6 +9,7 @@ project(runner LANGUAGES CXX)
 add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "system_fonts.cpp"
+  "image_export.cpp"
   "text_input.cpp"
   "desktop_window.cpp"
   "window_ime_context.cpp"
@@ -40,6 +41,7 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "gdi32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "dwrite.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "windowscodecs.lib" "shlwapi.lib" "shell32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "imm32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "comctl32.lib" "ole32.lib" "oleaut32.lib" "uuid.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")

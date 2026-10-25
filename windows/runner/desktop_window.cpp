@@ -233,7 +233,13 @@ DesktopWindowChannel::DesktopWindowChannel(flutter::BinaryMessenger* messenger,
           return;
         }
         if (call.method_name() == "retireGeometry") {
-          geometry_.Retire(id, owner);
+          if (geometry_.Owns(id, owner)) {
+            geometry_.Retire(id, owner);
+            if (frame_view_ == id) {
+              playback_frame_.reset();
+              frame_view_ = -1;
+            }
+          }
           result->Success();
           return;
         }
@@ -258,7 +264,32 @@ DesktopWindowChannel::DesktopWindowChannel(flutter::BinaryMessenger* messenger,
           result->Error("window_unavailable", "Flutter view is unavailable.");
           return;
         }
-        if (call.method_name() == "restoreGeometry") {
+        if (call.method_name() == "setPlaybackTitleBar") {
+          if (frame_view_ != id) {
+            auto frame = std::make_unique<playback_window::PlaybackWindowFrame>(window);
+            if (!frame->ready()) {
+              result->Error("caption_unavailable", "Cannot configure the playback frame.");
+              return;
+            }
+            playback_frame_ = std::move(frame);
+            frame_view_ = id;
+          }
+          result->Success();
+        } else if (call.method_name() == "startDragging") {
+          POINT cursor{};
+          GetCursorPos(&cursor);
+          ReleaseCapture();
+          PostMessage(window, WM_NCLBUTTONDOWN, HTCAPTION,
+                      MAKELPARAM(cursor.x, cursor.y));
+          result->Success();
+        } else if (call.method_name() == "toggleMaximized") {
+          PostMessage(window, WM_SYSCOMMAND,
+                      IsZoomed(window) ? SC_RESTORE : SC_MAXIMIZE, 0);
+          result->Success();
+        } else if (call.method_name() == "minimize") {
+          PostMessage(window, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+          result->Success();
+        } else if (call.method_name() == "restoreGeometry") {
           if (!geometry_.Restore(window, id, owner)) {
             result->Error("geometry_restore_failed", "Cannot restore playback bounds.");
             return;

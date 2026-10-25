@@ -3,6 +3,7 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var systemFontsChannel: FlutterMethodChannel?
+  private var imageExportChannel: FlutterMethodChannel?
   private var desktopWindows: DesktopWindowController?
 
   override func awakeFromNib() {
@@ -25,12 +26,65 @@ class MainFlutterWindow: NSWindow {
       result(NSFontManager.shared.availableFontFamilies)
     }
     systemFontsChannel = channel
+    imageExportChannel = registerImageExport(
+      messenger: flutterViewController.engine.binaryMessenger
+    )
     desktopWindows = DesktopWindowController(
       messenger: flutterViewController.engine.binaryMessenger
     )
 
     super.awakeFromNib()
   }
+}
+
+private func registerImageExport(messenger: FlutterBinaryMessenger) -> FlutterMethodChannel {
+  let channel = FlutterMethodChannel(name: "bilisail/image_export", binaryMessenger: messenger)
+  channel.setMethodCallHandler { call, result in
+    guard call.method == "save" || call.method == "copy" else {
+      result(FlutterMethodNotImplemented)
+      return
+    }
+    guard let args = call.arguments as? [String: Any],
+          let typed = args["bytes"] as? FlutterStandardTypedData,
+          let ext = args["extension"] as? String,
+          ["png", "jpg", "gif", "webp", "bmp", "avif"].contains(ext),
+          !typed.data.isEmpty, typed.data.count <= 32 * 1024 * 1024 else {
+      result(FlutterError(code: "invalid_image", message: "Invalid image data", details: nil))
+      return
+    }
+    let data = typed.data
+    if call.method == "copy" {
+      guard let image = NSImage(data: data) else {
+        result(FlutterError(code: "copy_failed", message: "Could not read image", details: nil))
+        return
+      }
+      let pasteboard = NSPasteboard.general
+      pasteboard.clearContents()
+      if pasteboard.writeObjects([image]) { result(nil) }
+      else { result(FlutterError(code: "copy_failed", message: "Could not copy image", details: nil)) }
+      return
+    }
+    DispatchQueue.global(qos: .userInitiated).async {
+      do {
+        let manager = FileManager.default
+        let pictures = try manager.url(for: .picturesDirectory, in: .userDomainMask,
+                                       appropriateFor: nil, create: true)
+        let directory = pictures.appendingPathComponent("BiliSail", isDirectory: true)
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("BiliSail-\(UUID().uuidString).\(ext)")
+        let temporary = directory.appendingPathComponent(".\(UUID().uuidString).tmp")
+        defer { try? manager.removeItem(at: temporary) }
+        try data.write(to: temporary, options: .withoutOverwriting)
+        try manager.moveItem(at: temporary, to: file)
+        DispatchQueue.main.async { result(file.path) }
+      } catch {
+        DispatchQueue.main.async {
+          result(FlutterError(code: "save_failed", message: "Could not save image", details: nil))
+        }
+      }
+    }
+  }
+  return channel
 }
 
 // The SDK's public registrar currently exposes only its implicit view. Resolve

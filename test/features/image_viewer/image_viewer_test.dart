@@ -3,6 +3,7 @@ import '../../support/input_test_app.dart';
 import 'dart:ui' as ui;
 
 import 'package:bilisail/domain/request_cancellation.dart';
+import 'package:bilisail/domain/image_export_service.dart';
 import 'package:bilisail/features/image_viewer/application/image_viewer_controller.dart';
 import 'package:bilisail/features/image_viewer/data/network_original_image_repository.dart';
 import 'package:bilisail/features/image_viewer/domain/original_image.dart';
@@ -150,6 +151,7 @@ void main() {
         final repository = _Repository(
           OriginalImage(bytes: bytes, width: 24, height: 16),
         );
+        final exporter = _ExportService();
         final sources = [
           Uri.parse('https://i0.hdslb.com/a.png'),
           Uri.parse('https://i0.hdslb.com/b.png'),
@@ -158,6 +160,7 @@ void main() {
           ProviderScope(
             overrides: [
               originalImageRepositoryProvider.overrideWithValue(repository),
+              imageExportServiceProvider.overrideWithValue(exporter),
             ],
             child: InputTestApp(
               home: Builder(
@@ -179,6 +182,15 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('1 / 2'), findsOneWidget);
         expect(find.text('100%'), findsOneWidget);
+        await tester.tap(find.byTooltip('保存图片'));
+        await tester.pumpAndSettle();
+        expect(find.text('已保存到 Pictures/BiliSail/test.png'), findsOneWidget);
+        await tester.tap(find.byTooltip('复制图片'));
+        await tester.pumpAndSettle();
+        expect(find.text('图片已复制到剪贴板'), findsOneWidget);
+        expect(exporter.saved, [bytes]);
+        expect(exporter.copied, [bytes]);
+        expect(repository.sources, hasLength(1));
         final viewer = find.byType(InteractiveViewer);
         final viewport = tester.getRect(viewer);
         await tester.tapAt(viewport.center);
@@ -218,6 +230,23 @@ void main() {
         expect(find.byType(Dialog), findsNothing);
       },
     );
+  }
+}
+
+class _ExportService implements ImageExportService {
+  final saved = <Uint8List>[];
+  final copied = <Uint8List>[];
+  @override
+  bool get supported => true;
+  @override
+  Future<String> save(Uint8List data) async {
+    saved.add(data);
+    return 'Pictures/BiliSail/test.png';
+  }
+
+  @override
+  Future<void> copy(Uint8List data) async {
+    copied.add(data);
   }
 }
 

@@ -8,6 +8,7 @@
 
 #include "win32_window.h"
 #include "system_fonts.h"
+#include "image_export.h"
 #include "text_input.h"
 #include "desktop_window.h"
 
@@ -34,6 +35,7 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       system_fonts_channel_;
   std::unique_ptr<TextInputChannel> text_input_channel_;
+  std::unique_ptr<ImageExportChannel> image_export_channel_;
   std::unique_ptr<DesktopWindowChannel> desktop_window_channel_;
 };
 

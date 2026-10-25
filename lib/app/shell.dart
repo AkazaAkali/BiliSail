@@ -134,6 +134,13 @@ final class BiliAppShell extends StatefulWidget {
 
 final class _BiliAppShellState extends State<BiliAppShell>
     with WidgetsBindingObserver {
+  static const _bottomNavigationHeight = 52.0;
+  static const _bottomNavigationIconSize = 16.0;
+  static const _bottomNavigationLabelStyle = TextStyle(
+    fontSize: 11,
+    height: 1.2,
+  );
+
   final _workspace = WorkspaceTabs();
   final _searchController = TextEditingController();
   final _tabKeys = <String, GlobalKey>{};
@@ -1009,7 +1016,16 @@ final class _BiliAppShellState extends State<BiliAppShell>
     }
     return NavigationBar(
       key: const ValueKey('workspace-bottom-navigation'),
-      height: 64,
+      height: _bottomNavigationHeight,
+      labelPadding: EdgeInsets.zero,
+      labelTextStyle: WidgetStateProperty.resolveWith((states) {
+        final colors = Theme.of(context).colorScheme;
+        return _bottomNavigationLabelStyle.copyWith(
+          color: states.contains(WidgetState.selected)
+              ? colors.onSurface
+              : colors.onSurfaceVariant,
+        );
+      }),
       selectedIndex: sections.indexOf(selected),
       onDestinationSelected: (index) =>
           _selectSection(sections[index], compact: true),
@@ -1017,8 +1033,11 @@ final class _BiliAppShellState extends State<BiliAppShell>
         for (final item in sections)
           NavigationDestination(
             key: ValueKey('workspace-bottom-${item.name}'),
-            icon: Icon(_sectionIcon(item), size: 18),
-            selectedIcon: Icon(_sectionIcon(item, selected: true), size: 18),
+            icon: Icon(_sectionIcon(item), size: _bottomNavigationIconSize),
+            selectedIcon: Icon(
+              _sectionIcon(item, selected: true),
+              size: _bottomNavigationIconSize,
+            ),
             label: item.label,
           ),
       ],
@@ -1032,15 +1051,13 @@ final class _BiliAppShellState extends State<BiliAppShell>
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final barTheme = NavigationBarTheme.of(context);
-    final labelStyle =
-        barTheme.labelTextStyle?.resolve({}) ?? theme.textTheme.labelMedium;
     return Material(
       key: const ValueKey('workspace-bottom-navigation'),
       color: barTheme.backgroundColor ?? colors.surface,
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 64,
+          height: _bottomNavigationHeight,
           child: Row(
             children: [
               for (final section in sections)
@@ -1061,13 +1078,13 @@ final class _BiliAppShellState extends State<BiliAppShell>
                               children: [
                                 Icon(
                                   _sectionIcon(section),
-                                  size: 18,
+                                  size: _bottomNavigationIconSize,
                                   color: colors.onSurfaceVariant,
                                 ),
-                                const SizedBox(height: 4),
+                                const SizedBox(height: 2),
                                 Text(
                                   section.label,
-                                  style: labelStyle?.copyWith(
+                                  style: _bottomNavigationLabelStyle.copyWith(
                                     color: colors.onSurfaceVariant,
                                   ),
                                 ),

@@ -50,6 +50,90 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../support/video_card_fake_engine.dart';
 
 void main() {
+  for (final cached in [false, true]) {
+    testWidgets('reused video page opens intro for new media cached=$cached', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1200, 800);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      const first = VideoId('BV1abc123456');
+      const second = VideoId('BV1xyz123456');
+      final next = Completer<VideoDetail>();
+      final detail = await const _VideoRepository().loadDetail(
+        second,
+        cancellation: RequestCancellation(),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          authControllerProvider.overrideWith(_GuestAuthController.new),
+          videoRepositoryProvider.overrideWithValue(const _VideoRepository()),
+          videoExtrasRepositoryProvider.overrideWithValue(_ExtrasRepository()),
+          videoDetailProvider(second).overrideWith((ref) => next.future),
+        ],
+      );
+      addTearDown(container.dispose);
+      final subscription = container.listen(
+        videoDetailProvider(second),
+        (_, _) {},
+      );
+      addTearDown(subscription.close);
+      if (cached) {
+        next.complete(detail);
+        await container.read(videoDetailProvider(second).future);
+      }
+      var id = first;
+      String? cid;
+      late StateSetter update;
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: InputTestApp(
+            home: Scaffold(
+              body: StatefulBuilder(
+                builder: (context, setState) {
+                  update = setState;
+                  return VideoScreen(
+                    key: const PageStorageKey('reused-video-slot'),
+                    id: id,
+                    initialCid: cid,
+                    playerBuilder: (_, _, _) => const SizedBox(),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final screen = tester.state(find.byType(VideoScreen));
+      await tester.tap(find.text('评论'));
+      await tester.pumpAndSettle();
+      update(() => cid = '2');
+      await tester.pumpAndSettle();
+      expect(find.text('暂无评论信息').hitTestable(), findsOneWidget);
+      update(() {
+        id = second;
+        cid = null;
+      });
+      await tester.pump();
+      if (!cached) {
+        expect(find.text('正在加载视频详情…'), findsOneWidget);
+        next.complete(detail);
+      }
+      await tester.pumpAndSettle();
+      expect(tester.state(find.byType(VideoScreen)), same(screen));
+      final strip = tester.widget<PagingTabStrip<int>>(
+        find.byType(PagingTabStrip<int>),
+      );
+      expect(strip.value, 0);
+      expect(strip.progress?.value, 0);
+      expect(find.text('测试视频').hitTestable(), findsOneWidget);
+      expect(find.text('暂无评论信息').hitTestable(), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
   for (final width in [390.0, 1200.0]) {
     testWidgets(
       'part drag reaches the real intro top and retains player at $width',
@@ -1955,7 +2039,7 @@ final class _VideoRepository implements VideoRepository {
   }) async => VideoDetail(
     summary: VideoSummary(
       access: access,
-      id: VideoId('BV1abc123456'),
+      id: id,
       title: '测试视频',
       coverUrl: '',
       author: 'UP',
