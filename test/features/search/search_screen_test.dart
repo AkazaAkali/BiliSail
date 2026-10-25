@@ -332,26 +332,34 @@ void main() {
     }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
   }
 
-  testWidgets('search uses full width and shared five-column video cards', (
-    tester,
-  ) async {
-    await _mount(tester, _Repository(), size: const Size(1895, 927));
-    await tester.tap(find.byKey(const ValueKey('search-category-video')));
-    await tester.pumpAndSettle();
-    final cards = find.byType(VideoCard);
-    expect(cards, findsNWidgets(10));
-    final first = tester.getRect(cards.first);
-    final fifth = tester.getRect(cards.at(4));
-    final sixth = tester.getRect(cards.at(5));
-    expect(first.width, greaterThan(350));
-    expect(first.left, 28);
-    expect(fifth.right, 1895 - 28);
-    expect(fifth.top, first.top);
-    expect(sixth.top, greaterThan(first.bottom));
-    expect(find.byType(BiliUpBadge), findsNWidgets(10));
-    await _snapshot(tester, '1895-video-grid');
-    expect(tester.takeException(), isNull);
-  });
+  for (final width in [320.0, 390.0, 1895.0]) {
+    testWidgets('search video cards fill the available width at $width', (
+      tester,
+    ) async {
+      await _mount(tester, _Repository(), size: Size(width, 927));
+      await tester.tap(find.byKey(const ValueKey('search-category-video')));
+      await tester.pumpAndSettle();
+      final cards = find.byType(VideoCard);
+      final compact = width < 600;
+      final columns = compact ? 2 : 5;
+      final inset = compact ? 4.0 : 28.0;
+      final gap = compact ? 6.0 : 20.0;
+      final first = tester.getRect(cards.first);
+      final last = tester.getRect(cards.at(columns - 1));
+      final next = tester.getRect(cards.at(columns));
+      expect(
+        first.width,
+        closeTo((width - inset * 2 - (columns - 1) * gap) / columns, .01),
+      );
+      expect(first.left, inset);
+      expect(last.right, closeTo(width - inset, .01));
+      expect(last.top, first.top);
+      expect(next.top - first.bottom, closeTo(compact ? 16 : 24, .01));
+      expect(find.byType(BiliUpBadge), findsNWidgets(cards.evaluate().length));
+      await _snapshot(tester, '${width.toInt()}-video-grid');
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets(
     'sort change starts at the top even with a retained page storage key',

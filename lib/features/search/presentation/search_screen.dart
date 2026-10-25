@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../domain/app_failure.dart';
 import '../../../shared/ui/paged_scroll_viewport.dart';
+import '../../../shared/ui/responsive_card_grid.dart';
 import '../../../shared/ui/smooth_scroll_behavior.dart';
 import '../../../shared/ui/state_view.dart';
 import '../application/search_controller.dart';
@@ -215,8 +216,9 @@ final class _SearchScreenState extends ConsumerState<SearchScreen> {
                 builder: (scrollController) => CustomScrollView(
                   controller: scrollController,
                   slivers: [
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(padding, 8, padding, 32),
+                    SliverCardGridPadding(
+                      desktopInset: 28,
+                      bottom: 32,
                       sliver: result.query.isEmpty
                           ? const SliverToBoxAdapter(
                               child: SizedBox(

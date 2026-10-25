@@ -106,7 +106,7 @@ void main() {
           expect(find.text('测试UP'), findsNWidgets(mountedCards));
           expect(find.text('今天投稿'), findsNWidgets(mountedCards));
           final first = tester.getRect(find.byType(VideoCard).first);
-          final inset = width < 600 ? 12.0 : 20.0;
+          final inset = width < 600 ? 4.0 : 20.0;
           expect(first.left, inset);
           expect(first.width, lessThanOrEqualTo(width - inset * 2));
           await tester.scrollUntilVisible(
@@ -172,7 +172,7 @@ void main() {
           expect(find.text('今天投稿'), findsNWidgets(mountedCards));
           final a = tester.getTopLeft(find.byType(VideoDynamicCard).at(0));
           final b = tester.getTopLeft(find.byType(VideoDynamicCard).at(1));
-          expect(a.dy == b.dy, width >= 800);
+          expect(a.dy, b.dy);
         } else {
           expect(
             find.byType(LiveRoomCard).evaluate().length,

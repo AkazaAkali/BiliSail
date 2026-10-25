@@ -31,8 +31,8 @@ void main() {
     tester,
   ) async {
     _setViewport(tester, 1920);
-    for (final width in [360.0, 375.0, 393.0, 412.0, 430.0]) {
-      final extent = width - 56;
+    for (final width in [320.0, 360.0, 375.0, 393.0, 412.0, 430.0]) {
+      final extent = width - 8;
       await tester.pumpWidget(_gridApp(width: extent));
       await tester.pumpAndSettle();
       final cards = find.byType(VideoCard);
@@ -40,10 +40,10 @@ void main() {
       final second = tester.getRect(cards.at(1));
       final third = tester.getRect(cards.at(2));
       expect(second.top, first.top, reason: 'phone width=$width');
-      expect(second.left - first.right, closeTo(10, .01));
-      expect(first.width, closeTo((extent - 10) / 2, .01));
+      expect(second.left - first.right, closeTo(6, .01));
+      expect(first.width, closeTo((extent - 6) / 2, .01));
       expect(second.right, closeTo(extent, .01));
-      expect(third.top, greaterThan(first.bottom));
+      expect(third.top - first.bottom, closeTo(16, .01));
       expect(tester.takeException(), isNull, reason: 'phone width=$width');
     }
   });
@@ -52,7 +52,7 @@ void main() {
     tester,
   ) async {
     _setViewport(tester, 1920);
-    for (final width in [360.0, 390.0, 599.0, 600.0, 640.0, 1000.0]) {
+    for (final width in [320.0, 360.0, 390.0, 599.0, 600.0, 640.0, 1000.0]) {
       await tester.pumpWidget(
         MaterialApp(
           theme: BiliTheme.light(),
@@ -76,12 +76,15 @@ void main() {
       await tester.pumpAndSettle();
       final first = tester.getRect(find.byType(VideoCard).at(0));
       final second = tester.getRect(find.byType(VideoCard).at(1));
-      final inset = width < 600 ? 12.0 : 20.0;
-      final gap = width - 2 * inset < 600 ? 10.0 : 20.0;
+      final inset = width < 600 ? 4.0 : 20.0;
+      final gap = width - 2 * inset < 600 ? 6.0 : 20.0;
       expect(first.left, inset);
       expect(second.top, first.top);
       expect(second.left - first.right, closeTo(gap, .01));
-      if (width == 390) expect(first.width, 178);
+      if (width < 600) {
+        expect(second.right, closeTo(width - inset, .01));
+      }
+      if (width == 390) expect(first.width, 188);
       expect(tester.takeException(), isNull, reason: 'allocated width=$width');
     }
   });

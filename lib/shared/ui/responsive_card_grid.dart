@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
 const _desktopSpacing = 20.0;
-const _runSpacing = 24.0;
 
-({int columns, double width, double spacing}) _layout(
+({int columns, double width, double spacing, double runSpacing}) _layout(
   BuildContext context,
   double extent,
 ) {
-  final spacing = extent < 600 ? 10.0 : _desktopSpacing;
+  final compact = extent < 600;
+  final spacing = compact ? 6.0 : _desktopSpacing;
   final textScaler = MediaQuery.textScalerOf(context);
   final minimum = textScaler.scale(300).clamp(300, 450);
   // Phone-sized grids can fit two compact cards; wider rows keep desktop sizes.
@@ -21,6 +21,7 @@ const _runSpacing = 24.0;
     columns: columns,
     width: (extent - (columns - 1) * spacing) / columns,
     spacing: spacing,
+    runSpacing: compact ? 16.0 : 24.0,
   );
 }
 
@@ -31,15 +32,16 @@ final class SliverCardGridPadding extends StatelessWidget {
     required this.sliver,
     this.top = 8,
     this.bottom = 24,
+    this.desktopInset = 20,
   });
 
   final Widget sliver;
-  final double top, bottom;
+  final double top, bottom, desktopInset;
 
   @override
   Widget build(BuildContext context) => SliverLayoutBuilder(
     builder: (context, constraints) {
-      final inset = constraints.crossAxisExtent < 600 ? 12.0 : 20.0;
+      final inset = constraints.crossAxisExtent < 600 ? 4.0 : desktopInset;
       return SliverPadding(
         padding: EdgeInsets.fromLTRB(inset, top, inset, bottom),
         sliver: sliver,
@@ -60,7 +62,7 @@ final class ResponsiveCardGrid extends StatelessWidget {
       final layout = _layout(context, constraints.maxWidth);
       return Wrap(
         spacing: layout.spacing,
-        runSpacing: _runSpacing,
+        runSpacing: layout.runSpacing,
         children: [
           for (final child in children)
             SizedBox(
@@ -90,7 +92,8 @@ final class SliverResponsiveCardGrid extends StatefulWidget {
 
 final class _SliverResponsiveCardGridState
     extends State<SliverResponsiveCardGrid> {
-  ({int columns, double width, double spacing})? _previousLayout;
+  ({int columns, double width, double spacing, double runSpacing})?
+  _previousLayout;
   Widget? _rows;
 
   @override
@@ -114,7 +117,7 @@ final class _SliverResponsiveCardGridState
       return _rows = SliverList.builder(
         itemCount: (widget.itemCount / layout.columns).ceil(),
         itemBuilder: (context, row) => Padding(
-          padding: const EdgeInsets.only(bottom: _runSpacing),
+          padding: EdgeInsets.only(bottom: layout.runSpacing),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             spacing: layout.spacing,
