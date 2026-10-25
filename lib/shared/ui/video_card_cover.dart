@@ -253,72 +253,70 @@ class _VideoCardCoverState extends State<VideoCardCover>
   }
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final preview = _preview;
-      return MouseRegion(
-        onEnter: widget.hovered == null ? (_) => _hoverCover(true) : null,
-        onExit: widget.hovered == null ? (_) => _hoverCover(false) : null,
-        child: AnimatedScale(
-          key: const ValueKey('video-card-cover-scale'),
-          scale: _coverHovered ? _coverHoverScale : 1,
-          // Snap back when scrolling starts; animating the exit would keep
-          // invalidating the cover during the first scroll frames.
-          duration: _scrolling || MediaQuery.disableAnimationsOf(context)
-              ? Duration.zero
-              : const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(widget.borderRadius),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                widget.child,
-                if (preview != null)
-                  IgnorePointer(
-                    // The session is returned only after its first frame is
-                    // ready. Keep the cover underneath and fade only on entry;
-                    // exit must remove the surface as soon as it is released.
-                    child: TweenAnimationBuilder<double>(
-                      key: ObjectKey(preview),
-                      tween: Tween(begin: 0, end: 1),
-                      duration: MediaQuery.disableAnimationsOf(context)
-                          ? Duration.zero
-                          : const Duration(milliseconds: 200),
-                      curve: Curves.linear,
-                      builder: (context, opacity, child) =>
-                          Opacity(opacity: opacity, child: child),
-                      child: _VideoCardPlaybackPreview(
-                        key: const ValueKey('video-card-preview'),
-                        preview: preview,
-                      ),
+  Widget build(BuildContext context) {
+    final preview = _preview;
+    return MouseRegion(
+      onEnter: widget.hovered == null ? (_) => _hoverCover(true) : null,
+      onExit: widget.hovered == null ? (_) => _hoverCover(false) : null,
+      child: AnimatedScale(
+        key: const ValueKey('video-card-cover-scale'),
+        scale: _coverHovered ? _coverHoverScale : 1,
+        // Snap back when scrolling starts; animating the exit would keep
+        // invalidating the cover during the first scroll frames.
+        duration: _scrolling || MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 200),
+        curve: Curves.easeOutCubic,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(widget.borderRadius),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              widget.child,
+              if (preview != null)
+                IgnorePointer(
+                  // The session is returned only after its first frame is
+                  // ready. Keep the cover underneath and fade only on entry;
+                  // exit must remove the surface as soon as it is released.
+                  child: TweenAnimationBuilder<double>(
+                    key: ObjectKey(preview),
+                    tween: Tween(begin: 0, end: 1),
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 200),
+                    curve: Curves.linear,
+                    builder: (context, opacity, child) =>
+                        Opacity(opacity: opacity, child: child),
+                    child: _VideoCardPlaybackPreview(
+                      key: const ValueKey('video-card-preview'),
+                      preview: preview,
                     ),
                   ),
-                if (widget.video.access.label != null)
-                  Positioned(
-                    top: 6,
-                    left: 6,
-                    right: 48,
-                    child: IgnorePointer(
-                      child: Align(
-                        alignment: Alignment.topLeft,
-                        child: VideoAccessBadge(access: widget.video.access),
-                      ),
+                ),
+              if (widget.video.access.label != null)
+                Positioned(
+                  top: 6,
+                  left: 6,
+                  right: 48,
+                  child: IgnorePointer(
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: VideoAccessBadge(access: widget.video.access),
                     ),
                   ),
-                if (widget.showWatchLaterButton &&
-                    _active &&
-                    _scope != null &&
-                    widget.video.id.isValid &&
-                    (_coverHovered || widget.focused))
-                  Positioned(top: 8, right: 8, child: _watchLaterButton()),
-              ],
-            ),
+                ),
+              if (widget.showWatchLaterButton &&
+                  _active &&
+                  _scope != null &&
+                  widget.video.id.isValid &&
+                  (_coverHovered || widget.focused))
+                Positioned(top: 8, right: 8, child: _watchLaterButton()),
+            ],
           ),
         ),
-      );
-    },
-  );
+      ),
+    );
+  }
 
   Widget _watchLaterButton() {
     final added = _scope?.interactions.isAdded(widget.video.id) ?? false;

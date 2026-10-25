@@ -2,6 +2,36 @@
 
 日期：2026-10-25。此记录针对 Android 底栏的首页、动态、我的、设置切换；此前首页频道分组和其他导航修改保留在当前工作区。
 
+## 2026-10-26：推荐与视频动态往返切换
+
+继续处理窄屏底栏切换卡顿。检查当前源码并用真实 `FeedScreen`、390×844 逻辑像素视口复查。每边 fake 仓储返回 500 条，推荐保留 500 条，视频动态依照既有上限保留 200 条：列表仍按视口懒创建，预热后往返切换不增加仓储读取。没有证据将此问题归因为每次切换全量创建卡片。
+
+本轮消除以下额外工作：
+
+- [RetainedTabView](../../lib/shared/ui/retained_tab_view.dart)保持空闲分页器的滚动物理类型，通过外围 `IgnorePointer` 拦截失活页面输入。原来切换到 `NeverScrollableScrollPhysics` 会替换 `ScrollPosition`，连带更新下游滚动依赖。未结束的分页手势、动画仍按既有 generation 和控制器替换机制取消；显式关闭横滑仍保留原有处理。
+- [FeedScreen](../../lib/features/feed/presentation/feed_screen.dart)在带频道分页器的首页路径按频道和实际显示配置复用页面 Widget，避免一级入口切换重新构建配置未变的频道。缓存至多覆盖固定频道枚举；登录、栏目回调转发给最新配置，登录入口增删、登录状态、路由初始栏目与布局配置变化照常更新。隐藏页面继续接收继承状态和 Provider 通知；“我的”页内嵌的单频道列表沿用原有配置更新路径。
+- 动态等非推荐类频道不再挂载底下那份空的视频列表、滚动控制器和刷新按钮；实际 `HomeContent` 列表及其状态、分页和滚动位置保留。
+- [共享视频封面](../../lib/shared/ui/video_card_cover.dart)移除未使用尺寸参数的 `LayoutBuilder`，避免可见性/悬停状态变化安排这层布局构建。
+- [一级切换动效](../../lib/shared/ui/primary_navigation_transition.dart)保留 220ms、4% 位移和减少动画适配，移除包裹整个内容区的淡入层。图片密集页面切换期间保持不透明，消除这层透明度合成；下文 2026-10-25 的整页淡入描述属于此前实现。
+
+受控结构探针位于忽略目录 `artifacts/primary-switch-20261026/`，`baseline-results.json` 与 `optimized-results.json` 记录同一视口预热后四次切换（两轮往返）。未请求真实账号/API/CDN，封面 URL 为空，不创建原生预览。
+
+| 每次入口切换中的工作 | 修改前 | 修改后 |
+| --- | ---: | ---: |
+| 盒布局构建器参与布局次数 | 72 | 48 |
+| 视口布局次数 | 6 | 3 |
+| 频道页构建次数 | 3 | 1 |
+| 整页透明度渲染对象参与布局次数 | 1 | 0 |
+| 预热后的新增推荐／视频动态仓储读取 | 0／0 | 0／0 |
+
+这是 debug 下的工作次数，不能换算成帧率或实际卡顿下降比例。隐藏分支仍使用 `Offstage`，未宣称隐藏页面零布局；图片恢复和首次进入仍需工作。本机 `adb devices` 未发现 Android 设备，DTD 未发现运行中的 Flutter 应用，热重载无可用连接；未进行 Android/iOS 真机 Profile/Release 帧耗时、真实图片解码或 GPU 合成对比，也未构建新安装包。
+
+[新增页面回归](../../test/features/feed/feed_primary_switch_test.dart)覆盖大批量 fake 数据下的懒创建、滚动位置对象和偏移保留、重复进入零额外读取、最新登录动作、入口移除及隐藏期间退出登录；[分页回归](../../test/features/feed/home_channel_swipe_test.dart)补充空闲分组的 `ScrollPosition` 身份检查。[动效回归](../../test/shared/ui/primary_navigation_transition_test.dart)与[路由回归](../../test/app/workspace_router_test.dart)验证不透明滑入、详情取消、平台开关和减少动画。
+
+最终 `tool/check.ps1 -SkipPub` 通过：根应用 2725、bili_api 460、bili_player 81、bili_danmaku 93、bili_mux 5，共 3364 项测试通过；10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过，不计为原生集成通过。格式、静态分析和平台打包边界检查通过，日志为 `build/primary-switch-20261026-check-final.log`。文档 17 个相对链接和 `git diff --check` 通过。本轮按用户要求提交已有优化，不推送；保留已有及同期其他功能修改。
+
+“我的”历史记录、稍后再看和收藏列表跨底栏切换的恢复开销，以及保留的滑入动效在目标设备上的成本，尚未完成专门对照验证。不能将推荐／视频动态的结构计数推广为这些页面的卡顿根因或修复结论；按用户要求留待后续继续定位。
+
 ## 实现
 
 - [外壳](../../lib/app/shell.dart)将一级入口标题、工具栏和内容作为同一动效区域，底栏保持固定。[PrimaryNavigationTransition](../../lib/shared/ui/primary_navigation_transition.dart)在目标入口变化时执行 220ms easeOutCubic 动画：内容由相应方向的 4% 宽度偏移归位，透明度从 0.65 恢复至 1。390 逻辑像素宽度下，位移约 16px；根据入口顺序与文字方向确定左右方向。

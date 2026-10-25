@@ -778,16 +778,16 @@ void main() {
           await tester.tap(find.byKey(ValueKey('$prefix-dynamic')));
           await tester.pump();
           final primary = find.byType(PrimaryNavigationTransition);
-          final fade = find
-              .descendant(of: primary, matching: find.byType(FadeTransition))
+          final slide = find
+              .descendant(of: primary, matching: find.byType(SlideTransition))
               .first;
           expect(
             tester.widget<PrimaryNavigationTransition>(primary).enabled,
             animatePrimary,
           );
           expect(
-            tester.widget<FadeTransition>(fade).opacity.value,
-            animatePrimary ? lessThan(1) : equals(1),
+            tester.widget<SlideTransition>(slide).position.value.dx.abs(),
+            animatePrimary ? greaterThan(0) : equals(0),
           );
           await tester.pumpAndSettle();
           expectChannel(HomeChannel.dynamic);

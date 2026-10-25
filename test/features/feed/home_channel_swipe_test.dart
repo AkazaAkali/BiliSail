@@ -43,19 +43,38 @@ void main() {
           ),
         )
         .controller!;
+    ScrollPosition position(HomeChannel group) => tester
+        .stateList<ScrollableState>(
+          find.descendant(
+            of: find.byKey(
+              ValueKey(('home-channel-group', group)),
+              skipOffstage: false,
+            ),
+            matching: find.byType(Scrollable, skipOffstage: false),
+            skipOffstage: false,
+          ),
+        )
+        .firstWhere((state) => state.position.axis == Axis.horizontal)
+        .position;
     final home = controller(HomeChannel.recommended);
+    final homePosition = position(HomeChannel.recommended);
     channel.value = HomeChannel.videoDynamic;
     await tester.pumpAndSettle();
     final dynamic = controller(HomeChannel.dynamic);
+    final dynamicPosition = position(HomeChannel.dynamic);
     expect(controller(HomeChannel.recommended), same(home));
+    expect(position(HomeChannel.recommended), same(homePosition));
     for (var i = 0; i < 3; i++) {
       channel.value = HomeChannel.recommended;
       await tester.pumpAndSettle();
       expect(controller(HomeChannel.dynamic), same(dynamic));
+      expect(position(HomeChannel.dynamic), same(dynamicPosition));
       channel.value = HomeChannel.videoDynamic;
       await tester.pumpAndSettle();
       expect(controller(HomeChannel.recommended), same(home));
       expect(controller(HomeChannel.dynamic), same(dynamic));
+      expect(position(HomeChannel.recommended), same(homePosition));
+      expect(position(HomeChannel.dynamic), same(dynamicPosition));
       expect(dynamic.index, 1);
     }
     expect(tester.takeException(), isNull);

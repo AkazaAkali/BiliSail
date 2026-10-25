@@ -64,11 +64,10 @@ class _PrimaryNavigationTransitionState
         end: Offset.zero,
       ).animate(_progress),
       textDirection: Directionality.of(context),
-      child: FadeTransition(
-        opacity: Tween(begin: 0.65, end: 1.0).animate(_progress),
-        // Animation ticks update compositing only, not the retained pages.
-        child: RepaintBoundary(child: widget.child),
-      ),
+      // Keep dense image feeds opaque: fading the whole page adds an opacity
+      // layer and blending during the same frames that restore the list.
+      // Translation still updates compositing without rebuilding the pages.
+      child: RepaintBoundary(child: widget.child),
     ),
   );
 

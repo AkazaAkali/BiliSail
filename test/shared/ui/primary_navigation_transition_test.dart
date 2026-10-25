@@ -35,14 +35,13 @@ void main() {
           .widget<SlideTransition>(within(SlideTransition))
           .position
           .value;
-      double opacity() =>
-          tester.widget<FadeTransition>(within(FadeTransition)).opacity.value;
+      // Image-heavy pages keep an opaque composition throughout the slide.
+      expect(within(FadeTransition), findsNothing);
       final element = tester.element(find.text('retained'));
       expect(slide(), Offset.zero);
       index.value = 2;
       await tester.pump();
       expect(slide().dx, greaterThan(0));
-      expect(opacity(), lessThan(1));
       final start = slide().dx;
       await tester.pump(const Duration(milliseconds: 50));
       expect(slide().dx, inExclusiveRange(0, start));
@@ -53,7 +52,6 @@ void main() {
       expect(slide().dx, lessThan(0));
       await tester.pumpAndSettle();
       expect(slide(), Offset.zero);
-      expect(opacity(), 1);
       expect(tester.element(find.text('retained')), same(element));
       expect(builds, 1);
       // Entering/leaving detail pages must cancel primary motion.
@@ -94,29 +92,29 @@ void main() {
         ),
       ),
     );
-    double opacity() => tester
-        .widget<FadeTransition>(
+    Offset slide() => tester
+        .widget<SlideTransition>(
           find.descendant(
             of: find.byType(PrimaryNavigationTransition),
-            matching: find.byType(FadeTransition),
+            matching: find.byType(SlideTransition),
           ),
         )
-        .opacity
+        .position
         .value;
     index.value = 1;
     await tester.pump();
-    expect(opacity(), lessThan(1));
+    expect(slide().dx, greaterThan(0));
     reduceMotion.value = true;
     await tester.pumpAndSettle();
-    expect(opacity(), 1);
+    expect(slide(), Offset.zero);
     index.value = 2;
     await tester.pump();
-    expect(opacity(), 1);
+    expect(slide(), Offset.zero);
     reduceMotion.value = false;
     enabled.value = false;
     index.value = 3;
     await tester.pump();
-    expect(opacity(), 1);
+    expect(slide(), Offset.zero);
     expect(tester.binding.hasScheduledFrame, isFalse);
   });
 }

@@ -21,6 +21,16 @@ import 'home_content.dart';
 import 'home_channel_swipe.dart';
 import 'popular_feed.dart';
 
+typedef _ChannelPageConfiguration = ({
+  bool active,
+  String? initialSection,
+  bool signedIn,
+  bool hasLogin,
+  bool showLiveSectionTabs,
+  bool swipeEnabled,
+  bool hasSectionCallback,
+});
+
 final class FeedScreen extends ConsumerStatefulWidget {
   const FeedScreen({
     super.key,
@@ -48,6 +58,14 @@ final class FeedScreen extends ConsumerStatefulWidget {
 }
 
 final class _FeedScreenState extends ConsumerState<FeedScreen> {
+  final _pages = <HomeChannel, (_ChannelPageConfiguration, Widget)>{};
+
+  void _login() => widget.onLogin?.call();
+
+  void _sectionChanged(HomeChannel channel, String section) {
+    if (widget.channel == channel) widget.onSectionChanged?.call(section);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -74,31 +92,55 @@ final class _FeedScreenState extends ConsumerState<FeedScreen> {
   }
 
   Widget _page(BuildContext context, HomeChannel channel, bool active) {
+    final initialSection =
+        (channel == HomeChannel.popular || channel == HomeChannel.ranking) &&
+            widget.channel == HomeChannel.ranking
+        ? '排行榜'
+        : channel == widget.channel
+        ? widget.initialSection
+        : null;
+    final configuration = (
+      active: active,
+      initialSection: initialSection,
+      signedIn: widget.isSignedIn,
+      hasLogin: widget.onLogin != null,
+      showLiveSectionTabs: widget.showLiveSectionTabs,
+      swipeEnabled: widget.onChannelChanged == null,
+      hasSectionCallback: widget.onSectionChanged != null,
+    );
+    // Primary destinations keep their selected inner tab. Reuse its widget
+    // when only the enclosing WorkspaceActivity changes; inherited account,
+    // layout and visibility updates still reach the mounted descendants.
+    final cached = _pages[channel];
+    final retainPage = widget.onChannelChanged != null;
+    if (retainPage && cached != null && cached.$1 == configuration) {
+      return cached.$2;
+    }
+    final ValueChanged<String>? onSectionChanged =
+        widget.onSectionChanged != null
+        ? (section) => _sectionChanged(channel, section)
+        : null;
+    final Widget page;
     if (channel == HomeChannel.popular || channel == HomeChannel.ranking) {
-      return PopularFeed(
+      page = PopularFeed(
         active: active,
         swipeEnabled: widget.onChannelChanged == null,
-        initialSection: widget.channel == HomeChannel.ranking
-            ? '排行榜'
-            : channel == widget.channel
-            ? widget.initialSection
-            : null,
-        onSectionChanged: channel == widget.channel
-            ? widget.onSectionChanged
-            : null,
+        initialSection: initialSection,
+        onSectionChanged: onSectionChanged,
+      );
+    } else {
+      page = _HomeChannelPage(
+        channel: channel,
+        active: active,
+        initialSection: initialSection,
+        isSignedIn: widget.isSignedIn,
+        onLogin: widget.onLogin == null ? null : _login,
+        showLiveSectionTabs: widget.showLiveSectionTabs,
+        onSectionChanged: onSectionChanged,
       );
     }
-    return _HomeChannelPage(
-      channel: channel,
-      active: active,
-      initialSection: channel == widget.channel ? widget.initialSection : null,
-      isSignedIn: widget.isSignedIn,
-      onLogin: widget.onLogin,
-      showLiveSectionTabs: widget.showLiveSectionTabs,
-      onSectionChanged: channel == widget.channel
-          ? widget.onSectionChanged
-          : null,
-    );
+    if (retainPage) _pages[channel] = (configuration, page);
+    return page;
   }
 
   @override
@@ -260,7 +302,9 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
     return IndexedStack(
       index: channel.hasVideoFeed ? 0 : visited.indexOf(current) + 1,
       children: [
-        videoFeed,
+        // Non-video channels own their HomeContent viewport. Keeping an empty
+        // recommendation viewport underneath it adds scroll/layout work.
+        if (channel.hasVideoFeed) videoFeed else const SizedBox.shrink(),
         for (final entry in visited)
           HomeContent(
             key: ValueKey(entry),
