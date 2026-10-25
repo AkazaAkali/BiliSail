@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -89,6 +91,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final account = ref.watch(authControllerProvider);
     final session = (widget.id, state.sessionGeneration);
     final p = state.profile;
+    // Wait for the header before laying out tabs and content. Otherwise they
+    // briefly appear at the top and jump down when the profile arrives.
+    if (p == null && state.profileMessage == null) {
+      return _ProfileInitialLoading(key: ValueKey(session));
+    }
     final isSelf = widget.isSelf || account.mid == widget.id.value;
     final signedIn = account.isSignedIn;
     final scrollBehavior = ScrollConfiguration.of(context);
@@ -150,9 +157,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           (final room?, final open?) => () => open(room.id),
                           _ => null,
                         },
-                      )
-                    else if (state.profileLoading)
-                      const LinearProgressIndicator(),
+                      ),
                     if (state.profileMessage case final message?)
                       StateView.error(
                         message: message,
@@ -506,6 +511,37 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     video: video,
     onTap: () => widget.onOpenVideo?.call(video),
   );
+}
+
+class _ProfileInitialLoading extends StatefulWidget {
+  const _ProfileInitialLoading({super.key});
+
+  @override
+  State<_ProfileInitialLoading> createState() => _ProfileInitialLoadingState();
+}
+
+class _ProfileInitialLoadingState extends State<_ProfileInitialLoading> {
+  Timer? _timer;
+  bool _showIndicator = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Fast reads should open the space without flashing a loading screen.
+    _timer = Timer(const Duration(milliseconds: 300), () {
+      setState(() => _showIndicator = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      _showIndicator ? const StateView.loading() : const SizedBox.expand();
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 }
 
 /// The search draft lives with the retained video page, including its session.
