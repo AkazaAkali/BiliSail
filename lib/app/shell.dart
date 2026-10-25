@@ -26,6 +26,7 @@ import '../shared/ui/app_dialog.dart';
 import '../shared/ui/paging_tab_strip.dart';
 import '../shared/ui/page_tab_style.dart';
 import '../shared/ui/retained_tab_view.dart';
+import '../shared/ui/primary_navigation_transition.dart';
 
 typedef WorkspacePageBuilder = Widget Function(
   BuildContext context,
@@ -159,6 +160,11 @@ final class _BiliAppShellState extends State<BiliAppShell>
   bool _exitConfirmationOpen = false;
 
   bool get _android => Theme.of(context).platform == TargetPlatform.android;
+  bool get _compactChannels => compactChannelNavigationForPlatform(
+    Theme.of(context).platform,
+    compact: MediaQuery.sizeOf(context).width < 600,
+  );
+
   bool get _canReturnFromMessages =>
       _android && _workspace.canReturnFromMessages;
 
@@ -193,10 +199,14 @@ final class _BiliAppShellState extends State<BiliAppShell>
 
   TabPagingProgress _pagingFor(WorkspaceTab tab) {
     final settings = tab.location.path == '/settings';
+    final channels = channelsForSection(
+      sectionForLocation(tab.location, compact: _compactChannels),
+      compact: _compactChannels,
+    );
     final index = settings
         ? SettingsCategory.fromName(tab.location.queryParameters['section'])
               .index
-        : HomeChannel.primaryValues
+        : channels
               .indexWhere(
                 (channel) =>
                     channel.name ==
@@ -205,7 +215,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
                         : tab.location.queryParameters['channel'] ??
                               'recommended'),
               )
-              .clamp(0, HomeChannel.primaryValues.length - 1);
+              .clamp(0, channels.isEmpty ? 0 : channels.length - 1);
     return _pagingProgress.putIfAbsent((
       tab.id,
       settings,
@@ -248,7 +258,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
         return;
       }
       _prunePages();
-      _rememberSection(_displayTab.location);
+      _rememberSection(_displayTab.location, compact: _compactChannels);
       _restoreSearch();
       _revealActiveTab();
       if (_workspace.active.isPlayback) _windowActivation++;
@@ -258,6 +268,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _rememberSection(_displayTab.location, compact: _compactChannels);
     _revealActiveTab();
   }
 
@@ -460,7 +471,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
   void _selectChannel(HomeChannel channel) {
     _lastChannels[sectionForLocation(
           Uri(path: '/', queryParameters: {'channel': channel.name}),
-          compact: false,
+          compact: _compactChannels,
         )] =
         channel;
     final tab = _displayTab.isBrowse ? _displayTab : _workspace.tabs.first;
@@ -476,7 +487,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
     );
   }
 
-  void _rememberSection(Uri location) {
+  void _rememberSection(Uri location, {bool compact = false}) {
     if (location.path == '/settings') {
       _lastSettingsCategory = SettingsCategory.fromName(
         location.queryParameters['section'],
@@ -492,7 +503,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
     final channel = requestedChannel == HomeChannel.ranking
         ? HomeChannel.popular
         : requestedChannel;
-    _lastChannels[sectionForLocation(location, compact: false)] = channel;
+    _lastChannels[sectionForLocation(location, compact: compact)] = channel;
     final section = location.queryParameters['section'];
     if (section != null && channel.sections.contains(section)) {
       _lastSections[channel] = section;
@@ -612,40 +623,52 @@ final class _BiliAppShellState extends State<BiliAppShell>
                                   ),
                                   child: ColoredBox(
                                     color: colors.surface,
-                                    child: Column(
-                                      children: [
-                                        if (_showBackButton &&
-                                            widget.windowControlsBuilder ==
-                                                null &&
-                                            _displayTab.isProfile)
-                                          SizedBox(
-                                            key: const ValueKey(
-                                              'workspace-profile-back-header',
+                                    child: PrimaryNavigationTransition(
+                                      key: const ValueKey(
+                                        'workspace-primary-transition',
+                                      ),
+                                      enabled: _compactChannels,
+                                      index: _displayTab.isRoot
+                                          ? sectionForLocation(
+                                              _displayTab.location,
+                                              compact: _compactChannels,
+                                            ).index
+                                          : null,
+                                      child: Column(
+                                        children: [
+                                          if (_showBackButton &&
+                                              widget.windowControlsBuilder ==
+                                                  null &&
+                                              _displayTab.isProfile)
+                                            SizedBox(
+                                              key: const ValueKey(
+                                                'workspace-profile-back-header',
+                                              ),
+                                              height: 42,
+                                              child: Align(
+                                                alignment: Alignment.centerLeft,
+                                                child: _backButton(),
+                                              ),
                                             ),
-                                            height: 42,
-                                            child: Align(
-                                              alignment: Alignment.centerLeft,
-                                              child: _backButton(),
-                                            ),
-                                          ),
-                                        if (_displayTab.location.path !=
-                                                '/search' &&
-                                            !_displayTab.isPlayback &&
-                                            !_displayTab.isProfile)
-                                          LayoutBuilder(
-                                            builder: (context, bounds) =>
-                                                _navigationHeader(
-                                                  context,
-                                                  bounds,
-                                                  _channelBar(
+                                          if (_displayTab.location.path !=
+                                                  '/search' &&
+                                              !_displayTab.isPlayback &&
+                                              !_displayTab.isProfile)
+                                            LayoutBuilder(
+                                              builder: (context, bounds) =>
+                                                  _navigationHeader(
                                                     context,
+                                                    bounds,
+                                                    _channelBar(
+                                                      context,
+                                                      compact: compact,
+                                                    ),
                                                     compact: compact,
                                                   ),
-                                                  compact: compact,
-                                                ),
-                                          ),
-                                        Expanded(child: pages),
-                                      ],
+                                            ),
+                                          Expanded(child: pages),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -799,7 +822,13 @@ final class _BiliAppShellState extends State<BiliAppShell>
   void _selectSection(WorkspaceSection section, {required bool compact}) {
     switch (section) {
       case WorkspaceSection.home:
-        _selectChannel(_lastChannels[section] ?? HomeChannel.recommended);
+        final channels = channelsForSection(section, compact: _compactChannels);
+        final previous = _lastChannels[section];
+        _selectChannel(
+          previous != null && channels.contains(previous)
+              ? previous
+              : channels.first,
+        );
       case WorkspaceSection.dynamic:
         _selectChannel(_lastChannels[section] ?? HomeChannel.dynamic);
       case WorkspaceSection.live:
@@ -836,7 +865,10 @@ final class _BiliAppShellState extends State<BiliAppShell>
 
   Widget _sideNavigation(BuildContext context, {required bool extended}) {
     final colors = Theme.of(context).colorScheme;
-    final section = sectionForLocation(_displayTab.location, compact: false);
+    final section = sectionForLocation(
+      _displayTab.location,
+      compact: _compactChannels,
+    );
     Widget entry(
       String label,
       IconData icon,
@@ -1083,18 +1115,25 @@ final class _BiliAppShellState extends State<BiliAppShell>
   }
 
   Widget _bottomNavigation(BuildContext context) {
-    const sections = [
+    final sections = [
       WorkspaceSection.home,
       WorkspaceSection.dynamic,
+      if (!_compactChannels) WorkspaceSection.live,
       WorkspaceSection.mine,
       WorkspaceSection.settings,
     ];
-    final selected = sectionForLocation(_displayTab.location, compact: true);
+    final selected = sectionForLocation(
+      _displayTab.location,
+      compact: _compactChannels,
+    );
     if (!sections.contains(selected)) {
       return _unselectedBottomNavigation(context, sections);
     }
     return NavigationBar(
       key: const ValueKey('workspace-bottom-navigation'),
+      animationDuration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : PrimaryNavigationTransition.duration,
       height: _bottomNavigationHeight,
       labelPadding: EdgeInsets.zero,
       labelTextStyle: WidgetStateProperty.resolveWith((states) {
@@ -1106,8 +1145,11 @@ final class _BiliAppShellState extends State<BiliAppShell>
         );
       }),
       selectedIndex: sections.indexOf(selected),
-      onDestinationSelected: (index) =>
-          _selectSection(sections[index], compact: true),
+      onDestinationSelected: (index) {
+        if (sections[index] != selected) {
+          _selectSection(sections[index], compact: true);
+        }
+      },
       destinations: [
         for (final item in sections)
           NavigationDestination(
@@ -1349,7 +1391,8 @@ final class _BiliAppShellState extends State<BiliAppShell>
         active.location.path == '/me') {
       return null;
     }
-    if (!compact && active.location.queryParameters['channel'] == 'live') {
+    if (!_compactChannels &&
+        active.location.queryParameters['channel'] == 'live') {
       return _liveSectionBar(context);
     }
     final selected = active.isBrowse
@@ -1364,8 +1407,11 @@ final class _BiliAppShellState extends State<BiliAppShell>
               )
               .firstOrNull
         : null;
-    final section = sectionForLocation(active.location, compact: compact);
-    final tabs = channelsForSection(section, compact: compact);
+    final section = sectionForLocation(
+      active.location,
+      compact: _compactChannels,
+    );
+    final tabs = channelsForSection(section, compact: _compactChannels);
     final equalWidthTabs = compact && section == WorkspaceSection.dynamic;
     return SizedBox(
       height: PageTabStyle.barHeight,
@@ -1377,7 +1423,6 @@ final class _BiliAppShellState extends State<BiliAppShell>
               : const EdgeInsets.symmetric(horizontal: 10),
           child: PagingTabStrip<HomeChannel>(
             tabs: tabs,
-            progressTabs: HomeChannel.primaryValues,
             value: selected,
             progress: _pagingFor(active),
             onSelected: _selectChannel,

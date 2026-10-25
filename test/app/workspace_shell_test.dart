@@ -738,7 +738,7 @@ void main() {
         await tester.pumpAndSettle();
         tester.view.physicalSize = const Size(390, 844);
         await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const ValueKey('channel-live')));
+        await tester.tap(find.byKey(const ValueKey('workspace-bottom-live')));
         await tester.pumpAndSettle();
         expect(
           router.routeInformationProvider.value.uri.queryParameters['section'],
@@ -1246,7 +1246,7 @@ void main() {
       },
     );
     _workspaceTestWidgets(
-      'root destinations select only their own entry and keep four compact links in $mode',
+      'root destinations select only their own entry and keep five narrow desktop links in $mode',
       (tester) async {
         tester.view.devicePixelRatio = 1;
         tester.view.physicalSize = const Size(1280, 844);
@@ -1319,11 +1319,11 @@ void main() {
                 )
                 .map((widget) => widget.properties.selected)
                 .whereType<bool>();
-            expect(flags, [false, false, false, false]);
+            expect(flags, [false, false, false, false, false]);
           } else {
             expect(find.byType(NavigationBar), findsOneWidget);
           }
-          for (final entry in ['home', 'dynamic', 'mine', 'settings']) {
+          for (final entry in ['home', 'dynamic', 'live', 'mine', 'settings']) {
             expect(
               find.byKey(ValueKey('workspace-bottom-$entry')).hitTestable(),
               findsOneWidget,

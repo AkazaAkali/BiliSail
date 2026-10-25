@@ -1,4 +1,14 @@
+import 'package:flutter/foundation.dart';
+
 import '../features/feed/domain/home_channel.dart';
+
+/// Desktop live stays a root destination even in a narrow window.
+bool compactChannelNavigationForPlatform(
+  TargetPlatform platform, {
+  required bool compact,
+}) =>
+    compact &&
+    (platform == TargetPlatform.android || platform == TargetPlatform.iOS);
 
 /// Product navigation groups are independent of the retained feed pages.
 enum WorkspaceSection {
@@ -49,6 +59,17 @@ List<HomeChannel> channelsForSection(
   WorkspaceSection.downloads ||
   WorkspaceSection.settings => [],
 };
+
+/// The header and retained pager share one order, with explicit swipe groups.
+List<List<HomeChannel>> channelGroupsForNavigation({required bool compact}) => [
+  for (final section in [
+    WorkspaceSection.home,
+    WorkspaceSection.dynamic,
+    if (!compact) WorkspaceSection.live,
+    WorkspaceSection.mine,
+  ])
+    channelsForSection(section, compact: compact),
+];
 
 /// Primary destinations switch immediately; their inner channels still page.
 bool shouldAnimateChannelSelection(

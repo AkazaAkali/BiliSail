@@ -51,6 +51,7 @@
 | [界面与多标签验证](validation/uwp-workspace.md) | UWP 风格布局、首页频道、多标签状态与本轮验证边界 |
 | [旧单标签导航与顶部滚动](validation/single-page-navigation.md) | 单标签退役前的历史记录；状态保留与横向滚轮验证 |
 | [首页子频道协议](validation/home-subtabs.md) | 各首页列表的端点、游标与前序接入记录 |
+| [窄屏一级导航动效](validation/primary-navigation-motion.md) | Android 底栏滑入/淡入、隐藏根分支构建复用与验证边界 |
 | [排行榜分区参数](validation/ranking-regions.md) | 官网配置动态目录、新分区 ID、刷新撤下处理与风控验证边界 |
 | [影视与直播内置播放](validation/content-playback.md) | 四频道内置入口、三类播放页、影视选集、直播线路与原生验证 |
 | [直播清晰度与线路选择](validation/live-playback-options.md) | 官网与参考协议、统一菜单样式、自动档、主备线路和独立默认清晰度 |

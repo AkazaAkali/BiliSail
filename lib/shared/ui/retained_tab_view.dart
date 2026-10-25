@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 
 import '../../core/presentation/workspace_activity.dart';
 import 'app_network_image.dart';
@@ -213,6 +214,15 @@ final class _RetainedTabViewState<T extends Object>
       _generation++;
       _dragging = true;
     }
+    // Wheel input has no dragDetails. User direction distinguishes it from
+    // routed tab animations and lets it commit only after page snapping.
+    if (notification is UserScrollNotification &&
+        notification.direction != ScrollDirection.idle &&
+        _tabs?.indexIsChanging != true &&
+        !_dragging) {
+      _generation++;
+      _dragging = true;
+    }
     if (notification is ScrollEndNotification && _dragging) {
       final metrics = notification.metrics;
       if (metrics is! PageMetrics) return false;
@@ -272,6 +282,7 @@ final class _RetainedTabViewState<T extends Object>
               PointerDeviceKind.touch,
               PointerDeviceKind.stylus,
               PointerDeviceKind.invertedStylus,
+              PointerDeviceKind.trackpad,
             },
             scrollbars: false,
           ),

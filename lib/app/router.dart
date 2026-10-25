@@ -251,12 +251,16 @@ final class _WorkspacePage extends ConsumerWidget {
       location: location,
       builder: (context) {
         final channel = _channelFor(location);
-        final compact = MediaQuery.sizeOf(context).width < 600;
+        final compact = compactChannelNavigationForPlatform(
+          Theme.of(context).platform,
+          compact: MediaQuery.sizeOf(context).width < 600,
+        );
         return FeedScreen(
           key: PageStorageKey('feed-${tab.id}'),
           channel: channel,
           initialSection: location.queryParameters['section'],
           showLiveSectionTabs: compact,
+          channelGroups: channelGroupsForNavigation(compact: compact),
           animateChannelSelection: (from, to) =>
               shouldAnimateChannelSelection(from, to, compact: compact),
           onSectionChanged: (section) => context.go(

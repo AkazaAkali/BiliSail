@@ -2,6 +2,16 @@ import 'package:bilisail/app/workspace_root_page.dart';
 import 'package:bilisail/core/presentation/workspace_activity.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+final _revision = NotifierProvider<_Revision, int>(_Revision.new);
+
+class _Revision extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void increment() => state++;
+}
 
 void main() {
   final locations = {
@@ -17,10 +27,14 @@ void main() {
     ) async {
       final selection = ValueNotifier(locations[initial]!);
       final visible = ValueNotifier(true);
+      final builds = <WorkspaceRootSection, int>{};
       addTearDown(selection.dispose);
       addTearDown(visible.dispose);
-      Widget probe(WorkspaceRootSection section, Uri location) =>
-          _Probe(key: ValueKey(section), uri: location);
+      Widget probe(WorkspaceRootSection section, Uri location) {
+        builds.update(section, (value) => value + 1, ifAbsent: () => 1);
+        return _Probe(key: ValueKey(section), uri: location);
+      }
+
       await tester.pumpWidget(
         MaterialApp(
           home: ValueListenableBuilder(
@@ -56,6 +70,7 @@ void main() {
         ...WorkspaceRootSection.values,
         ...WorkspaceRootSection.values.reversed,
       ]) {
+        final previousBuilds = Map.of(builds);
         selection.value = locations[section]!;
         await tester.pump();
         final state = tester.state<_ProbeState>(find.byType(_Probe));
@@ -71,6 +86,9 @@ void main() {
         }
         state.value = section.index + 7;
         for (final entry in states.entries) {
+          if (entry.key != section) {
+            expect(builds[entry.key], previousBuilds[entry.key]);
+          }
           expect(
             WorkspaceActivity.isActive(entry.value.context),
             entry.key == section,
@@ -88,6 +106,41 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
   }
+
+  testWidgets('hidden branches still receive provider updates', (tester) async {
+    final location = ValueNotifier(Uri(path: '/'));
+    addTearDown(location.dispose);
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          home: ValueListenableBuilder(
+            valueListenable: location,
+            builder: (context, uri, _) => WorkspaceRootPage(
+              location: uri,
+              feedBuilder: (_, _) => Consumer(
+                builder: (_, ref, _) =>
+                    Text('account epoch ${ref.watch(_revision)}'),
+              ),
+              accountBuilder: (_) => const Text('account'),
+              messagesBuilder: (_, _) => const SizedBox(),
+              downloadsBuilder: (_, _) => const SizedBox(),
+              settingsBuilder: (_, _) => const SizedBox(),
+            ),
+          ),
+        ),
+      ),
+    );
+    location.value = Uri(path: '/me');
+    await tester.pump();
+    ProviderScope.containerOf(tester.element(find.byType(WorkspaceRootPage)))
+        .read(_revision.notifier)
+        .increment();
+    await tester.pump();
+    expect(find.text('account epoch 1', skipOffstage: false), findsOneWidget);
+    location.value = Uri(path: '/');
+    await tester.pump();
+    expect(find.text('account epoch 1'), findsOneWidget);
+  });
 }
 
 class _Probe extends StatefulWidget {

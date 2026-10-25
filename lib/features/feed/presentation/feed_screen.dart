@@ -30,6 +30,7 @@ final class FeedScreen extends ConsumerStatefulWidget {
     this.initialSection,
     this.onChannelChanged,
     this.animateChannelSelection,
+    this.channelGroups,
     this.showLiveSectionTabs = true,
     this.onSectionChanged,
   });
@@ -39,6 +40,7 @@ final class FeedScreen extends ConsumerStatefulWidget {
   final String? initialSection;
   final ValueChanged<HomeChannel>? onChannelChanged;
   final TabSelectionAnimation<HomeChannel>? animateChannelSelection;
+  final List<List<HomeChannel>>? channelGroups;
   final bool showLiveSectionTabs;
   final ValueChanged<String>? onSectionChanged;
   @override
@@ -108,6 +110,7 @@ final class _FeedScreenState extends ConsumerState<FeedScreen> {
             channel: widget.channel,
             onChanged: onChanged,
             animateSelection: widget.animateChannelSelection,
+            channelGroups: widget.channelGroups,
             pageBuilder: _page,
           );
   }

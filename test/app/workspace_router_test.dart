@@ -21,6 +21,10 @@ import 'dart:async';
 import 'package:bilisail/app/router.dart';
 import 'package:bilisail/app/shell.dart';
 import 'package:bilisail/app/platform_defaults.dart';
+import 'package:bilisail/app/workspace_navigation.dart';
+import 'package:bilisail/features/auth/presentation/account_screen.dart';
+import 'package:bilisail/shared/ui/retained_tab_view.dart';
+import 'package:bilisail/shared/ui/primary_navigation_transition.dart';
 import 'package:bilisail/features/messages/application/messages_controller.dart';
 import 'package:bilisail/features/messages/presentation/messages_screen.dart';
 import 'package:bilisail/shared/ui/app_dialog.dart';
@@ -65,6 +69,7 @@ import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:bilisail/features/settings/domain/settings_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -440,92 +445,249 @@ void main() {
     );
   }
   for (final mode in WorkspaceNavigationMode.values) {
-    _workspaceTestWidgets(
-      'home swipes synchronize routes and visible channels in $mode',
-      (tester) async {
-        tester.view.devicePixelRatio = 1;
-        tester.view.physicalSize = const Size(375, 850);
-        addTearDown(tester.view.resetDevicePixelRatio);
-        addTearDown(tester.view.resetPhysicalSize);
-        final settings = _SettingsRepository()
-          ..settings = const AppSettings.defaults().copyWith(
-            navigationMode: mode,
+    for (final (platform, width) in [
+      (TargetPlatform.android, 390.0),
+      (TargetPlatform.android, 1280.0),
+      (TargetPlatform.windows, 390.0),
+      (TargetPlatform.windows, 1280.0),
+      (TargetPlatform.macOS, 390.0),
+      (TargetPlatform.macOS, 1280.0),
+    ]) {
+      _workspaceTestWidgets(
+        'root swipe groups stay isolated on $platform at $width in $mode',
+        (tester) async {
+          tester.view.devicePixelRatio = 1;
+          tester.view.physicalSize = Size(width, 850);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(tester.view.resetPhysicalSize);
+          final settings = _SettingsRepository()
+            ..settings = const AppSettings.defaults().copyWith(
+              navigationMode: mode,
+            );
+          final auth = _AuthRepository();
+          addTearDown(auth.dispose);
+          final router = createBiliRouter(
+            playerBuilder: (_, _, _) => const SizedBox(),
+            accountBuilder: (_) => const SizedBox(),
           );
-        final auth = _AuthRepository();
-        addTearDown(auth.dispose);
-        final router = createBiliRouter(
-          playerBuilder: (_, _, _) => const SizedBox(),
-          accountBuilder: (_) => const SizedBox(),
-        );
-        addTearDown(router.dispose);
-        await tester.pumpWidget(
-          ProviderScope(
-            overrides: [
-              authRepositoryProvider.overrideWithValue(auth),
-              settingsRepositoryProvider.overrideWithValue(settings),
-              feedRepositoryProvider.overrideWithValue(_FeedRepository()),
-              homeRepositoryProvider.overrideWithValue(_HomeRepository()),
-            ],
-            child: InputTestApp.router(routerConfig: router),
-          ),
-        );
-        await tester.pumpAndSettle();
-        final originalState = tester.state(find.byType(FeedScreen));
-        final scope = ProviderScope.containerOf(
-          tester.element(find.byType(FeedScreen)),
-        );
-        final surface = find.byKey(const ValueKey('home-channel-swipe'));
-        await tester.drag(surface, const Offset(-220, 0));
-        await tester.pumpAndSettle();
-        expect(
-          router.routeInformationProvider.value.uri.queryParameters,
-          containsPair('channel', 'popular'),
-        );
-        expect(
-          router.routeInformationProvider.value.uri.queryParameters,
-          containsPair('tab', 'home'),
-        );
-        expect(scope.read(feedControllerProvider).channel, HomeChannel.popular);
-        await tester.drag(surface, const Offset(-220, 0));
-        await tester.pumpAndSettle();
-        expect(find.text('登录后可查看动态'), findsOneWidget);
-        await tester.tap(find.byKey(const ValueKey('workspace-bottom-home')));
-        await tester.pumpAndSettle();
-        expect(
-          tester.widget<FeedScreen>(find.byType(FeedScreen)).channel,
-          HomeChannel.popular,
-        );
-        router.go('/?channel=recommended&tab=home');
-        await tester.pumpAndSettle();
-        for (final channel in HomeChannel.primaryValues.skip(1)) {
-          await tester.drag(surface, const Offset(-220, 0));
+          addTearDown(router.dispose);
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                authRepositoryProvider.overrideWithValue(auth),
+                settingsRepositoryProvider.overrideWithValue(settings),
+                feedRepositoryProvider.overrideWithValue(_FeedRepository()),
+                homeRepositoryProvider.overrideWithValue(_HomeRepository()),
+              ],
+              child: InputTestApp.router(routerConfig: router),
+            ),
+          );
           await tester.pumpAndSettle();
+          final originalState = tester.state(find.byType(FeedScreen));
+          final scope = ProviderScope.containerOf(
+            tester.element(find.byType(FeedScreen)),
+          );
+          final surface = find.byKey(const ValueKey('home-channel-swipe'));
+          final compact = compactChannelNavigationForPlatform(
+            platform,
+            compact: width < 600,
+          );
+          final home = channelsForSection(
+            WorkspaceSection.home,
+            compact: compact,
+          );
+          final dx = width * .65;
+          void expectChannel(HomeChannel channel) {
+            expect(
+              router.routeInformationProvider.value.uri.queryParameters,
+              containsPair('channel', channel.name),
+            );
+            expect(
+              tester.widget<FeedScreen>(find.byType(FeedScreen)).channel,
+              channel,
+            );
+          }
+
+          // Visit the next root first so a boundary drag cannot reveal even an
+          // already-mounted unrelated page.
+          router.go('/?channel=dynamic&tab=home');
+          await tester.pumpAndSettle();
+          router.go('/?channel=recommended&tab=home');
+          await tester.pumpAndSettle();
+          for (final channel in home.skip(1)) {
+            await tester.drag(surface, Offset(-dx, 0));
+            await tester.pumpAndSettle();
+            expectChannel(channel);
+            if (channel == HomeChannel.popular) {
+              expect(scope.read(feedControllerProvider).channel, channel);
+            }
+            expect(
+              find.byKey(ValueKey('channel-${channel.name}')).hitTestable(),
+              findsOneWidget,
+            );
+          }
+          Future<void> boundary(HomeChannel channel, double direction) async {
+            final position = tester
+                .state<ScrollableState>(
+                  find
+                      .descendant(
+                        of: surface,
+                        matching: find.byType(Scrollable),
+                      )
+                      .first,
+                )
+                .position;
+            final pixels = position.pixels;
+            final gesture = await tester.startGesture(
+              tester.getCenter(surface),
+            );
+            await gesture.moveBy(Offset(direction * dx, 0));
+            await tester.pump();
+            expect(
+              position.pixels,
+              closeTo(pixels, .01),
+              reason: 'a boundary drag must not slide another root into view',
+            );
+            await gesture.up();
+            await tester.pumpAndSettle();
+            await tester.fling(surface, Offset(direction * dx, 0), 2000);
+            await tester.pumpAndSettle();
+            expectChannel(channel);
+            await tester.sendEventToBinding(
+              PointerScrollEvent(
+                position: tester.getCenter(surface),
+                scrollDelta: Offset(-direction * width * 2, 0),
+              ),
+            );
+            await tester.pumpAndSettle();
+            expectChannel(channel);
+            final trackpad = await tester.createGesture(
+              kind: PointerDeviceKind.trackpad,
+            );
+            await trackpad.panZoomStart(tester.getCenter(surface));
+            await trackpad.panZoomUpdate(
+              tester.getCenter(surface),
+              pan: Offset(direction * dx, 0),
+            );
+            await tester.pump();
+            expect(position.pixels, closeTo(pixels, .01));
+            await trackpad.panZoomEnd();
+            await tester.pumpAndSettle();
+            expectChannel(channel);
+          }
+
+          await boundary(home.last, -1);
+          for (final channel in home.reversed.skip(1)) {
+            await tester.drag(surface, Offset(dx, 0));
+            await tester.pumpAndSettle();
+            expectChannel(channel);
+          }
+          await boundary(home.first, 1);
+
+          final prefix = width < 600 ? 'workspace-bottom' : 'workspace-nav';
+          await tester.tap(find.byKey(ValueKey('$prefix-dynamic')));
+          await tester.pump();
+          final primary = find.byType(PrimaryNavigationTransition);
+          final fade = find
+              .descendant(of: primary, matching: find.byType(FadeTransition))
+              .first;
           expect(
-            tester.widget<FeedScreen>(find.byType(FeedScreen)).channel,
-            channel,
+            tester.widget<PrimaryNavigationTransition>(primary).enabled,
+            compact,
           );
           expect(
-            find.byKey(ValueKey('channel-${channel.name}')).hitTestable(),
-            findsOneWidget,
+            tester.widget<FadeTransition>(fade).opacity.value,
+            compact ? lessThan(1) : equals(1),
           );
-        }
-        await tester.drag(surface, const Offset(-220, 0));
-        await tester.pumpAndSettle();
-        expect(
-          tester.widget<FeedScreen>(find.byType(FeedScreen)).channel,
-          HomeChannel.favorites,
-        );
-        expect(tester.state(find.byType(FeedScreen)), same(originalState));
-        expect(
-          ProviderScope.containerOf(tester.element(find.byType(FeedScreen))),
-          same(scope),
-        );
-        expect(find.byType(FeedScreen, skipOffstage: false), findsOneWidget);
-        expect(tester.takeException(), isNull);
-        await tester.pumpWidget(const SizedBox());
-      },
-      platform: TargetPlatform.android,
-    );
+          await tester.pumpAndSettle();
+          expectChannel(HomeChannel.dynamic);
+          await boundary(HomeChannel.dynamic, 1);
+          final trackpad = await tester.createGesture(
+            kind: PointerDeviceKind.trackpad,
+          );
+          await trackpad.panZoomStart(tester.getCenter(surface));
+          await trackpad.panZoomUpdate(
+            tester.getCenter(surface),
+            pan: Offset(-dx, 0),
+          );
+          await trackpad.panZoomEnd();
+          await tester.pumpAndSettle();
+          expectChannel(HomeChannel.videoDynamic);
+          await boundary(HomeChannel.videoDynamic, -1);
+          await tester.sendEventToBinding(
+            PointerScrollEvent(
+              position: tester.getCenter(surface),
+              scrollDelta: Offset(-width * 2, 0),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expectChannel(HomeChannel.dynamic);
+
+          if (!compact) {
+            await tester.tap(find.byKey(ValueKey('$prefix-live')));
+            await tester.pumpAndSettle();
+            expectChannel(HomeChannel.live);
+            expect(find.byKey(const ValueKey('channel-live')), findsNothing);
+            expect(
+              find.byKey(const ValueKey('workspace-live-section-strip')),
+              findsOneWidget,
+            );
+            for (final section in HomeChannel.live.sections) {
+              await tester.tap(
+                find.byKey(ValueKey('workspace-live-section-$section')),
+              );
+              await tester.pumpAndSettle();
+              await boundary(HomeChannel.live, -1);
+              await boundary(HomeChannel.live, 1);
+              expect(
+                router
+                    .routeInformationProvider
+                    .value
+                    .uri
+                    .queryParameters['section'],
+                section,
+              );
+            }
+          }
+
+          await tester.tap(find.byKey(ValueKey('$prefix-mine')));
+          await tester.pumpAndSettle();
+          final mine = find.byKey(const ValueKey('account-content-pages'));
+          void expectAccount(AccountContentTab tab) => expect(
+            tester
+                .widget<RetainedTabView<AccountContentTab>>(
+                  find.byType(RetainedTabView<AccountContentTab>),
+                )
+                .value,
+            tab,
+          );
+          expectAccount(AccountContentTab.history);
+          await tester.fling(mine, Offset(dx, 0), 2000);
+          await tester.pumpAndSettle();
+          expectAccount(AccountContentTab.history);
+          for (final tab in AccountContentTab.values.skip(1)) {
+            await tester.drag(mine, Offset(-dx, 0));
+            await tester.pumpAndSettle();
+            expectAccount(tab);
+            expect(router.routeInformationProvider.value.uri.path, '/me');
+          }
+          await tester.fling(mine, Offset(-dx, 0), 2000);
+          await tester.pumpAndSettle();
+          expectAccount(AccountContentTab.downloads);
+          await tester.tap(find.byKey(ValueKey('$prefix-home')));
+          await tester.pumpAndSettle();
+          expectChannel(HomeChannel.recommended);
+          expect(tester.state(find.byType(FeedScreen)), same(originalState));
+          expect(
+            ProviderScope.containerOf(tester.element(find.byType(FeedScreen))),
+            same(scope),
+          );
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox());
+        },
+        platform: platform,
+      );
+    }
   }
   for (final mode in WorkspaceNavigationMode.values) {
     _workspaceTestWidgets(

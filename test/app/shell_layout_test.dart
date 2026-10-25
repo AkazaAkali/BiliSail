@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets(
-    'narrow navigation has four destinations and desktop keeps live separate',
+    'mobile narrow navigation has four destinations and wide keeps live separate',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -37,6 +37,10 @@ void main() {
         ['首页', '动态', '我的', '设置'],
       );
       expect(find.byKey(const ValueKey('channel-live')), findsOneWidget);
+      // Reselecting the current destination is a no-op, even without a router.
+      await tester.tap(find.byKey(const ValueKey('workspace-bottom-home')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
       for (final width in [600.0, 960.0, 1440.0]) {
         tester.view.physicalSize = Size(width, 844);
         await tester.pumpAndSettle();
@@ -56,6 +60,7 @@ void main() {
         expect(tester.takeException(), isNull);
       }
     },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
   );
   testWidgets(
     'desktop utilities stay at the bottom while main navigation scrolls',
@@ -445,32 +450,26 @@ void main() {
       expect(find.text('全部分区'), findsNothing);
       expect(find.byKey(const ValueKey('channel-ranking')), findsNothing);
       expect(find.byKey(const ValueKey('workspace-back')), findsNothing);
-      if (width >= 600) {
-        expect(find.byKey(const ValueKey('home-channel-strip')), findsNothing);
-        expect(find.byKey(const ValueKey('channel-live')), findsNothing);
-        for (final section in ['推荐直播', '我的关注', '观看记录']) {
-          expect(
-            find.byKey(ValueKey('workspace-live-section-$section')),
-            findsOneWidget,
-          );
-        }
-      } else {
-        expect(find.byKey(const ValueKey('channel-live')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-channel-strip')), findsNothing);
+      expect(find.byKey(const ValueKey('channel-live')), findsNothing);
+      for (final section in ['推荐直播', '我的关注', '观看记录']) {
         expect(
-          find.byKey(const ValueKey('workspace-live-section-strip')),
-          findsNothing,
+          find.byKey(ValueKey('workspace-live-section-$section')),
+          findsOneWidget,
         );
+      }
+      if (width < 600) {
         final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
         expect(
           bar.destinations.whereType<NavigationDestination>().map(
             (item) => item.label,
           ),
-          ['首页', '动态', '我的', '设置'],
+          ['首页', '动态', '直播', '我的', '设置'],
         );
       }
       expect(tester.takeException(), isNull, reason: '$width');
     }
-  });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   for (final mode in WorkspaceNavigationMode.values) {
     for (final location in ['/', '/search?q=cat']) {
@@ -720,7 +719,10 @@ void main() {
           await tester.pumpAndSettle();
           for (final channel in channelsForSection(
             WorkspaceSection.home,
-            compact: width < 600,
+            compact: compactChannelNavigationForPlatform(
+              theme.platform,
+              compact: width < 600,
+            ),
           )) {
             final tab = find.byKey(ValueKey('channel-${channel.name}'));
             final label = find.descendant(

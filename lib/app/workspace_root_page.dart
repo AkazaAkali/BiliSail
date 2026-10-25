@@ -47,28 +47,11 @@ class WorkspaceRootPage extends StatefulWidget {
 }
 
 class _WorkspaceRootPageState extends State<WorkspaceRootPage> {
-  final _locations = <WorkspaceRootSection, Uri>{};
   final _storage = <WorkspaceRootSection, PageStorageBucket>{};
+  final _roots = <WorkspaceRootSection, Widget>{};
 
   WorkspaceRootSection get _selected =>
       WorkspaceRootSection.fromLocation(widget.location);
-
-  @override
-  void initState() {
-    super.initState();
-    _rememberLocation();
-  }
-
-  @override
-  void didUpdateWidget(WorkspaceRootPage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _rememberLocation();
-  }
-
-  void _rememberLocation() {
-    _locations[_selected] = widget.location;
-    _storage.putIfAbsent(_selected, PageStorageBucket.new);
-  }
 
   Widget _buildRoot(
     BuildContext context,
@@ -103,19 +86,27 @@ class _WorkspaceRootPageState extends State<WorkspaceRootPage> {
   );
 
   @override
-  Widget build(BuildContext context) => Stack(
-    fit: StackFit.expand,
-    children: [
-      for (final section in WorkspaceRootSection.values)
-        if (_locations[section] case final location?)
-          _retained(
-            key: ValueKey('workspace-root-${section.name}'),
-            selected: _selected == section,
-            storage: _storage.putIfAbsent(section, PageStorageBucket.new),
-            child: Builder(
-              builder: (context) => _buildRoot(context, section, location),
+  Widget build(BuildContext context) {
+    final selected = _selected;
+    final location = widget.location;
+    // Only the selected branch receives new route/configuration callbacks.
+    // Other branches still react to inherited state and account providers, but
+    // unrelated navigation does not rebuild all their feature trees.
+    _roots[selected] = Builder(
+      builder: (context) => _buildRoot(context, selected, location),
+    );
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        for (final section in WorkspaceRootSection.values)
+          if (_roots[section] case final root?)
+            _retained(
+              key: ValueKey('workspace-root-${section.name}'),
+              selected: _selected == section,
+              storage: _storage.putIfAbsent(section, PageStorageBucket.new),
+              child: root,
             ),
-          ),
-    ],
-  );
+      ],
+    );
+  }
 }
