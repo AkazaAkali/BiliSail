@@ -12,6 +12,7 @@ import '../../../shared/ui/system_font_picker.dart';
 import '../../../shared/ui/danmaku_settings_controls.dart';
 import '../../../shared/ui/player_controls_mode_setting.dart';
 import '../../../shared/ui/app_notice.dart';
+import '../../../shared/ui/app_dialog.dart';
 import '../../../domain/playback_rates.dart';
 import '../application/settings_controller.dart';
 import '../application/app_update_controller.dart';
@@ -28,7 +29,7 @@ const _usageNotice = <Widget>[
   Text('如果侵犯了您的合法权益，请及时联系开发者，我们会第一时间处理并删除相关内容。'),
 ];
 
-final class SettingsScreen extends StatefulWidget {
+final class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({
     super.key,
     this.category = SettingsCategory.appearance,
@@ -38,11 +39,12 @@ final class SettingsScreen extends StatefulWidget {
   final ValueChanged<SettingsCategory>? onCategoryChanged;
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-final class _SettingsScreenState extends State<SettingsScreen> {
+final class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late SettingsCategory _category = widget.category;
+  bool _resetting = false;
   // The retained settings page must not own the home channel strip's progress.
   late final _progress = TabPagingProgress(widget.category.index.toDouble());
 
@@ -67,6 +69,38 @@ final class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _resetSettings() async {
+    setState(() => _resetting = true);
+    try {
+      final confirmed = await showAppDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('恢复默认设置'),
+          content: const Text(
+            '将所有应用设置（包括快捷键）恢复为当前平台的默认值，并立即保存。账号、观看记录和下载内容不受影响。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('确认恢复'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      await ref.read(settingsControllerProvider.notifier).resetToDefaults();
+      if (mounted) showAppNotice(context, '已恢复当前平台的默认设置');
+    } catch (_) {
+      if (mounted) showAppNotice(context, '恢复默认设置失败，请重试');
+    } finally {
+      if (mounted) setState(() => _resetting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -74,10 +108,28 @@ final class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-          child: Text(
-            '设置',
-            key: const ValueKey('settings-page-title'),
-            style: Theme.of(context).textTheme.titleLarge,
+          child: OverflowBar(
+            alignment: MainAxisAlignment.spaceBetween,
+            overflowAlignment: OverflowBarAlignment.start,
+            spacing: 12,
+            overflowSpacing: 4,
+            children: [
+              Text(
+                '设置',
+                key: const ValueKey('settings-page-title'),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              TextButton.icon(
+                key: const ValueKey('reset-settings'),
+                onPressed:
+                    _resetting ||
+                        !ref.watch(settingsControllerProvider).hasValue
+                    ? null
+                    : _resetSettings,
+                icon: const Icon(Icons.restore),
+                label: const Text('恢复默认设置'),
+              ),
+            ],
           ),
         ),
         SizedBox(

@@ -4,6 +4,7 @@ import 'package:bilisail/features/settings/application/settings_controller.dart'
 import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:bilisail/features/settings/domain/settings_category.dart';
 import 'package:bilisail/features/settings/domain/settings_repository.dart';
+import 'package:bilisail/features/settings/domain/shortcut_settings.dart';
 import 'package:bilisail/features/settings/presentation/settings_screen.dart';
 import 'package:bilisail/shared/ui/app_notice.dart';
 import 'package:flutter/gestures.dart';
@@ -12,6 +13,104 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets(
+    'reset requires confirmation, applies defaults and reloads them',
+    (tester) async {
+      const defaults = AppSettings.defaults(
+        danmakuArea: .5,
+        danmakuFontScale: .6,
+      );
+      final repository = _SettingsRepository()
+        ..settings = defaults.copyWith(
+          theme: AppThemePreference.dark,
+          danmakuArea: 1,
+          shortcuts: const ShortcutSettings.defaults().withEnabled(false),
+        );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(repository),
+            settingsDefaultsProvider.overrideWithValue(defaults),
+          ],
+          child: MaterialApp(
+            builder: AppNoticeHost.builder,
+            home: const Scaffold(body: SettingsScreen()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final reset = find.byKey(const ValueKey('reset-settings'));
+      await tester.tap(reset);
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(repository.settings.theme, AppThemePreference.dark);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(repository.settings.theme, AppThemePreference.dark);
+      expect(tester.widget<TextButton>(reset).onPressed, isNotNull);
+      await tester.tap(reset);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('确认恢复'));
+      await tester.pumpAndSettle();
+      expect(repository.settings.theme, AppThemePreference.system);
+      expect(repository.settings.danmakuArea, .5);
+      expect(repository.settings.danmakuFontScale, .6);
+      expect(repository.settings.shortcuts.enabled, isTrue);
+      expect(
+        tester
+            .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '跟随系统'))
+            .selected,
+        isTrue,
+      );
+      expect(find.text('已恢复当前平台的默认设置'), findsOneWidget);
+      final container = ProviderScope.containerOf(tester.element(reset));
+      container.invalidate(settingsControllerProvider);
+      await tester.pumpAndSettle();
+      expect(
+        container.read(settingsControllerProvider).requireValue.danmakuArea,
+        .5,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'reset failure keeps the saved preference and reports the failure',
+    (tester) async {
+      final repository = _SettingsRepository()
+        ..settings = const AppSettings.defaults().copyWith(
+          theme: AppThemePreference.dark,
+        )
+        ..failSave = true;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [settingsRepositoryProvider.overrideWithValue(repository)],
+          child: MaterialApp(
+            builder: AppNoticeHost.builder,
+            home: const Scaffold(
+              body: SettingsScreen(category: SettingsCategory.playback),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('reset-settings')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('确认恢复'));
+      await tester.pumpAndSettle();
+      expect(repository.settings.theme, AppThemePreference.dark);
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(SettingsScreen)),
+      );
+      expect(
+        container.read(settingsControllerProvider).requireValue.theme,
+        AppThemePreference.dark,
+      );
+      expect(find.text('恢复默认设置失败，请重试'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('title and category strip stay above the scrolling settings', (
     tester,
   ) async {

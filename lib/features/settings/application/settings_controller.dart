@@ -11,6 +11,10 @@ final settingsRepositoryProvider = Provider<SettingsRepository>(
       throw UnimplementedError('SettingsRepository must be provided by app'),
 );
 
+final settingsDefaultsProvider = Provider<AppSettings>(
+  (ref) => const AppSettings.defaults(),
+);
+
 final settingsControllerProvider =
     AsyncNotifierProvider<SettingsController, AppSettings>(
       SettingsController.new,
@@ -150,10 +154,23 @@ final class SettingsController extends AsyncNotifier<AppSettings> {
   Future<void> setSponsorBlockCategories(List<String> value) =>
       update((current) => current.copyWith(sponsorBlockCategories: value));
 
+  Future<void> resetToDefaults() async {
+    final defaults = ref.read(settingsDefaultsProvider);
+    await _updateSettings(
+      (current) => defaults.copyWith(shortcuts: current.shortcuts),
+      shortcuts: defaults.shortcuts,
+    );
+  }
+
   @override
   Future<AppSettings> update(
     FutureOr<AppSettings> Function(AppSettings) cb, {
     FutureOr<AppSettings> Function(Object, StackTrace)? onError,
+  }) => _updateSettings(cb);
+
+  Future<AppSettings> _updateSettings(
+    FutureOr<AppSettings> Function(AppSettings) cb, {
+    ShortcutSettings? shortcuts,
   }) async {
     final previous = state.asData?.value ?? await future;
     final shortcutRevision = _shortcutCommitRevision;
@@ -167,11 +184,20 @@ final class SettingsController extends AsyncNotifier<AppSettings> {
     final write = _writeQueue.then((_) async {
       // A queued appearance/player setting must preserve a shortcut snapshot
       // committed after this optimistic update was prepared.
-      final persisted = shortcutRevision == _shortcutCommitRevision
+      final persisted = shortcuts != null
+          ? next.copyWith(shortcuts: shortcuts)
+          : shortcutRevision == _shortcutCommitRevision
           ? next
           : next.copyWith(shortcuts: _persisted?.shortcuts ?? next.shortcuts);
       await repository.save(persisted);
       _persisted = persisted;
+      if (shortcuts != null) {
+        // Reset shortcuts only after saving, just like an explicit shortcut edit.
+        ++_shortcutCommitRevision;
+        if (ref.mounted) {
+          state = AsyncData(state.requireValue.copyWith(shortcuts: shortcuts));
+        }
+      }
     });
     // A failed write must not prevent a newer setting from reaching storage.
     _writeQueue = write.then<void>(

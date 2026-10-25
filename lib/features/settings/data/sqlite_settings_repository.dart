@@ -20,17 +20,20 @@ class SqliteSettingsRepository implements SettingsRepository {
   final double defaultDanmakuArea;
   final double defaultDanmakuFontScale;
   final PlayerControlsMode defaultPlayerControlsMode;
+
+  AppSettings get defaults => AppSettings.defaults(
+    navigationMode: defaultNavigationMode,
+    highEnergyProgressEnabled: defaultHighEnergyProgressEnabled,
+    danmakuArea: defaultDanmakuArea,
+    danmakuFontScale: defaultDanmakuFontScale,
+    playerControlsMode: defaultPlayerControlsMode,
+  );
+
   @override
   Future<AppSettings> load() async {
     final value = await database.readSetting('preferences.v1');
     if (value == null) {
-      return AppSettings.defaults(
-        navigationMode: defaultNavigationMode,
-        highEnergyProgressEnabled: defaultHighEnergyProgressEnabled,
-        danmakuArea: defaultDanmakuArea,
-        danmakuFontScale: defaultDanmakuFontScale,
-        playerControlsMode: defaultPlayerControlsMode,
-      );
+      return defaults;
     }
     final Object? decoded = jsonDecode(value);
     if (decoded is! Map<String, Object?>) {

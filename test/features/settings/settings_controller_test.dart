@@ -9,6 +9,134 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('failed reset restores saved settings and never activates default shortcuts', () async {
+    final custom = const AppSettings.defaults().copyWith(
+      theme: AppThemePreference.dark,
+      shortcuts: const ShortcutSettings.defaults().withEnabled(false),
+    );
+    final repository = _DeferredSettingsRepository()..stored = custom;
+    final container = ProviderContainer(
+      overrides: [settingsRepositoryProvider.overrideWithValue(repository)],
+    );
+    addTearDown(container.dispose);
+    await container.read(settingsControllerProvider.future);
+    final controller = container.read(settingsControllerProvider.notifier);
+
+    final reset = controller.resetToDefaults();
+    final assertion = expectLater(reset, throwsStateError);
+    expect(
+      container.read(settingsControllerProvider).requireValue.shortcuts.enabled,
+      isFalse,
+    );
+    await Future<void>.delayed(Duration.zero);
+    repository.failNext();
+    await assertion;
+    expect(
+      container.read(settingsControllerProvider).requireValue,
+      same(custom),
+    );
+    expect(repository.stored, same(custom));
+
+    final retry = controller.resetToDefaults();
+    await Future<void>.delayed(Duration.zero);
+    repository.completeNext();
+    await retry;
+    expect(
+      container.read(settingsControllerProvider).requireValue.theme,
+      AppThemePreference.system,
+    );
+    expect(
+      container.read(settingsControllerProvider).requireValue.shortcuts.enabled,
+      isTrue,
+    );
+  });
+
+  test(
+    'reset overrides an earlier shortcut save and preserves later settings',
+    () async {
+      final repository = _DeferredSettingsRepository();
+      final container = ProviderContainer(
+        overrides: [settingsRepositoryProvider.overrideWithValue(repository)],
+      );
+      addTearDown(container.dispose);
+      await container.read(settingsControllerProvider.future);
+      final controller = container.read(settingsControllerProvider.notifier);
+      final shortcut = controller.setShortcuts(
+        const ShortcutSettings.defaults().withEnabled(false),
+      );
+      await Future<void>.delayed(Duration.zero);
+      final reset = controller.resetToDefaults();
+      final theme = controller.setTheme(AppThemePreference.dark);
+      repository.completeNext();
+      await shortcut;
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        container
+            .read(settingsControllerProvider)
+            .requireValue
+            .shortcuts
+            .enabled,
+        isFalse,
+      );
+      repository.completeNext();
+      await reset;
+      expect(
+        container
+            .read(settingsControllerProvider)
+            .requireValue
+            .shortcuts
+            .enabled,
+        isTrue,
+      );
+      expect(
+        container.read(settingsControllerProvider).requireValue.theme,
+        AppThemePreference.dark,
+      );
+      await Future<void>.delayed(Duration.zero);
+      repository.completeNext();
+      await theme;
+      expect(repository.stored.theme, AppThemePreference.dark);
+      expect(
+        repository.stored.shortcuts.toJson(),
+        const ShortcutSettings.defaults().toJson(),
+      );
+    },
+  );
+
+  test(
+    'appearance queued after reset cannot restore old shortcut bindings',
+    () async {
+      final repository = _DeferredSettingsRepository()
+        ..stored = const AppSettings.defaults().copyWith(
+          shortcuts: const ShortcutSettings.defaults().withEnabled(false),
+        );
+      final container = ProviderContainer(
+        overrides: [settingsRepositoryProvider.overrideWithValue(repository)],
+      );
+      addTearDown(container.dispose);
+      await container.read(settingsControllerProvider.future);
+      final controller = container.read(settingsControllerProvider.notifier);
+      final reset = controller.resetToDefaults();
+      final theme = controller.setTheme(AppThemePreference.dark);
+      await Future<void>.delayed(Duration.zero);
+      repository.completeNext();
+      await reset;
+      await Future<void>.delayed(Duration.zero);
+      repository.completeNext();
+      await theme;
+      expect(repository.stored.shortcuts.enabled, isTrue);
+      expect(repository.stored.theme, AppThemePreference.dark);
+      expect(
+        container
+            .read(settingsControllerProvider)
+            .requireValue
+            .shortcuts
+            .enabled,
+        isTrue,
+      );
+    },
+  );
+
   test(
     'wheel damping updates live, queues saves and rolls back failures',
     () async {

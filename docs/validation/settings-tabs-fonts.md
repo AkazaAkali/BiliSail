@@ -59,3 +59,15 @@
 设置内容复用原有控件与全局设置控制器，首次选中的分类才挂载；已访问分类保留独立滚动位置和控件状态，关闭工作区时释放。进入或切换分类不会自动保存设置，滑块的水平拖动继续调整原设置，桌面鼠标不触发分类分页，列表仍保留滚轮与滚动条。
 
 新增 5 项设置页行为回归覆盖全部分类双向遍历／首尾边界、短滑／取消／鼠标拖动、滚动位置与正常保存、隐藏／外部选择以及桌面滚轮／滑块；另有真实路由回归确认分类更新与工作区页面复用。共享标签栏、完整自动检查与实机验收边界见 [子标签栏过渡验证](single-page-navigation.md)。
+
+## 恢复当前平台默认设置（2026-10-25）
+
+设置页标题旁新增“恢复默认设置”，所有分类共用同一入口，窄屏或大字号下可自动换行。确认弹窗说明恢复范围；取消不会保存，确认后将外观、播放、弹幕、字幕、空降助手和快捷键等 `AppSettings` 偏好恢复并写入既有 `preferences.v1`。账号、观看记录、下载内容和独立下载配置保持原状，不修改数据库表或快照版本。
+
+默认值复用 `SqliteSettingsRepository.defaults`，由 app 组合根将同一份配置注入 `settingsDefaultsProvider`；首次启动和显式重置均使用 `lib/app/platform_defaults.dart` 注入的导航、高能进度条、弹幕区域／字号及播放控件模式。保存沿用设置控制器的串行队列和失败回退；快捷键在保存成功后切换，排队中的旧快捷键保存不会覆盖后发的重置，重置后的其他设置修改也不会恢复旧快捷键。
+
+新增 8 项回归覆盖 Android／Windows／macOS 默认快照完整保存与重载、独立下载配置保留、确认／取消、保存失败／重试及快捷键与后续设置的排队竞态。设置相关定向回归共 49 项通过，设置功能与组合根的定向静态分析通过。四个子包的格式、静态分析和离线测试通过（bili_api 456、bili_player 81、bili_danmaku 93、bili_mux 2）；mux 另有 10 项原生测试因未配置 `BILI_MUX_LIBRARY` 跳过。
+
+`tool/check.ps1 -SkipPub` 的平台打包边界和根格式检查通过，全量分析被同期新增的 `test/app/predictive_back_test.dart:271`、`test/support/system_back_gesture.dart:23` 两处 `curly_braces_in_flow_control_structures` 阻塞。继续单独执行根应用全量测试：2352 项通过，`predictive_back_test.dart` 的 `keyboard change invalidates a pending gesture` 失败（预期 `/history`，实际 `/`）；这些同期返回手势文件不属于本次修改范围。日志为 `build/settings-reset-check.log`、`build/settings-reset-root-tests.log`、`build/settings-reset-package-checks.log` 和 `build/settings-reset-analysis.log`。
+
+当前无可连接的 Flutter 调试实例，未完成热重载、构建或三端实机验收。

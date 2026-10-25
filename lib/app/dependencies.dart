@@ -456,6 +456,7 @@ class AppDependencies {
           ),
         ),
         settingsRepositoryProvider.overrideWithValue(settings),
+        settingsDefaultsProvider.overrideWithValue(settings.defaults),
         systemFontCatalogProvider.overrideWithValue(
           const NativeSystemFontCatalog(),
         ),
