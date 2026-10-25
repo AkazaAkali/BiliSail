@@ -16,6 +16,15 @@ import '../support/input_test_app.dart';
 import '../support/system_back_gesture.dart';
 
 void main() {
+  final binding = TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() {
+    final view = binding.platformDispatcher.views.single;
+    view.devicePixelRatio = 1;
+    view.physicalSize = const Size(390, 844);
+    addTearDown(view.resetDevicePixelRatio);
+    addTearDown(view.resetPhysicalSize);
+  });
+
   for (final mode in WorkspaceNavigationMode.values) {
     for (final target in ['/video/A', '/user/42']) {
       testWidgets(
@@ -108,7 +117,114 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
-  for (final size in const [Size(390, 844), Size(844, 390), Size(1080, 844)]) {
+  for (final mode in WorkspaceNavigationMode.values) {
+    for (final (size, ratio, inset, enabled) in const [
+      (Size(390, 844), 1.0, 0.0, true),
+      (Size(599, 844), 2.0, 0.0, true),
+      (Size(600, 844), 1.0, 0.0, false),
+      (Size(844, 390), 1.0, 0.0, false),
+      (Size(1280, 800), 2.0, 0.0, false),
+      (Size(1600, 1000), 1.0, 0.0, false),
+      (Size(630, 844), 2.0, 16.0, true),
+      (Size(632, 844), 2.0, 16.0, false),
+    ]) {
+      for (final edge in SwipeEdge.values) {
+        testWidgets(
+          'predictive Back matches bottom navigation at $size DPR=$ratio '
+          'inset=$inset in $mode from $edge',
+          (tester) async {
+            tester.view.devicePixelRatio = ratio;
+            tester.view.physicalSize = size * ratio;
+            tester.view.padding = FakeViewPadding(
+              left: inset * ratio,
+              right: inset * ratio,
+            );
+            addTearDown(tester.view.resetPadding);
+            final router = _router(
+              mode: mode,
+              builder: (_, tab) => _PageProbe(tab: tab, disposed: []),
+            );
+            addTearDown(router.dispose);
+            await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+            await tester.pumpAndSettle();
+            expect(
+              find.byType(NavigationBar),
+              enabled ? findsOneWidget : findsNothing,
+            );
+            router.go('/video/A');
+            await tester.pumpAndSettle();
+            final video = find.byKey(const ValueKey('page-surface-/video/A'));
+            final original = tester.getRect(video);
+            expect(
+              await systemBackGesture(tester, 'startBackGesture', edge: edge),
+              enabled,
+            );
+            await systemBackGesture(
+              tester,
+              'updateBackGestureProgress',
+              progress: 0.5,
+              edge: edge,
+            );
+            await tester.pump();
+            expect(
+              find.byKey(const ValueKey('page-surface-/')),
+              enabled ? findsOneWidget : findsNothing,
+            );
+            expect(tester.getRect(video), enabled ? isNot(original) : original);
+            await systemBackGesture(tester, 'cancelBackGesture');
+            await tester.pumpAndSettle();
+            expect(router.routeInformationProvider.value.uri.path, '/video/A');
+            expect(tester.getRect(video), original);
+            await systemBackGesture(tester, 'startBackGesture', edge: edge);
+            await systemBackGesture(tester, 'commitBackGesture');
+            await tester.pumpAndSettle();
+            expect(router.routeInformationProvider.value.uri.path, '/');
+            expect(tester.takeException(), isNull);
+            await tester.pumpWidget(const SizedBox.shrink());
+          },
+          variant: TargetPlatformVariant.only(TargetPlatform.android),
+        );
+      }
+    }
+  }
+
+  testWidgets('resizing disables a pending preview without replacing pages', (
+    tester,
+  ) async {
+    final router = _router(
+      builder: (_, tab) => _PageProbe(tab: tab, disposed: []),
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+    router.go('/video/A');
+    await tester.pumpAndSettle();
+    final video = find.byKey(const ValueKey('page-surface-/video/A'));
+    final element = tester.element(video);
+    expect(await systemBackGesture(tester, 'startBackGesture'), isTrue);
+    await systemBackGesture(tester, 'updateBackGestureProgress', progress: 0.5);
+    await tester.pump();
+    tester.view.physicalSize = const Size(1280, 800);
+    await tester.pumpAndSettle();
+    await systemBackGesture(tester, 'commitBackGesture');
+    await tester.pumpAndSettle();
+    expect(router.routeInformationProvider.value.uri.path, '/video/A');
+    expect(tester.element(video), same(element));
+    expect(find.byKey(const ValueKey('page-surface-/')), findsNothing);
+    expect(await systemBackGesture(tester, 'startBackGesture'), isFalse);
+    await systemBackGesture(tester, 'cancelBackGesture');
+    tester.view.physicalSize = const Size(599, 844);
+    await tester.pumpAndSettle();
+    expect(tester.element(video), same(element));
+    expect(await systemBackGesture(tester, 'startBackGesture'), isTrue);
+    await systemBackGesture(tester, 'commitBackGesture');
+    await tester.pumpAndSettle();
+    expect(router.routeInformationProvider.value.uri.path, '/');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
+  for (final size in const [Size(390, 844), Size(599, 844), Size(599, 390)]) {
     for (final edge in SwipeEdge.values) {
       testWidgets(
         'video Back keeps two full-size pages adjacent at $size from $edge',

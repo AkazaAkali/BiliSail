@@ -240,6 +240,8 @@ Riverpod 负责状态订阅和注入，不承担弹幕逐帧广播。路由 prov
 
 2026-10-07 首页视频频道、其他首页子标签、观看历史和搜索结果已改用按视口懒创建的 Sliver 列表；共享视频网格使用 `SliverVideoGrid` / `SliverResponsiveCardGrid`，按行保留自然高度与原有响应式列数。行委托只在数据、动作或横向布局改变时更新，滚动位置变化不替换委托；分页尾部和回顶部按钮单独更新。页面的领域列表仍完整保留，稍后再看队列使用完整列表；屏幕外卡片释放自己的悬停预览资源，隐藏子标签保留列表滚动位置。具体性能证据和平台边界见 [列表滚动性能修复](validation/feed-scroll-performance.md)。
 
+Android 工作区预测式返回动画按根页面底栏布局的同一断点启停：安全区内可用宽度小于 600 逻辑像素时启用，达到 600 时仅执行普通返回。窗口缩放、横竖屏和分屏后自动更新，导航模式与缓存页面状态保持；实现与验证见 [Android 预测式返回](validation/android-predictive-back.md)。
+
 桌面提供 hover、右键、滚轮、可见焦点、快捷键和窗口尺寸恢复；移动提供返回栈、横竖屏、触控手势和安全区。文本缩放、屏幕阅读器和键盘访问在共享组件层处理。
 
 `PlatformServices` 分成小接口：`WindowService`、`AudioSessionService`、`PowerService`、`MediaControlsService`、`PipService`、`FileAccessService`、`ExternalLinkService`。通过 capability 返回支持状态，页面不散落 `Platform.isWindows`。

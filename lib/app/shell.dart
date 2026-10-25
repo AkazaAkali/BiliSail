@@ -31,6 +31,8 @@ import '../shared/ui/page_tab_style.dart';
 import '../shared/ui/retained_tab_view.dart';
 import '../shared/ui/primary_navigation_transition.dart';
 
+const _compactNavigationWidth = 600.0;
+
 typedef WorkspacePageBuilder = Widget Function(
   BuildContext context,
   WorkspaceTab tab,
@@ -186,7 +188,8 @@ final class _BiliAppShellState extends State<BiliAppShell>
   }
 
   bool get _android => Theme.of(context).platform == TargetPlatform.android;
-  bool get _compactChannels => MediaQuery.sizeOf(context).width < 600;
+  bool get _compactChannels =>
+      MediaQuery.sizeOf(context).width < _compactNavigationWidth;
   bool get _animatePrimaryNavigation =>
       _compactChannels &&
       (Theme.of(context).platform == TargetPlatform.android ||
@@ -684,7 +687,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
         body: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final compact = constraints.maxWidth < 600;
+              final compact = constraints.maxWidth < _compactNavigationWidth;
               final wide = constraints.maxWidth >= 1600;
               final colors = Theme.of(context).colorScheme;
               return Column(
@@ -851,30 +854,37 @@ final class _BiliAppShellState extends State<BiliAppShell>
         _viewsForTab(
           _workspace.tabs.firstWhere((tab) => tab.id == destination.id),
         ).any((view) => view.location == destination.location);
-    return PredictiveBackRegion(
-      enabled: supported && !(_pageBack[_displayTab.id]?.canGoBack ?? false),
-      identity: _backIdentity(_displayTab),
-      destinationIdentity: destination == null
-          ? null
-          : _backIdentity(destination),
-      onStart: () {
-        _gestureSource = _displayTab;
-        _gestureDestination = destination;
-        return destination != null;
-      },
-      onEnd: () {
-        _gestureSource = null;
-        _gestureDestination = null;
-      },
-      onBack: _goBack,
-      builder: (context, progress, edge, previewing) =>
-          WorkspaceBackPresentation(
-            progress: progress,
-            edge: edge,
-            source: previewing ? _gestureSource : null,
-            destination: previewing ? _gestureDestination : null,
-            child: child,
-          ),
+    return LayoutBuilder(
+      builder: (context, constraints) => PredictiveBackRegion(
+        // Match the frame's width after SafeArea consumes horizontal padding.
+        enabled:
+            supported &&
+            constraints.maxWidth - MediaQuery.paddingOf(context).horizontal <
+                _compactNavigationWidth &&
+            !(_pageBack[_displayTab.id]?.canGoBack ?? false),
+        identity: _backIdentity(_displayTab),
+        destinationIdentity: destination == null
+            ? null
+            : _backIdentity(destination),
+        onStart: () {
+          _gestureSource = _displayTab;
+          _gestureDestination = destination;
+          return destination != null;
+        },
+        onEnd: () {
+          _gestureSource = null;
+          _gestureDestination = null;
+        },
+        onBack: _goBack,
+        builder: (context, progress, edge, previewing) =>
+            WorkspaceBackPresentation(
+              progress: progress,
+              edge: edge,
+              source: previewing ? _gestureSource : null,
+              destination: previewing ? _gestureDestination : null,
+              child: child,
+            ),
+      ),
     );
   }
 
@@ -1826,7 +1836,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
           const SizedBox(width: 5),
           if (_frameTab(context).location.path != '/' &&
               _frameTab(context).location.path != '/search' &&
-              MediaQuery.sizeOf(context).width >= 600) ...[
+              MediaQuery.sizeOf(context).width >= _compactNavigationWidth) ...[
             _tool('观看历史', BiliIcons.history, '/history'),
             _tool('下载', Icons.download_outlined, '/downloads'),
             _tool('设置', BiliIcons.settings, '/settings'),
