@@ -11,8 +11,7 @@
 | 个人中心 | 打开自己的独立用户标签 |
 | 关注、粉丝、动态统计 | 打开自己的用户页并选中对应列表 |
 | 我的消息 | 打开可复用的消息标签，头像和菜单显示未读总数 |
-| 稍后再看、我的收藏 | 跳转现有首页对应频道 |
-| 历史记录 | 打开现有本地播放历史 |
+| 历史记录、稍后再看、我的收藏 | 跳转“我的”页对应内容标签，复用已保留的列表与筛选状态 |
 | 直播中心 | 跳转现有直播“我的关注”；未扩展 UWP 的装扮/签到能力 |
 | 退出登录 | 复用现有凭据清理与账号任务取消 |
 
@@ -168,6 +167,22 @@ Android 在当前页面没有可返回层级时显示“退出哔帆？”确认
 `tool/check.ps1 -SkipPub` 已执行，根格式、静态分析与打包边界检查通过；根测试重跑时，工作区同期新增的 8 条 Android 键盘隐藏底栏断言失败（`test/app/shell_layout_test.dart`，期望底栏消失但仍存在），因此不能报告全量通过。四个子包另行完成格式、分析和测试：API 456、播放器 81、弹幕 93、封装 2 项通过；封装另有 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。保留同期修改，没有调整这些无关的导航行为。日志为本机忽略文件 `build/account-bcoin-check-final.log`、`build/account-bcoin-packages-check.log`。
 
 未发现可连接的 DTD／Flutter 调试进程，热重载未执行。本轮未构建安装包，真实账号余额与三端运行界面尚未验收。
+
+## 2026-10-25：硬币与 B 币名称对齐
+
+我的页两行余额改为共用名称和数值列：名称右对齐，使“硬币”和“B币”的“币”字上下对齐，金额从同一位置左对齐。列宽按字体和内容自然计算，保留原有行距、普通字号 48 逻辑像素最小高度及垂直居中，大字体仍自然增高。
+
+现有我的页 25 项 Widget 测试通过，补充普通／双倍字号、320／390／600／1200 宽度的字形位置和金额起点断言，并检查宽屏及 320 双倍字号的离线渲染预览。本次两文件静态分析通过；`tool/check.ps1 -SkipPub` 的打包边界和格式检查通过，全量分析被同期 `test/app/predictive_back_test.dart:271`、`test/support/system_back_gesture.dart:23` 的两处 `curly_braces_in_flow_control_structures` 提示阻塞，脚本尚未运行到根测试及子包检查。没有调整这些无关代码。日志为 `build/account-balance-alignment-tests.log` 和 `build/account-balance-alignment-check.log`。本轮未构建或实机验收；未发现可连接的 Flutter 调试应用，热重载未执行。
+
+## 2026-10-25：头像菜单定位我的页内容标签
+
+头像侧边栏的历史记录、稍后再看、我的收藏分别导航到 `/me?section=history`、`/me?section=watchLater`、`/me?section=favorites`。“我的”固定根分支接收路由参数，首次只加载指定内容；已有页面按新参数切换标签，保留各列表、滚动与筛选状态，不新增可关闭的工作区标签。直接点击一级“我的”仍恢复上次内容标签。页内点击或滑动切换标签同步更新路由，避免下次菜单跳转时选中状态与目标不一致。
+
+自动回归覆盖双／多标签、390／1200 宽度的真实头像按钮和抽屉入口、首次及重复打开、已打开页面的路由切换、筛选保留与四个内容标签的懒加载。没有新增协议、依赖或存储迁移。本轮没有构建或进行三端运行界面验收；尝试发现调试进程和热重载，但没有可连接的 Flutter 调试应用，热重载未执行。
+
+根检查脚本首轮因同期独立播放窗口集成测试的两处非空断言静态警告中断；同期代码更新后全量静态分析复查通过。已完成脚本要求的打包边界检查、根应用与四个包的格式、分析及离线测试：根应用 2332、API 456、播放器 81、弹幕 93、封装包 2 项通过，共 2964 项；封装包另有 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。日志为本机忽略文件 `build/account-menu-navigation-check.log`、`build/account-menu-navigation-analysis-final.log`、`build/account-menu-navigation-root-tests.log` 和 `build/account-menu-navigation-package-check.log`。
+
+将菜单跳转和余额对齐一并提交前，重新完成四个相关测试文件的 61 项回归及本次八个 Dart 文件的静态分析，均通过；`git diff --check` 通过。回归日志为 `build/account-fixes-precommit-tests.log`。
 
 ## 未验证或未实现
 

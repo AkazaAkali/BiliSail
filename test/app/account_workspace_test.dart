@@ -8,6 +8,8 @@ import 'package:bilisail/domain/video.dart';
 import 'package:bilisail/features/auth/application/account_overview_controller.dart';
 import 'package:bilisail/features/auth/application/auth_controller.dart';
 import 'package:bilisail/features/auth/domain/auth_repository.dart';
+import 'package:bilisail/features/auth/presentation/account_button.dart';
+import 'package:bilisail/features/auth/presentation/account_menu.dart';
 import 'package:bilisail/features/auth/presentation/account_screen.dart';
 import 'package:bilisail/features/downloads/application/download_controller.dart';
 import 'package:bilisail/features/downloads/domain/download_repository.dart';
@@ -27,6 +29,7 @@ import 'package:bilisail/features/settings/presentation/settings_screen.dart';
 import 'package:bilisail/features/settings/application/settings_controller.dart';
 import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:bilisail/features/settings/domain/settings_repository.dart';
+import 'package:bilisail/shared/ui/paging_tab_strip.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -53,6 +56,7 @@ void main() {
     WidgetTester tester, {
     double width = 1200,
     bool signedIn = true,
+    bool showAccountMenu = false,
     String initialLocation = '/me',
     _AuthRepository? auth,
     int Function()? epoch,
@@ -65,7 +69,9 @@ void main() {
     final router = createBiliRouter(
       initialLocation: initialLocation,
       playerBuilder: (_, _, _) => const SizedBox(),
-      accountBuilder: (_) => const SizedBox(width: 40, height: 40),
+      accountBuilder: (context) => showAccountMenu
+          ? AccountButton(onNavigate: context.go)
+          : const SizedBox(width: 40, height: 40),
     );
     addTearDown(router.dispose);
     final repository = auth ?? _AuthRepository(signedIn);
@@ -79,6 +85,9 @@ void main() {
           authRepositoryProvider.overrideWithValue(repository),
           if (epoch != null) sessionEpochProvider.overrideWithValue(epoch),
           accountOverviewProvider.overrideWith((_) async => null),
+          accountMessageIndicatorProvider.overrideWithValue(
+            const AccountMessageIndicator(),
+          ),
           libraryRepositoryProvider.overrideWithValue(history),
           homeRepositoryProvider.overrideWithValue(home),
           feedRepositoryProvider.overrideWithValue(_FeedRepository()),
@@ -99,6 +108,143 @@ void main() {
     await tester.ensureVisible(target);
     await tester.tap(target);
     await tester.pumpAndSettle();
+  }
+
+  Future<void> openAccountTab(
+    WidgetTester tester,
+    AccountContentTab tab,
+  ) async {
+    if (find.byTooltip('我的账号').evaluate().isEmpty) {
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-nav-home')).evaluate().isNotEmpty
+            ? find.byKey(const ValueKey('workspace-nav-home'))
+            : find.byKey(const ValueKey('workspace-bottom-home')),
+      );
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.byTooltip('我的账号'));
+    await tester.pumpAndSettle();
+    final item = find.descendant(
+      of: find.byType(AccountMenu),
+      matching: find.text(tab.label),
+    );
+    await tester.ensureVisible(item);
+    await tester.tap(item);
+    await tester.pumpAndSettle();
+    expect(find.byType(AccountMenu), findsNothing);
+  }
+
+  for (final mode in WorkspaceNavigationMode.values) {
+    for (final width in [390.0, 1200.0]) {
+      testWidgets('account menu opens retained My tabs at $width in $mode', (
+        tester,
+      ) async {
+        final router = await mount(
+          tester,
+          width: width,
+          mode: mode,
+          initialLocation: '/',
+          showAccountMenu: true,
+        );
+        State? account;
+        var watchLaterVisited = false;
+        for (final tab in [
+          AccountContentTab.watchLater,
+          AccountContentTab.favorites,
+          AccountContentTab.history,
+          AccountContentTab.watchLater,
+        ]) {
+          await openAccountTab(tester, tab);
+          final uri = router.routeInformationProvider.value.uri;
+          expect(uri.path, '/me');
+          expect(uri.queryParameters['section'], tab.name);
+          final state = tester.state(find.byType(AccountScreen));
+          if (account == null) {
+            account = state;
+          } else {
+            expect(state, same(account));
+          }
+          expect(
+            tester
+                .widget<PagingTabStrip<AccountContentTab>>(
+                  find.byType(PagingTabStrip<AccountContentTab>),
+                )
+                .value,
+            tab,
+          );
+          if (tab == AccountContentTab.watchLater) {
+            if (!watchLaterVisited) {
+              await tester.tap(find.text('未看完'));
+              await tester.pumpAndSettle();
+              watchLaterVisited = true;
+            }
+            expect(find.text('稍后再看·未看完'), findsOneWidget);
+          }
+        }
+        expect(history.loads, 1);
+        expect(
+          home.queries.where(
+            (query) => query.channel == HomeChannel.watchLater,
+          ),
+          hasLength(2),
+        );
+
+        // A route can also change the selected tab while My stays visible.
+        await select(tester, '我的收藏');
+        expect(
+          router.routeInformationProvider.value.uri.queryParameters['section'],
+          'favorites',
+        );
+        router.go('/me?section=watchLater');
+        await tester.pumpAndSettle();
+        expect(find.text('稍后再看·未看完'), findsOneWidget);
+        await openAccountTab(tester, AccountContentTab.watchLater);
+        expect(tester.state(find.byType(AccountScreen)), same(account));
+        expect(find.text('稍后再看·未看完'), findsOneWidget);
+        if (mode == WorkspaceNavigationMode.multipleTabs) {
+          expect(
+            find.byKey(const ValueKey('workspace-tab-home')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const ValueKey('workspace-tab-tab-1')),
+            findsNothing,
+          );
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+  }
+
+  for (final tab in AccountContentTab.values) {
+    testWidgets('My deep link lazily opens ${tab.name}', (tester) async {
+      await mount(tester, initialLocation: '/me?section=${tab.name}');
+      expect(
+        tester
+            .widget<PagingTabStrip<AccountContentTab>>(
+              find.byType(PagingTabStrip<AccountContentTab>),
+            )
+            .value,
+        tab,
+      );
+      expect(history.loads, tab == AccountContentTab.history ? 1 : 0);
+      expect(
+        downloads.initializations,
+        tab == AccountContentTab.downloads ? 1 : 0,
+      );
+      expect(
+        home.queries,
+        hasLength(
+          tab == AccountContentTab.watchLater ||
+                  tab == AccountContentTab.favorites
+              ? 1
+              : 0,
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
   }
 
   for (final width in [390.0, 1200.0]) {

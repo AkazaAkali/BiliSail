@@ -290,9 +290,9 @@ final class _WorkspacePage extends ConsumerWidget {
         );
       },
     ),
-    accountBuilder: (context) => _rootBranch(
+    accountBuilder: (context, location) => _rootBranch(
       section: WorkspaceRootSection.account,
-      location: Uri(path: '/me'),
+      location: location,
       builder: (context) {
         void login() => showAppDialog<void>(
           context: context,
@@ -300,6 +300,15 @@ final class _WorkspacePage extends ConsumerWidget {
         );
         return AccountScreen(
           key: PageStorageKey('me-${tab.id}'),
+          initialTab: AccountContentTab.values
+              .where((tab) => tab.name == location.queryParameters['section'])
+              .firstOrNull,
+          onTabChanged: (section) => context.go(
+            Uri(
+              path: '/me',
+              queryParameters: {'section': section.name, 'tab': tab.id},
+            ).toString(),
+          ),
           onNavigate: context.go,
           onLogin: login,
           contentBuilder: (context, section) =>

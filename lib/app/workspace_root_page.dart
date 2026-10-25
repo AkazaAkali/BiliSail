@@ -37,7 +37,7 @@ class WorkspaceRootPage extends StatefulWidget {
 
   final Uri location;
   final WorkspaceRootBuilder feedBuilder;
-  final WidgetBuilder accountBuilder;
+  final WorkspaceRootBuilder accountBuilder;
   final WorkspaceRootBuilder messagesBuilder;
   final WorkspaceRootBuilder downloadsBuilder;
   final WorkspaceRootBuilder settingsBuilder;
@@ -59,7 +59,7 @@ class _WorkspaceRootPageState extends State<WorkspaceRootPage> {
     Uri location,
   ) => switch (section) {
     WorkspaceRootSection.feed => widget.feedBuilder(context, location),
-    WorkspaceRootSection.account => widget.accountBuilder(context),
+    WorkspaceRootSection.account => widget.accountBuilder(context, location),
     WorkspaceRootSection.messages => widget.messagesBuilder(context, location),
     WorkspaceRootSection.downloads => widget.downloadsBuilder(
       context,

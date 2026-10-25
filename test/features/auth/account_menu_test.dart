@@ -67,9 +67,9 @@ void main() {
       expect(find.byType(Drawer), findsNothing);
       for (final (label, path) in [
         ('我的消息', '/messages'),
-        ('稍后再看', '/?channel=watchLater'),
-        ('我的收藏', '/?channel=favorites'),
-        ('历史记录', '/history'),
+        ('稍后再看', '/me?section=watchLater'),
+        ('我的收藏', '/me?section=favorites'),
+        ('历史记录', '/me?section=history'),
         ('下载管理', '/downloads'),
         ('直播中心', '/?channel=live&section=我的关注'),
       ]) {

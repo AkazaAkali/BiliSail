@@ -226,10 +226,10 @@ class AccountMenu extends ConsumerWidget {
                     item(
                       '稍后再看',
                       Icons.play_circle_outline,
-                      '/?channel=watchLater',
+                      '/me?section=watchLater',
                     ),
-                    item('我的收藏', Icons.star_border, '/?channel=favorites'),
-                    item('历史记录', Icons.history, '/history'),
+                    item('我的收藏', Icons.star_border, '/me?section=favorites'),
+                    item('历史记录', Icons.history, '/me?section=history'),
                     if (embedded)
                       item('下载管理', Icons.download_outlined, '/downloads'),
                     item(

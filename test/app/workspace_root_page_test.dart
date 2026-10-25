@@ -16,7 +16,7 @@ class _Revision extends Notifier<int> {
 void main() {
   final locations = {
     WorkspaceRootSection.feed: Uri.parse('/?channel=popular&section=每周必看'),
-    WorkspaceRootSection.account: Uri.parse('/me'),
+    WorkspaceRootSection.account: Uri.parse('/me?section=favorites'),
     WorkspaceRootSection.messages: Uri.parse('/messages?talker=2'),
     WorkspaceRootSection.downloads: Uri.parse('/downloads'),
     WorkspaceRootSection.settings: Uri.parse('/settings?section=playback'),
@@ -47,8 +47,8 @@ void main() {
                   location: location,
                   feedBuilder: (_, uri) =>
                       probe(WorkspaceRootSection.feed, uri),
-                  accountBuilder: (_) =>
-                      probe(WorkspaceRootSection.account, Uri(path: '/me')),
+                  accountBuilder: (_, uri) =>
+                      probe(WorkspaceRootSection.account, uri),
                   messagesBuilder: (_, uri) =>
                       probe(WorkspaceRootSection.messages, uri),
                   downloadsBuilder: (_, uri) =>
@@ -121,7 +121,7 @@ void main() {
                 builder: (_, ref, _) =>
                     Text('account epoch ${ref.watch(_revision)}'),
               ),
-              accountBuilder: (_) => const Text('account'),
+              accountBuilder: (_, _) => const Text('account'),
               messagesBuilder: (_, _) => const SizedBox(),
               downloadsBuilder: (_, _) => const SizedBox(),
               settingsBuilder: (_, _) => const SizedBox(),

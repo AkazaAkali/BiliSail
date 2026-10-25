@@ -168,6 +168,30 @@ void main() {
         find.byKey(ValueKey('probe-${tab.name}'), skipOffstage: false),
       );
 
+  void expectBalanceAlignment(WidgetTester tester) {
+    Rect coinCharacter(String label) {
+      final paragraph = tester.renderObject<RenderParagraph>(find.text(label));
+      final box = paragraph
+          .getBoxesForSelection(
+            const TextSelection(baseOffset: 1, extentOffset: 2),
+          )
+          .single;
+      return Rect.fromPoints(
+        paragraph.localToGlobal(Offset(box.left, box.top)),
+        paragraph.localToGlobal(Offset(box.right, box.bottom)),
+      );
+    }
+
+    final coins = coinCharacter('硬币');
+    final bCoins = coinCharacter('B币');
+    expect(bCoins.left, closeTo(coins.left, .5));
+    expect(bCoins.right, closeTo(coins.right, .5));
+    expect(
+      tester.getTopLeft(find.text('6.25')).dx,
+      closeTo(tester.getTopLeft(find.text('12.5')).dx, .01),
+    );
+  }
+
   testWidgets(
     'compact profile and four tabs show content without route changes',
     (tester) async {
@@ -178,8 +202,11 @@ void main() {
       expect(find.text('测试账号'), findsOneWidget);
       expect(find.text('等级 5'), findsOneWidget);
       expect(find.text('经验 20500 / 28800'), findsOneWidget);
-      expect(find.text('硬币 12.5'), findsOneWidget);
-      expect(find.text('B币 6.25'), findsOneWidget);
+      expect(find.text('硬币'), findsOneWidget);
+      expect(find.text('B币'), findsOneWidget);
+      expect(find.text('12.5'), findsOneWidget);
+      expect(find.text('6.25'), findsOneWidget);
+      expectBalanceAlignment(tester);
       final balances = tester.getRect(
         find.byKey(const ValueKey('account-balances')),
       );
@@ -189,8 +216,8 @@ void main() {
       expect(balances.height, closeTo(following.height, 1));
       expect(balances.center.dy, closeTo(following.center.dy, 1));
       expect(
-        tester.getRect(find.text('B币 6.25')).top,
-        greaterThan(tester.getRect(find.text('硬币 12.5')).bottom),
+        tester.getRect(find.text('6.25')).top,
+        greaterThan(tester.getRect(find.text('12.5')).bottom),
       );
       for (final label in ['关注', '粉丝', '动态', '82', '37', '24']) {
         expect(find.text(label), findsOneWidget);
@@ -245,8 +272,8 @@ void main() {
         'Kopoer',
         '等级 6',
         '已满级 · 43597',
-        '硬币 1029.2',
-        'B币 25',
+        '1029.2',
+        '25',
         '82',
         '10',
         '30',
@@ -282,9 +309,9 @@ void main() {
       await mount(tester);
       expect(find.text('等级 —'), findsOneWidget);
       expect(find.text('经验 — / —'), findsOneWidget);
-      expect(find.text('硬币 —'), findsOneWidget);
-      expect(find.text('B币 —'), findsOneWidget);
-      expect(find.text('—'), findsNWidgets(3));
+      expect(find.text('硬币'), findsOneWidget);
+      expect(find.text('B币'), findsOneWidget);
+      expect(find.text('—'), findsNWidgets(5));
       expect(find.byType(LinearProgressIndicator), findsNothing);
       expect(
         find.byKey(const ValueKey('account-experience-progress-unknown')),
@@ -319,9 +346,9 @@ void main() {
     await mount(tester);
     expect(find.text('等级 0'), findsOneWidget);
     expect(find.text('经验 0 / 100'), findsOneWidget);
-    expect(find.text('硬币 0'), findsOneWidget);
-    expect(find.text('B币 0'), findsOneWidget);
-    expect(find.text('0'), findsNWidgets(3));
+    expect(find.text('硬币'), findsOneWidget);
+    expect(find.text('B币'), findsOneWidget);
+    expect(find.text('0'), findsNWidgets(5));
     expect(
       tester
           .widget<LinearProgressIndicator>(
@@ -467,8 +494,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('等级 6'), findsOneWidget);
       expect(find.text('等级 5'), findsNothing);
-      expect(find.text('B币 6.25'), findsNothing);
-      expect(find.text('B币 —'), findsOneWidget);
+      expect(find.text('6.25'), findsNothing);
+      expect(find.text('B币'), findsOneWidget);
       final next = Completer<AccountOverview>();
       overview.onLoad = (_) => next.future;
       auth.emit(
@@ -482,9 +509,9 @@ void main() {
       await tester.pump();
       expect(find.text('等级 6'), findsNothing);
       expect(find.text('等级 —'), findsOneWidget);
-      expect(find.text('硬币 —'), findsOneWidget);
-      expect(find.text('B币 —'), findsOneWidget);
-      expect(find.text('—'), findsNWidgets(3));
+      expect(find.text('硬币'), findsOneWidget);
+      expect(find.text('B币'), findsOneWidget);
+      expect(find.text('—'), findsNWidgets(5));
       next.complete(const AccountOverview(level: 4));
       await tester.pumpAndSettle();
       expect(find.text('等级 4'), findsOneWidget);
@@ -536,6 +563,7 @@ void main() {
       (tester) async {
         viewport(tester, Size(width, 720));
         await mount(tester);
+        expectBalanceAlignment(tester);
         expect(
           tester
               .getSize(find.byKey(const ValueKey('account-profile-summary')))
@@ -545,8 +573,8 @@ void main() {
         for (final label in [
           '等级 5',
           '经验 20500 / 28800',
-          '硬币 12.5',
-          'B币 6.25',
+          '12.5',
+          '6.25',
           '关注',
           '粉丝',
           '动态',
@@ -579,6 +607,7 @@ void main() {
         userName: '很长很长的账号名称也应该保持清晰可读',
       );
       await mount(tester, scale: 2);
+      expectBalanceAlignment(tester);
       expect(find.byTooltip(auth.current.userName ?? ''), findsOneWidget);
       expect(
         tester.widget<Text>(find.text(auth.current.userName ?? '')).maxLines,
@@ -597,8 +626,8 @@ void main() {
       for (final label in [
         '等级 5',
         '经验 20500 / 28800',
-        '硬币 12.5',
-        'B币 6.25',
+        '12.5',
+        '6.25',
         '关注',
         '粉丝',
         '动态',

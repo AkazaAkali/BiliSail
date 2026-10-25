@@ -38,22 +38,37 @@ class AccountScreen extends ConsumerStatefulWidget {
     required this.onLogin,
     required this.contentBuilder,
     this.onNavigate,
+    this.initialTab,
+    this.onTabChanged,
   });
 
   final VoidCallback onLogin;
   final AccountContentBuilder contentBuilder;
   final ValueChanged<String>? onNavigate;
+  final AccountContentTab? initialTab;
+  final ValueChanged<AccountContentTab>? onTabChanged;
 
   @override
   ConsumerState<AccountScreen> createState() => _AccountScreenState();
 }
 
 class _AccountScreenState extends ConsumerState<AccountScreen> {
-  AccountContentTab _selected = AccountContentTab.history;
-  final _progress = TabPagingProgress(0);
+  late AccountContentTab _selected =
+      widget.initialTab ?? AccountContentTab.history;
+  late final _progress = TabPagingProgress(_selected.index.toDouble());
+
+  @override
+  void didUpdateWidget(AccountScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialTab case final tab? when tab != oldWidget.initialTab) {
+      _selected = tab;
+    }
+  }
 
   void _select(AccountContentTab tab) {
-    if (_selected != tab) setState(() => _selected = tab);
+    if (_selected == tab) return;
+    setState(() => _selected = tab);
+    widget.onTabChanged?.call(tab);
   }
 
   @override
@@ -204,20 +219,40 @@ class _AccountProfileBar extends StatelessWidget {
             : () => onOpenSection?.call('dynamics'),
       ),
     ];
+    TableRow balanceRow(String label, num? value, {double topPadding = 0}) =>
+        TableRow(
+          children: [
+            Padding(
+              padding: EdgeInsets.only(top: topPadding),
+              child: Text(
+                label,
+                textAlign: TextAlign.end,
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+            Padding(
+              padding: EdgeInsetsDirectional.only(start: 4, top: topPadding),
+              child: Text('${value ?? '—'}', style: theme.textTheme.bodySmall),
+            ),
+          ],
+        );
     final balances = ConstrainedBox(
       key: const ValueKey('account-balances'),
       constraints: const BoxConstraints(minHeight: 48),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('硬币 ${data?.coins ?? '—'}', style: theme.textTheme.bodySmall),
-            const SizedBox(height: 2),
-            Text('B币 ${data?.bCoins ?? '—'}', style: theme.textTheme.bodySmall),
-          ],
+        child: Center(
+          widthFactor: 1,
+          heightFactor: 1,
+          child: Table(
+            defaultColumnWidth: const IntrinsicColumnWidth(),
+            defaultVerticalAlignment: TableCellVerticalAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              balanceRow('硬币', data?.coins),
+              balanceRow('B币', data?.bCoins, topPadding: 2),
+            ],
+          ),
         ),
       ),
     );
