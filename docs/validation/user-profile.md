@@ -123,3 +123,34 @@
 新增 6 项 widget 回归，覆盖快速／慢速读取、粉丝入口的初始分类、资料失败与重试、刷新保留布局、关闭时取消计时。个人空间、“我的”页与账号工作区共 152 项定向测试通过，日志为 `build/profile-entry-targeted.log`。当前未发现可连接的 Flutter debug 应用，热重载无法执行；未构建或进行 Windows／Android／macOS 实机点击验收。
 
 `tool/check.ps1 -SkipPub` 完整通过：根应用 2208、`bili_api` 446、`bili_player` 81、`bili_danmaku` 93、`bili_mux` 2，共 2830 项测试；根应用及四个包的格式、静态分析与打包边界脚本均通过。`bili_mux` 的 10 项原生测试因未设置 `BILI_MUX_LIBRARY` 按条件跳过，不代表原生集成通过。全量日志为 `build/profile-entry-check.log`；本次差异空白检查通过。
+
+## 2026-10-26：收藏夹视频滚动与状态更新热点
+
+用户空间进入收藏夹后的网格已有按行懒创建，但外层 `SliverLayoutBuilder` 在纵向滚动约束改变时，仍会创建新的 `SliverResponsiveCardGrid` 和 `itemBuilder` 闭包。共享网格将闭包变化视为内容变化，清除行委托缓存，导致已挂载的视频卡每帧重新构建。空间资料刷新、夹内分页开始等状态更新也会替换相同内容的网格，放大突发构建开销。
+
+[收藏夹视频网格](../../lib/features/profile/presentation/profile_folder_video_grid.dart)现在直接接入页面 sliver，横向布局由共享网格处理；按条目列表身份和视频／作者回调缓存当前网格，资料和分页等待状态复用原有卡片。条目追加、同长度内容替换或回调改变时更新网格，窗口宽度和字体缩放仍通过共享布局处理。保留自然行高、失效视频提示、懒创建、单卡绘制边界、600 逻辑像素自动分页及既有账号／请求隔离，不新增预取、网络请求或图片缓存。
+
+[新增回归](../../test/features/profile/profile_folder_performance_test.dart)使用真实空间页面及共享卡片、100 条 fake 视频、空封面、Windows TargetPlatform 和 DPR 1，统计测试开始时已挂载卡片的额外构建次数：
+
+| 场景 | 修复前 | 修复后 |
+| --- | ---: | ---: |
+| 375 宽，8 张已挂载卡片，30 帧每帧滚动 1px | 240 | 0 |
+| 1600 宽，12 张已挂载卡片，同上 | 360 | 0 |
+| 1600 宽，资料刷新和分页等待，12 张已挂载卡片 | 24 | 0 |
+
+上述为 debug 工作次数，不是帧率；新行进入视口仍正常创建卡片。4 项新增回归同时覆盖分页追加后的尾部可见性、滚动位置保留、宽窄布局、两倍文字、动作回调更新、同长度内容替换和切换收藏夹。主页 123 项定向回归全部通过，原有滑动、封面保留、分页、隐藏页和会话重置回归继续通过。日志为 `build/profile-folder-baseline.log`、`build/profile-folder-optimized.log`、`build/profile-folder-targeted.log`。
+
+`tool/check.ps1 -SkipPub` 在当时工作区完整通过：根应用 2723、`bili_api` 460、`bili_player` 81、`bili_danmaku` 93、`bili_mux` 5，共 3362 项测试；根应用及四包格式、静态分析和打包边界检查通过。10 项 mux 原生测试因未配置 `BILI_MUX_LIBRARY` 跳过，不计为原生通过。日志为 `build/profile-folder-check.log`。交付前发现共享分页、封面与首页有新的同期修改，保留这些修改，再次运行主页 123 项回归及本次三个 Dart 文件的静态分析，均通过；日志为 `build/profile-folder-final-targeted.log`，不将较早的全量结果视作这些后续修改的全仓验证。没有可连接的 Flutter debug 应用，已尝试热重载但未执行成功。
+
+### Windows Profile 对照
+
+使用真实空间页面和共享卡片／图片实现，将 `c68c61e61455ad62f0d46288241f3c44f9f6a85e` 的空间页面只读提取为基线，与修复后页面在同一原生进程中运行，其余组件相同。每个样本注入 500 条 fake 视频及 640×360 内存 PNG，不读取真实账号、不访问网络或图片磁盘缓存、不创建悬停预览。每种页面和宽度先往返滚动 800px 预热，再各以 3 秒下滚／3 秒回顶采样两轮；原生 `FrameTiming` 统计 UI 与 raster 时长。
+
+环境为 Windows x64、Flutter 3.47.6 Profile、Impeller OpenGLES、Ryzen 7 7700、约 31 GiB 内存、DPR 1。窗口 430×900／1600×900，对应 Flutter 视口 414×861／1584×861。以下为两轮 P95 范围，单位毫秒：
+
+| 视口宽度 | UI 修复前 | UI 修复后 | raster 修复前 | raster 修复后 |
+| --- | ---: | ---: | ---: | ---: |
+| 414 | 2.714–4.285 | 0.293–0.361 | 7.701–12.042 | 3.114–3.925 |
+| 1584 | 3.800–4.283 | 0.237–0.244 | 13.714–14.073 | 4.587–4.632 |
+
+两轮帧数有波动，测量顺序为各宽度先基线、后修复；不由采样帧数推算 FPS，也不将这些结果等同于用户真实收藏夹或其他设备的卡顿已全部消除。探针、基线副本和原始结果位于忽略目录 `artifacts/profile-folder-performance/`，启动／构建日志为 `build/profile-folder-windows-profile.log`，专用样本窗口已正常退出。仅构建并运行了该 Windows Profile 诊断入口，`build/windows/x64/runner/Profile/bilisail.exe` 是诊断程序；本轮未生成正式 Release 包。真实账号网络／封面加载、人工滚轮手感和 Android／macOS 设备性能尚未验收。

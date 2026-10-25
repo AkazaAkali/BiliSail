@@ -12,12 +12,11 @@ import '../../../shared/ui/paged_scroll_viewport.dart';
 import '../../../shared/ui/state_view.dart';
 import '../../../shared/ui/dynamic_post_interactions.dart';
 import '../../../shared/ui/sliver_dynamic_post_list.dart';
-import '../../../shared/ui/responsive_card_grid.dart';
 import '../../../shared/ui/retained_tab_view.dart';
-import '../../../shared/ui/video_card.dart';
 import '../../../shared/ui/user_follow_button.dart';
 import '../../auth/application/auth_controller.dart';
 import 'profile_header.dart';
+import 'profile_folder_video_grid.dart';
 import 'profile_video_card.dart';
 import '../application/profile_controller.dart';
 import '../domain/profile_repository.dart';
@@ -297,8 +296,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             sliver:
-                state.section == ProfileSection.dynamics &&
-                    entries.every((entry) => entry.dynamicPost != null)
+                state.section == ProfileSection.folders &&
+                    state.folderId != null
+                ? ProfileFolderVideoGrid(
+                    entries: entries,
+                    onOpenVideo: widget.onOpenVideo,
+                    onOpenUser: widget.onOpenUser,
+                  )
+                : state.section == ProfileSection.dynamics &&
+                      entries.every((entry) => entry.dynamicPost != null)
                 ? SliverDynamicPostList(
                     posts: [for (final entry in entries) ?entry.dynamicPost],
                     spacing: 12,
@@ -309,17 +315,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   )
                 : SliverLayoutBuilder(
                     builder: (context, constraints) {
-                      if (state.section == ProfileSection.folders &&
-                          state.folderId != null) {
-                        return SliverResponsiveCardGrid(
-                          itemCount: entries.length,
-                          itemBuilder: (context, index) => _entry(
-                            entries[index],
-                            controller,
-                            sharedVideoCard: true,
-                          ),
-                        );
-                      }
                       final isVideoList =
                           entries.isNotEmpty &&
                           entries.every(
@@ -406,11 +401,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
-  Widget _entry(
-    ProfileEntry entry,
-    ProfileController controller, {
-    bool sharedVideoCard = false,
-  }) {
+  Widget _entry(ProfileEntry entry, ProfileController controller) {
     final post = entry.dynamicPost;
     if (post != null && entry.kind == ProfileEntryKind.dynamic) {
       return InteractiveDynamicPostCard(
@@ -422,13 +413,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
     final video = entry.video;
     if (video != null && entry.kind == ProfileEntryKind.video) {
-      if (sharedVideoCard) {
-        return VideoCard(
-          video: video,
-          onTap: () => widget.onOpenVideo?.call(video),
-          onOpenUser: widget.onOpenUser,
-        );
-      }
       return _video(video);
     }
     if (entry.kind == ProfileEntryKind.video) {
