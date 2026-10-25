@@ -1,0 +1,129 @@
+name: 问题反馈 / Bug report
+description: 报告闪退、播放异常、界面错误、下载失败或其他已有功能的问题。
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢帮助改进 BiliSail（哔帆）！每个 issue 请只描述一个问题，可使用中文或 English。
+        建议先查看[使用说明](https://github.com/CKopoer/BiliSail#使用说明)和[最新发布版本](https://github.com/CKopoer/BiliSail/releases)。无法更新或仅旧版本出现的问题也可以反馈，请注明情况。
+        **Issue 公开可见。请勿上传 Cookie、Token、登录二维码、手机号、私信内容或带签名参数的播放／下载地址；截图和日志请先检查、打码。**
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索[已有 issue（含已关闭）](https://github.com/CKopoer/BiliSail/issues?q=is%3Aissue)，未发现相同问题；如有相关记录，会在下方附上链接。
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: BiliSail 版本
+      description: 在「设置 → 关于」查看完整版本号（含构建号）；无法启动时填写安装包文件名，自行构建请附 commit。
+      placeholder: 完整版本号／安装包文件名／构建 commit
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 出现问题的平台
+      options:
+        - Windows
+        - Android
+        - macOS
+        - 其他（请在环境信息中说明）
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: 系统与设备
+      description: 填写系统版本、设备型号／架构；画面或性能问题请补充显卡和驱动版本（如能获取）。
+      placeholder: 例如 Windows 11 24H2 / x64 / 显卡型号；Android 15 / 手机型号；macOS 15 / Apple M 系列
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及功能
+      options:
+        - 安装、启动或更新
+        - 视频／番剧／影视播放
+        - 直播播放与聊天
+        - 弹幕或字幕
+        - 下载或离线播放
+        - 登录或账号
+        - 消息、私信、评论或动态
+        - 首页、搜索或用户空间
+        - 标签、窗口、全屏或导航
+        - 快捷键、输入法或滚动
+        - 设置、外观或其他
+
+  - type: dropdown
+    id: source
+    attributes:
+      label: 安装包来源
+      options:
+        - GitHub Releases
+        - GitHub Actions 构建产物
+        - 自行从源码构建
+        - 其他／不确定（可在补充信息中说明）
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 如何复现
+      description: 从哪个页面开始、执行了什么操作？偶发问题可描述出现前的操作及大致频率。
+      placeholder: |
+        1. 打开……
+        2. 点击／切换……
+        3. 出现……（每次／偶尔／仅一次）
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际发生了什么
+      description: 描述异常表现；若有错误提示或错误码，请保留原文。
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期的正常表现
+      description: 你希望执行上述操作后发生什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 相关内容与设置（可选）
+      description: 播放问题建议补充公开 BV 号／ep 号／直播间号、出错时间点、清晰度／编码／解码方式、是否全屏及弹幕状态；下载问题可补充封装格式与失败阶段。只提供你能确定的信息。
+      placeholder: |
+        内容标识及时间点：
+        仅某个内容还是多个内容都会出现：
+        相关设置（双／多标签、硬件解码等）：
+        是否登录（无需账号信息）、网络环境、官网同内容是否正常（如已尝试）：
+        最近正常的版本／已尝试的办法／相关 issue：
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: 截图或录屏（可选）
+      description: 可以拖入文件。请先隐藏账号资料、私信和其他个人信息。
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志（可选）
+      description: 如果已有日志，可粘贴出错前后的相关片段；没有日志可以留空。请移除凭据、URL 查询参数和本机私人路径。
+      render: text

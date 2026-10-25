@@ -1,0 +1,57 @@
+name: 使用求助 / Question
+description: 咨询安装、设置或操作方法，以及暂时无法判断是否属于 bug 的问题。
+title: "[Question] "
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先查看[下载与安装](https://github.com/CKopoer/BiliSail#下载与安装)、[使用说明](https://github.com/CKopoer/BiliSail#使用说明)及[已有 issue](https://github.com/CKopoer/BiliSail/issues?q=is%3Aissue)。
+        已能明确复现的功能异常建议使用「问题反馈」；不确定时也可以在这里描述，可使用中文或 English。
+        **Issue 公开可见，请勿提供 Cookie、Token、登录二维码、手机号、私信或带签名参数的播放／下载地址。**
+
+  - type: input
+    id: version
+    attributes:
+      label: BiliSail 版本
+      description: 「设置 → 关于」中的完整版本号；尚未安装或无法启动时填写拟安装的版本／安装包文件名，不清楚可说明。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 使用平台
+      options:
+        - Windows
+        - Android
+        - macOS
+        - 其他（请在环境信息中说明）
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: 系统与设备（可选）
+      description: 安装或兼容性问题建议提供系统版本、设备型号／架构及安装包来源和文件名。
+
+  - type: textarea
+    id: question
+    attributes:
+      label: 想完成什么，遇到了什么疑问
+      description: 请说明使用场景、所在页面和不清楚的地方；错误提示请保留原文。
+    validations:
+      required: true
+
+  - type: textarea
+    id: attempts
+    attributes:
+      label: 已查看的说明或尝试的操作（可选）
+      description: 可以附相关文档／issue 链接，说明哪些步骤仍不清楚；尚未尝试也可以留空。
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: 截图与其他信息（可选）
+      description: 可以拖入截图或录屏，请先隐藏个人信息；日志请移除凭据和 URL 查询参数。

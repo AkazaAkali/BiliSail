@@ -1,0 +1,39 @@
+name: 文档反馈 / Documentation
+description: 反馈 README、安装说明、开发文档或界面文案中的错误与遗漏。
+title: "[Docs] "
+labels: [documentation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎帮助完善说明与文案，可使用中文或 English。
+        请先搜索[已有 issue（含已关闭）](https://github.com/CKopoer/BiliSail/issues?q=is%3Aissue)；已有相同反馈时可以在原 issue 补充。
+
+  - type: input
+    id: location
+    attributes:
+      label: 问题位置
+      description: 提供文档链接和章节，或应用页面与文案位置；旧版本文档请说明对应版本。
+      placeholder: README 的「下载与安装」／文档链接和章节／设置 → 某项说明
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 哪些内容有误或不清楚
+      description: 描述错误、过时、遗漏或难以理解的内容；涉及操作步骤时，请说明卡在哪一步。
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: 建议如何修改（可选）
+      description: 可以提供建议文案、正确的操作步骤或需要补充的说明。
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 依据与补充信息（可选）
+      description: 可以附官方资料、相关版本、系统信息或截图；截图请隐藏个人信息。

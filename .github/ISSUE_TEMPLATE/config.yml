@@ -1,0 +1,12 @@
+# 仅参考以下项目的反馈分类和字段组织；本项目表单文案独立编写，未复制其代码或资源。
+# https://github.com/bggRGjQaUbCoE/PiliPlus/tree/main/.github/ISSUE_TEMPLATE
+# https://github.com/ywmoyue/biliuwp-lite/tree/dev/.github/ISSUE_TEMPLATE
+# 表单语法：https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms
+blank_issues_enabled: false
+contact_links:
+  - name: 下载与更新 / Releases
+    url: https://github.com/CKopoer/BiliSail/releases
+    about: 查看已发布版本、安装包和更新说明。
+  - name: 使用与安装说明 / User guide
+    url: https://github.com/CKopoer/BiliSail#使用说明
+    about: 查看安装方法、功能说明与使用边界；仍有疑问可以选择「使用求助」。
