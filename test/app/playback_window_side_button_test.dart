@@ -101,6 +101,9 @@ void main() {
           buttons: kBackMouseButton,
         ),
       );
+      harness.pointer(
+        PointerUpEvent(viewId: window.viewId, kind: PointerDeviceKind.mouse),
+      );
       await tester.pumpAndSettle();
       expect(window.disposed, isFalse);
       expect(harness.activations, 0);
@@ -268,11 +271,10 @@ class _Harness {
     String key, {
     this.earlyFocus = false,
     this.returnFocusDuringCreation = false,
-  })
-    : windows = FakeDetachedWindowFactory(tester.view),
+  }) : windows = FakeDetachedWindowFactory(tester.view),
       shortcuts = const ShortcutSettings.defaults().withKeys(
         ShortcutAction.closeTab,
-        ['Ctrl+W', key],
+        ['Ctrl+W', if (earlyFocus) 'MouseBack', key],
       );
 
   final WidgetTester tester;
