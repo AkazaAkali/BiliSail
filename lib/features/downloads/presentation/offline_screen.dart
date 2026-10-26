@@ -69,7 +69,7 @@ final class _OfflineScreenState extends ConsumerState<OfflineScreen> {
       future: _verified,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const StateView.loading(message: '正在核验本地文件…');
+          return const StateView.loading(message: '正在打开本地文件…');
         }
         if (snapshot.hasError) {
           final error = snapshot.error;

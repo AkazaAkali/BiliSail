@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:media_kit/media_kit.dart' as mk;
 
 import 'player_contract.dart';
+import 'android_media_leases.dart';
 import 'player_diagnostics.dart';
 import 'native_readiness.dart';
 import 'native_media_options.dart';
@@ -40,6 +41,7 @@ final class MediaKitEngine
   }
 
   final void Function(PlayerDiagnosticEvent)? onDiagnostic;
+  final _mediaLeases = AndroidMediaLeases();
 
   /// DASH frame queue, Android-on / desktop-off unless explicitly overridden.
   /// Keeps the selected decoder; hardware-decoder compatibility is experimental.
@@ -439,7 +441,15 @@ final class MediaKitEngine
       await _releasePlayer();
       if (generation != _generation || _disposed) return;
       try {
-        final (mediaTrack, audioTrack) = _validate(source, options, generation);
+        final (video, audio) = _validate(source, options, generation);
+        final mediaTrack = await _mediaLeases.open(video);
+        final audioTrack = audio == null
+            ? null
+            : await _mediaLeases.open(audio);
+        if (generation != _generation || _disposed) {
+          await _mediaLeases.close();
+          return;
+        }
         final watch = Stopwatch()..start();
         final openBudget = options.openTimeout;
         initializePlayerBackend();
@@ -808,7 +818,12 @@ final class MediaKitEngine
   }
 
   MediaTrack _validateTrack(MediaTrack track, int generation) {
-    if (!{'http', 'https', 'file'}.contains(track.uri.scheme) ||
+    if (!{
+          'http',
+          'https',
+          'file',
+          if (Platform.isAndroid) 'content',
+        }.contains(track.uri.scheme) ||
         track.uri.host.isEmpty && track.uri.scheme != 'file') {
       throw PlayerFailure(
         PlayerFailureKind.invalidSource,
@@ -977,7 +992,11 @@ final class MediaKitEngine
     _videoOutput.clearPlayer();
     final old = _player;
     _player = null;
-    if (old != null) await old.dispose();
+    try {
+      if (old != null) await old.dispose();
+    } finally {
+      await _mediaLeases.close();
+    }
   }
 
   Future<void> _command(

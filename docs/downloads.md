@@ -63,3 +63,73 @@ macOS 构建、Android/macOS 设备离线播放、真实登录账号/会员 PGC 
 同日按窄屏反馈，将刷新／设置移至子标签行右侧，内容区 600 及以上仍使用标题右侧布局。下载页与工作区定向 34 项通过；明暗主题的 320／390／599／600／1000／1440 宽度共 12 个渲染场景通过，包含 320 宽度的 1.5 倍文字、599／600 边界、无标题嵌入模式、宽窄切换后的搜索保留，以及窄屏按钮与标签同行的位置检查。输出：`build/downloads-compact-header-targeted.log`、`build/validation/downloads-compact-header/`。仍仅为组件渲染，未打包或实机操作。
 
 此次微调后的 `tool/check.ps1 -SkipPub` 再次通过：3328 项测试、格式、静态分析及打包边界检查通过，10 项 mux 原生测试仍因未配置 `BILI_MUX_LIBRARY` 跳过。日志：`build/downloads-compact-header-check.log`。
+
+
+### 2026-10-26 Android 默认下载路径校验
+
+Android 默认目录仍由 `getApplicationDocumentsDirectory()` 提供，追加
+`BiliSail/offline`；锁定的 `path_provider_android 2.3.1` 通过 JNI 调用
+`Context.getDir("flutter", MODE_PRIVATE)`，不是 `/sdcard` 或公共 Download。
+旧实现对完整祖先链一直检查到 `/`，把所有非 directory 结果（包括查找失败的
+notFound）都报为符号链接，可能误拒绝系统合法路径别名或不可查询的祖先。
+
+组合根向 `DownloadFileStore` 注入 Android 平台提供的应用文档目录作为可信锚点。
+默认路径直接使用平台给出的锚点，不强制 realpath，以免解析本身再次查询受限
+系统祖先。仅当旧记录使用不同锚点写法时，解析双方并要求指向同一目录；解析
+失败不放宽。所有 I/O 使用平台锚点，从 `BiliSail/offline` 到 scope/task 逐级无链接检查，
+先验证父目录再创建子目录。下载子树中的链接（含指向子树内部的链接）不获豁免。
+其他平台仍使用原来的全祖先边界；非法任务 ID、`..`、错误目录布局、任意其他
+DB 根路径不能借此成为受信目录。
+
+新建、续传、封装文件访问、离线校验和删除共用文件存储校验。文件名白名单、
+归属标记、媒体/临时文件链接拒绝和递归删除前子树检查保留。旧任务保留原目录
+记录及媒体，不迁移文件、不清设置、不增加系统权限；无法证明属于当前应用
+锚点的旧路径安全拒绝。目录缺失/不可访问、非目录和真实链接使用不同提示。
+
+新增文件存储正反向回归与仓储端到端回归：默认创建、平台锚点别名、旧路径
+恢复/续传/离线打开/删除、错误根目录和越界、根/scope/task/media/tmp/归属标记
+链接、悬空链接与外部文件不变。符号链接测试在 Linux CI 执行；Windows 无额外
+建链权限时明确跳过。环境没有 Flutter/Dart SDK，本地仅完成代码审查、WASM
+版 dart_style 格式化及 diff 检查，正式格式、分析和测试以分支 CI 为准。
+
+尚未采集用户设备的首次失败祖先或安装验证，不能视作设备问题已复现。
+最小诊断应包含版本、Android API、路径来源、脱敏后的平台/实际根路径、首次
+失败节点及 no-follow 类型、解析错误码。该修复保持现有基于路径的 I/O 模型，
+不宣称消除了拥有目录并发写权限的攻击者造成的检查/使用竞态；若扩展到
+不可信共享存储，应另行评估目录句柄/no-follow 原生 I/O 或 SAF 适配。
+
+
+## 2026-10-26：离线播放不做内容完整性门禁
+
+按用户取舍，完成、打开、刷新和初始化不再读取完整媒体计算 SHA，也不比较完成文件的历史大小或修改时间。旧摘要仅兼容读取；新轨道以 committed 标识落盘提交，旧摘要非空记录兼容为已提交。用户修改媒体后仍交给播放器尝试，分轨缺失显示具体轨道错误。
+
+账号和任务归属、受限文件名、符号链接及删除边界继续生效；HTTP Range/ETag/响应长度仍用于传输正确性。私有临时文件刷新关闭及改名后才记录提交，不因播放器错误删除文件。旧文档中的“打开时完整校验”由本节取代。
+
+新增/调整回归覆盖分轨修改、刷新和重启、合并文件修改、原分轨清理及缺音轨错误。当前执行环境无 Flutter/Dart SDK，SDK 下载代理返回 HTTP 403；本地仅做 WASM Dart 格式预检和差异检查，正式分析/单测由分支 CI 验证。Android 实机未验证。
+
+原生合并器也取消了写完后重读整个输出并比较压缩包 SHA 的运行时强核验。保留封装所需的输入轨道/编码识别、包大小限制、读写和 trailer/close 错误、取消及截止时间。CI 原生封装回归仍独立比较音视频包内容/时间戳，用于验证实现正确性，不作为用户媒体的播放门禁。
+
+
+## 2026-10-26：Android 公共保存位置
+
+首次下载只提供文件夹选择，不再提供默认 Downloads/BiliSail 或推荐保存位置。应用内选择器复用 Material 主题、粉色强调色及明暗外观，浏览内部存储和可用外部存储，支持进入文件夹、返回上一级并明确确认当前文件夹；取消不添加任务。用户选择持久保存，设置修改仅影响新任务；旧任务不迁移。
+
+Android 11+ 的 SAF 即使获得“所有文件访问权限”也不能选择 Downloads 根目录，因此本轮按用户要求采用获得存储授权后的本地文件夹浏览器。Android 11+ 在系统设置页申请 MANAGE_EXTERNAL_STORAGE，并在返回后通过 Environment.isExternalStorageManager() 确认实际状态；Android 6–10 申请 READ/WRITE_EXTERNAL_STORAGE（maxSdkVersion=29），Android 10 使用 requestLegacyExternalStorage。拒绝、撤销或不再询问时显示重新授权入口，未授权不读取文件夹或保存新位置。权限申请仅由打开文件夹选择流程触发，不在启动时申请。依据 [Android 所有文件访问](https://developer.android.com/training/data-storage/manage-all-files) 和 [SAF 目录限制](https://developer.android.com/training/data-storage/shared/documents-files#document-tree-access-restrictions)。
+
+私有 .part 维持续传和原生合并，最终媒体流式写入用户确认的文件夹，使用 <taskId>_video.m4s / audio.m4s 或合并文件；不额外创建 BiliSail 默认目录。选定前用独占临时文件检查写入能力，随后清理探针；创建媒体也使用独占创建，不覆盖现有文件。平台返回的共享存储根作为可信锚点，仅遍历其下目录，拒绝点路径、符号链接及 Android 私有目录。每次最多显示 2000 个子文件夹并提示截断。原生私有日志逐个记录创建的 URI，失败保留原文件，重试只清理自己的未提交条目；已发布记录重复调用返回原 URI。SQLite 持久保存 URI 后才清理私有媒体，字幕/弹幕及归属信息仍私有。旧 MediaStore/SAF 任务继续按原有 URI 读取与删除，旧默认目的地不再用于新任务，必须重新明确选择文件夹。
+
+新任务通过本地 file URI 播放；旧公共任务继续通过 ContentResolver 只读 FD，主视频及外部音轨分别持有句柄直到 mpv 释放；不在播放前复制媒体。仅支持可 seek 的提供者，流式管道给出明确错误。原生仅打开本应用发布日志中的 URI；删除检查选定文件夹及精确任务文件名，旧任务检查 MediaStore 相对位置或 SAF 子树归属，不递归公共目录。存储撤销、离线、空间不足保留任务和可恢复私有源。公共文件通常保留至卸载后，但任务数据库和授权不恢复；没有自动重新导入功能。
+
+发布阶段需额外写出及峰值双份空间；多轨发布不是跨文件原子事务。提供者创建成功到私有日志落盘之间存在系统 API 无法原子提交的极小窗口，进程在此时终止可能留下孤立条目，应用不会通过广泛扫描/删除来冒险清理它。
+
+验证包括仓储公共提交/重启/授权恢复/发布失败重试，以及播放器双轨 FD 生命周期测试。
+
+本轮在 master 整合原 feat/android-public-downloads 分支并修复选择器：
+
+- 下载选择器、下载页面、仓储、文件边界和离线播放定向测试 77 项通过；Windows 缺少建链权限，13 项符号链接测试明确跳过。新选择器覆盖无默认位置、授权先于浏览、拒绝后重新授权、明确选择 Downloads 根目录、上一级导航、保存失败重试、取消和重复操作保护。320/390 宽度的明暗主题共 4 张静态预览通过，320 使用 1.5 倍文字；输出在 `build/validation/android-download-folder/`，日志 `build/android-download-targeted.log`。
+- 下载相关 Dart 文件和新增设备测试静态分析无错误；相关格式与 `git diff --check` 通过。四个包共 641 项测试通过（bili_api 460、bili_player 83、bili_danmaku 93、bili_mux 5）；10 项 mux 原生测试未配置 BILI_MUX_LIBRARY 而跳过。日志 `build/android-download-package-tests.log`。
+- Android arm64 的 mux 组件重建及完整应用 Debug APK 构建通过，日志 `build/android-download-mux-build.log`、`build/android-download-apk-build.log`。Android 16/API 36 x86_64 临时只读模拟器中，选定 Downloads 根目录后的真实发布/读取/重复提交/精确删除，以及旧 MediaStore 发布/只读 FD/删除，共 2 项集成测试通过；不存在账号或网络写操作。第二轮还观察到真实系统授权设置页打开，再由测试宿主授予该模拟器的 app-op 并关闭设置页，原生返回后继续测试；这不等同于用户手动切换权限或厂商系统实机验收。日志 `build/android-download-device-test.log`、`build/android-download-permission-activity.log`。
+- 模拟器暴露旧 MediaStore 条目尚未首次打开写入流时无法读取的问题，现先创建底层文件再检查可 seek，仍在复制媒体之前拒绝流式提供者。
+- 已执行 `tool/check.ps1 -SkipPub`，被同期其他任务文件的格式检查阻塞；单独运行根测试为 2852 项通过、13 项跳过，`primary_switch_layout_test.dart` 的保留页面尺寸断言失败（390×682 与 390×734），属于同期导航改动，未修改这些文件。日志 `build/android-download-check.log`、`build/android-download-root-tests.log`。本轮无可连接的 DTD 调试进程，未执行热重载；原生改动需重新安装构建。
+
+Android 6–10 权限窗口、厂商 Android 实机、可移除设备/拔出恢复和实际媒体解码仍需验收；不将 mock、模拟器或编译结果视为这些项目通过。

@@ -12,6 +12,9 @@ import 'package:bilisail/features/downloads/presentation/download_dialog.dart';
 import 'package:bilisail/features/downloads/presentation/downloads_screen.dart';
 import 'package:bilisail/features/downloads/presentation/offline_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:bilisail/features/downloads/domain/public_download_storage.dart';
+import 'package:bilisail/features/downloads/data/android_public_download_storage.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -56,6 +59,7 @@ Future<void> _pump(
   Size size = const Size(800, 700),
   double textScale = 1,
   GlobalKey? captureKey,
+  PublicDownloadStorage? storage,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -65,6 +69,7 @@ Future<void> _pump(
     ProviderScope(
       overrides: [
         downloadRepositoryProvider.overrideWithValue(repository),
+        publicDownloadStorageProvider.overrideWithValue(storage),
         downloadSourceRepositoryProvider.overrideWithValue(source),
       ],
       child: MaterialApp(
@@ -125,6 +130,36 @@ void main() {
       });
     }
   }
+  testWidgets(
+    'cancelling public destination does not enqueue or close dialog',
+    (tester) async {
+      const channel = MethodChannel('dev.bilisail/download_storage');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async => false);
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+      final repository = _DownloadRepository();
+      await _pump(
+        tester,
+        DownloadDialog(items: [_item(1)]),
+        repository,
+        _SourceRepository(),
+        storage: const AndroidPublicDownloadStorage(),
+      );
+      await tester.tap(find.text('开始下载'));
+      await tester.pumpAndSettle();
+      expect(find.text('选择下载文件夹'), findsOneWidget);
+      await tester.tap(find.text('取消').last);
+      await tester.pumpAndSettle();
+      expect(repository.enqueued, isEmpty);
+      expect(find.byType(DownloadDialog), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await repository.close();
+    },
+  );
+
   testWidgets('selection remains explicit and includes chosen episodes only', (
     tester,
   ) async {

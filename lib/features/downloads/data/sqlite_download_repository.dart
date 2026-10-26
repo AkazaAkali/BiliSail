@@ -16,6 +16,7 @@ import '../../../domain/video.dart';
 import '../../../domain/video_codec.dart';
 import '../domain/download_repository.dart';
 import '../domain/download_muxer.dart';
+import '../domain/public_download_storage.dart';
 import 'download_file_store.dart';
 import 'http_download_transfer.dart';
 
@@ -28,13 +29,16 @@ final class SqliteDownloadRepository implements DownloadRepository {
     HttpDownloadTransfer? transfer,
     DownloadFileStore? files,
     DownloadMuxer? muxer,
+    PublicDownloadStorage? publicStorage,
     DateTime Function()? clock,
-  }) : _defaultDirectory = defaultDirectory,
+  }) : _publicStorage = publicStorage,
+       _defaultDirectory = defaultDirectory,
        _transfer = transfer ?? const HttpDownloadTransfer(),
        _files = files ?? const DownloadFileStore(),
        _muxer = muxer ?? const _UnavailableDownloadMuxer(),
        _clock = clock ?? DateTime.now;
 
+  final PublicDownloadStorage? _publicStorage;
   final AppDatabase db;
   final DownloadSourceRepository sources;
   final Future<String> Function() _defaultDirectory;
@@ -139,7 +143,7 @@ final class SqliteDownloadRepository implements DownloadRepository {
         if (!identical(restored, task)) await _save(restored);
         if (restored.status == DownloadStatus.completed) {
           try {
-            await _files.removeSourceTracks(restored);
+            await _cleanupMedia(restored);
           } on FileSystemException {
             /* Retaining committed originals is safe. */
           }
@@ -158,14 +162,24 @@ final class SqliteDownloadRepository implements DownloadRepository {
     _emit();
   }
 
-  Future<DownloadTask> _reconcile(
-    DownloadTask task, {
-    bool verifyHashes = false,
-  }) async {
+  Future<DownloadTask> _reconcile(DownloadTask task) async {
     try {
-      if (task.selection.output.isMerged && task.mergedMedia != null) {
-        if (await _files.verifyMerged(task, verifyHash: verifyHashes)) {
-          if (await _files.verifyCompleted(task, verifyHashes: verifyHashes)) {
+      if (task.publicFiles.isNotEmpty) {
+        await _files.ownedDirectory(task);
+        if (_publicStorage == null) {
+          throw const AppFailure(AppFailureKind.storage, '当前平台不能打开此公共下载');
+        }
+        await _publicStorage.verify(task);
+        return task.copyWith(
+          status: DownloadStatus.completed,
+          clearFailure: true,
+        );
+      }
+      if (task.publicDestination == null &&
+          task.selection.output.isMerged &&
+          task.mergedMedia != null) {
+        if (await _files.verifyMerged(task)) {
+          if (await _files.verifyCompleted(task)) {
             return task.copyWith(
               status: DownloadStatus.completed,
               clearFailure: true,
@@ -180,10 +194,10 @@ final class SqliteDownloadRepository implements DownloadRepository {
         }
       }
       if (task.status == DownloadStatus.completed) {
-        if (!await _files.verifyCompleted(task, verifyHashes: verifyHashes)) {
+        if (!await _files.verifyCompleted(task)) {
           return task.copyWith(
             status: DownloadStatus.failed,
-            failure: const AppFailure(AppFailureKind.storage, '离线文件缺失或校验失败'),
+            failure: const AppFailure(AppFailureKind.storage, '离线文件不存在或无法读取'),
             updatedAt: _clock(),
           );
         }
@@ -192,7 +206,7 @@ final class SqliteDownloadRepository implements DownloadRepository {
         for (final track in task.tracks) {
           if (track.complete) {
             tracks.add(
-              await _files.verifyTrack(task, track, verifyHash: verifyHashes)
+              await _files.verifyTrack(task, track)
                   ? track
                   : _resetTrack(track),
             );
@@ -204,6 +218,12 @@ final class SqliteDownloadRepository implements DownloadRepository {
         }
         return task.copyWith(tracks: tracks);
       }
+    } on AppFailure catch (failure) {
+      return task.copyWith(
+        status: DownloadStatus.failed,
+        failure: failure,
+        updatedAt: _clock(),
+      );
     } catch (_) {
       return task.copyWith(
         status: DownloadStatus.failed,
@@ -284,7 +304,10 @@ final class SqliteDownloadRepository implements DownloadRepository {
       throw const AppFailure(AppFailureKind.storage, '下载队列最多保留 500 项');
     }
     if (pending.isEmpty) return;
-    final root = _preferences.directory ?? await _defaultDirectory();
+    final destination = await _publicStorage?.destination();
+    final root = destination == null
+        ? _preferences.directory ?? await _defaultDirectory()
+        : await _defaultDirectory();
     if (!p.isAbsolute(root)) {
       throw ArgumentError.value(root, 'defaultDirectory');
     }
@@ -301,6 +324,7 @@ final class SqliteDownloadRepository implements DownloadRepository {
         selection: selection,
         status: DownloadStatus.queued,
         directory: directory,
+        publicDestination: destination,
         createdAt: now,
         updatedAt: now,
       );
@@ -363,9 +387,20 @@ final class SqliteDownloadRepository implements DownloadRepository {
   Future<void> _runTask(String id, _Run run) async {
     try {
       var task = _tasks[id]!;
-      if (task.selection.output.isMerged &&
-          (await _files.verifyMerged(task) ||
-              task.tracks.length == 2 && await _verifiedTracks(task))) {
+      if (task.publicFiles.isNotEmpty) {
+        final restored = await _reconcile(task);
+        if (!_valid(id, run)) return;
+        if (restored.status != DownloadStatus.completed) {
+          throw restored.failure!;
+        }
+        await _save(restored);
+        _tasks[id] = restored;
+        _emit();
+        await _cleanupMedia(restored);
+        return;
+      }
+      if (task.selection.output.isMerged && await _files.verifyMerged(task) ||
+          task.tracks.length == 2 && await _verifiedTracks(task)) {
         if (!_valid(id, run)) return;
         await _finishTask(task, id, run);
         return;
@@ -512,7 +547,7 @@ final class SqliteDownloadRepository implements DownloadRepository {
     final reusedOutput =
         task.selection.output.isMerged && await _files.verifyMerged(task);
     if (!reusedOutput && !await _verifiedTracks(task)) {
-      throw const AppFailure(AppFailureKind.storage, '媒体文件校验失败');
+      throw const AppFailure(AppFailureKind.storage, '媒体文件不存在或无法读取');
     }
     if (!_valid(id, run)) return;
     var warnings = task.warnings;
@@ -575,6 +610,23 @@ final class SqliteDownloadRepository implements DownloadRepository {
     if (!_valid(id, run)) return;
     await _files.writeManifest(task);
     if (!_valid(id, run)) return;
+    if (task.publicDestination != null && task.publicFiles.isEmpty) {
+      final files = <String, String>{};
+      for (final name
+          in task.selection.output.isMerged
+              ? [task.selection.output.fileName]
+              : ['video.m4s', 'audio.m4s']) {
+        files[name] = (await _files.taskFile(task, name)).path;
+      }
+      final uris = await _publicStorage!.publish(task, files, run.cancel);
+      // Native publication is journaled, so a cancelled generation can recover
+      // the same URIs on retry without overwriting a user's public files.
+      if (!_valid(id, run)) return;
+      task = task.copyWith(publicFiles: uris);
+      await _save(task);
+      _tasks[id] = task;
+    }
+    if (!_valid(id, run)) return;
     task = task.copyWith(
       status: DownloadStatus.completed,
       bytesPerSecond: 0,
@@ -587,10 +639,22 @@ final class SqliteDownloadRepository implements DownloadRepository {
     _tasks[id] = task;
     _emit();
     try {
-      await _files.removeSourceTracks(task, verifyHashes: false);
+      await _cleanupMedia(task);
     } on FileSystemException {
       // Retaining originals after a successful commit is safe; retry cleanup
       // on the next reconciliation. Never turn usable media into a failure.
+    }
+  }
+
+  Future<void> _cleanupMedia(DownloadTask task) async {
+    if (task.publicFiles.isEmpty) {
+      await _files.removeSourceTracks(task);
+      return;
+    }
+    // Only after durable public URI + completed index commit. Retain metadata.
+    for (final name in ['video.m4s', 'audio.m4s', 'media.mp4', 'media.mkv']) {
+      final file = await _files.taskFile(task, name);
+      if (await file.exists()) await file.delete();
     }
   }
 
@@ -851,7 +915,16 @@ final class SqliteDownloadRepository implements DownloadRepository {
       _tasks.remove(id);
       _emit();
       try {
-        if (deleteFiles) await _files.deleteOwned(current);
+        if (deleteFiles) {
+          await _files.ownedDirectory(current);
+          if (current.publicDestination != null) {
+            if (_publicStorage == null) {
+              throw const AppFailure(AppFailureKind.storage, '当前平台不能删除公共下载');
+            }
+            await _publicStorage.delete(current);
+          }
+          await _files.deleteOwned(current);
+        }
         await _writes;
         await db.customStatement(
           'DELETE FROM download_tasks WHERE id = ? AND scope = ?',
@@ -965,7 +1038,7 @@ final class SqliteDownloadRepository implements DownloadRepository {
         task.status != DownloadStatus.completed) {
       throw const AppFailure(AppFailureKind.notFound, '离线下载不存在');
     }
-    final reconciled = await _reconcile(task, verifyHashes: true);
+    final reconciled = await _reconcile(task);
     if (scope != _scope ||
         epoch != _epoch ||
         scope != sources.accountScope ||
@@ -979,7 +1052,7 @@ final class SqliteDownloadRepository implements DownloadRepository {
       await _save(reconciled);
       _emit();
       throw reconciled.failure ??
-          const AppFailure(AppFailureKind.storage, '离线文件校验失败');
+          const AppFailure(AppFailureKind.storage, '离线文件不存在或无法读取');
     }
     return reconciled;
   }
@@ -1038,6 +1111,8 @@ String _encodeTask(DownloadTask task) => jsonEncode({
   'id': task.id,
   'scope': task.scope,
   'directory': task.directory,
+  'publicDestination': task.publicDestination,
+  'publicFiles': task.publicFiles,
   'status': task.status.name,
   'createdAtMs': task.createdAt.millisecondsSinceEpoch,
   'updatedAtMs': task.updatedAt.millisecondsSinceEpoch,
@@ -1077,6 +1152,7 @@ String _encodeTask(DownloadTask task) => jsonEncode({
           'totalBytes': track.totalBytes,
           'etag': track.etag,
           'sha256': track.sha256,
+          'committed': track.committed,
         },
       )
       .toList(),
@@ -1104,6 +1180,9 @@ DownloadTask _decodeTask(String text) {
       id: value['id'] as String,
       scope: value['scope'] as String,
       directory: value['directory'] as String,
+      publicDestination: value['publicDestination'] as String?,
+      publicFiles: (value['publicFiles'] as Map<String, dynamic>? ?? {})
+          .cast<String, String>(),
       status: DownloadStatus.values.byName(value['status'] as String),
       createdAt: DateTime.fromMillisecondsSinceEpoch(
         value['createdAtMs'] as int,
@@ -1141,7 +1220,7 @@ DownloadTask _decodeTask(String text) {
           : DownloadMergedMedia(
               output: output,
               bytes: merged['bytes'] as int,
-              sha256: merged['sha256'] as String,
+              sha256: merged['sha256'] as String?,
             ),
       tracks: tracks.map((raw) {
         final t = raw as Map<String, dynamic>;
@@ -1155,6 +1234,7 @@ DownloadTask _decodeTask(String text) {
           totalBytes: t['totalBytes'] as int?,
           etag: t['etag'] as String?,
           sha256: t['sha256'] as String?,
+          committed: t['committed'] as bool? ?? false,
         );
       }).toList(),
       failure: kind == null

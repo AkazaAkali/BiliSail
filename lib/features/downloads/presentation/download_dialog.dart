@@ -7,6 +7,7 @@ import '../../../domain/request_cancellation.dart';
 import '../../../domain/video_codec.dart';
 import '../application/download_controller.dart';
 import '../domain/download_models.dart';
+import 'download_destination_dialog.dart';
 import 'downloads_screen.dart';
 
 Future<void> showDownloadDialog(
@@ -211,6 +212,10 @@ final class _DownloadDialogState extends ConsumerState<DownloadDialog> {
       _error = null;
     });
     try {
+      if (!await chooseDownloadDestination(context, ref)) {
+        return;
+      }
+      if (!mounted || _accountChanged) return;
       await ref
           .read(downloadControllerProvider.notifier)
           .enqueue(

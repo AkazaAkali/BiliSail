@@ -1,3 +1,5 @@
+import '../features/downloads/data/android_public_download_storage.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -16,6 +18,7 @@ import '../core/platform/file_access_service.dart';
 import '../features/downloads/application/download_controller.dart';
 import '../features/downloads/data/api_download_source_repository.dart';
 import '../features/downloads/data/sqlite_download_repository.dart';
+import '../features/downloads/data/download_file_store.dart';
 import '../features/downloads/data/native_download_muxer.dart';
 import '../features/playback/data/offline_playback_repository.dart';
 import '../core/platform/external_links.dart';
@@ -188,7 +191,14 @@ class AppDependencies {
       database,
       downloadSources,
       muxer: NativeDownloadMuxer(),
+      publicStorage: Platform.isAndroid
+          ? const AndroidPublicDownloadStorage()
+          : null,
       defaultDirectory: const FileAccessService().defaultDownloadDirectory,
+      files: DownloadFileStore(
+        trustedDocumentsDirectory:
+            const FileAccessService().trustedDownloadDocumentsDirectory,
+      ),
     );
     final cardPreviews = VideoCardPreviewPlayback(
       createEngine: () => MediaKitEngine(onDiagnostic: playbackLog?.record),
@@ -301,6 +311,9 @@ class AppDependencies {
           PublicCommentVideoLinkRepository(api, requests),
         ),
         downloadRepositoryProvider.overrideWithValue(downloads),
+        publicDownloadStorageProvider.overrideWithValue(
+          Platform.isAndroid ? const AndroidPublicDownloadStorage() : null,
+        ),
         downloadSourceRepositoryProvider.overrideWithValue(downloadSources),
         sessionEpochProvider.overrideWithValue(() => requests.sessionEpoch),
         playbackViewerRepositoryProvider.overrideWithValue(

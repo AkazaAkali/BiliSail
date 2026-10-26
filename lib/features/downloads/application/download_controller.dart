@@ -5,6 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../domain/app_failure.dart';
 import '../../../domain/request_cancellation.dart';
 import '../domain/download_repository.dart';
+import '../domain/public_download_storage.dart';
+
+final publicDownloadStorageProvider = Provider<PublicDownloadStorage?>(
+  (ref) => null,
+);
 
 final downloadRepositoryProvider = Provider<DownloadRepository>((ref) {
   final repository = _UnavailableDownloadRepository();
@@ -58,6 +63,20 @@ final class DownloadController extends Notifier<DownloadQueueState> {
   }) => ref
       .read(downloadSourceRepositoryProvider)
       .qualities(item, cancellation: cancellation);
+
+  Future<bool> hasDestination() async =>
+      await ref.read(publicDownloadStorageProvider)?.hasDestination() ?? true;
+
+  PublicDownloadStorage get _publicStorage =>
+      ref.read(publicDownloadStorageProvider) ??
+      (throw const AppFailure(AppFailureKind.storage, '文件夹选择不可用'));
+
+  Future<bool> requestDirectoryAccess() =>
+      _publicStorage.requestDirectoryAccess();
+  Future<DownloadFolderListing> listDirectories(String? directory) =>
+      _publicStorage.listDirectories(directory);
+  Future<void> chooseDestination(String directory) =>
+      _publicStorage.chooseDestination(directory);
 
   Future<void> enqueue(List<DownloadItem> items, DownloadSelection selection) =>
       _repository.enqueue(items, selection);

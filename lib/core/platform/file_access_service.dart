@@ -5,12 +5,19 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../domain/app_failure.dart';
 
-/// Desktop file browsing is an explicit gesture; mobile files stay app-owned.
+/// Desktop browsing and app-owned download staging; Android selects shared folders separately.
 final class FileAccessService {
   const FileAccessService();
   bool get canOpenDirectory => Platform.isWindows || Platform.isMacOS;
   bool get canChooseDownloadDirectory => canOpenDirectory;
   bool get pauseDownloadsInBackground => Platform.isAndroid || Platform.isIOS;
+
+  /// Only Android's platform-owned anchor may have system ancestors that the
+  /// app cannot inspect. Download children must still be checked without links.
+  Future<String?> trustedDownloadDocumentsDirectory() async =>
+      Platform.isAndroid
+      ? (await getApplicationDocumentsDirectory()).path
+      : null;
 
   Future<String> defaultDownloadDirectory() async {
     // Flatpak exposes XDG_DATA_HOME as persistent app-owned storage. The host's

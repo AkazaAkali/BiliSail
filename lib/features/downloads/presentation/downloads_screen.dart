@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/ui/app_dialog.dart';
@@ -11,6 +12,7 @@ import '../../../shared/ui/smooth_scroll_behavior.dart';
 import '../../../shared/ui/state_view.dart';
 import '../application/download_controller.dart';
 import '../domain/download_models.dart';
+import 'download_destination_dialog.dart';
 
 String downloadByteText(int bytes) {
   if (bytes < 1024) return '$bytes B';
@@ -362,7 +364,7 @@ final class _DownloadTaskCard extends StatelessWidget {
       DownloadStatus.queued => '等待下载',
       DownloadStatus.resolving => '解析中',
       DownloadStatus.downloading => '下载中',
-      DownloadStatus.verifying => '校验中',
+      DownloadStatus.verifying => '正在保存',
       DownloadStatus.muxing => '合并中',
       DownloadStatus.paused => '已暂停',
       DownloadStatus.failed => '下载失败',
@@ -772,7 +774,26 @@ final class _DownloadSettingsDialogState
                 : (value) => setState(() => _concurrency = value.first),
           ),
           const SizedBox(height: 16),
-          const Text('默认保存在应用文档目录的离线文件夹。目录变更只影响之后新增的任务。'),
+          if (ref.watch(publicDownloadStorageProvider) != null)
+            TextButton.icon(
+              onPressed: _saving
+                  ? null
+                  : () async {
+                      try {
+                        await chooseDownloadDestination(
+                          context,
+                          ref,
+                          force: true,
+                        );
+                      } on AppFailure catch (e) {
+                        if (mounted) setState(() => _error = e.message);
+                      }
+                    },
+              icon: const Icon(Icons.folder_open),
+              label: const Text('公共下载位置（更改仅影响新任务）'),
+            )
+          else
+            const Text('默认保存在应用文档目录的离线文件夹。目录变更只影响之后新增的任务。'),
           if (widget.allowCustomDirectory) ...[
             const SizedBox(height: 12),
             TextField(

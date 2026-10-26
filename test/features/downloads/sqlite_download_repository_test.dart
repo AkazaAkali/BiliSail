@@ -7,8 +7,10 @@ import 'package:bilisail/domain/app_failure.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/domain/video.dart';
 import 'package:bilisail/features/downloads/data/sqlite_download_repository.dart';
+import 'package:bilisail/features/downloads/data/download_file_store.dart';
 import 'package:bilisail/features/downloads/domain/download_repository.dart';
 import 'package:bilisail/features/downloads/domain/download_muxer.dart';
+import 'package:bilisail/features/downloads/domain/public_download_storage.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -20,6 +22,7 @@ void main() {
   late AppDatabase db;
   late SqliteDownloadRepository repository;
   DownloadMuxer? muxer;
+  _PublicStorage? publicStorage;
   var slow = false;
   var streamSlow = false;
   var rejectAudioOnce = false;
@@ -27,13 +30,19 @@ void main() {
   Future<void> Function(HttpResponse)? streamVideo;
   final media = List<int>.generate(2048, (index) => index % 256);
 
-  Future<void> openRepository({DateTime Function()? clock}) async {
+  Future<void> openRepository({
+    DateTime Function()? clock,
+    DownloadFileStore? files,
+    String? directory,
+  }) async {
     db = AppDatabase(NativeDatabase(databaseFile));
     repository = SqliteDownloadRepository(
       db,
       sources,
-      defaultDirectory: () async => root.path,
+      defaultDirectory: () async => directory ?? root.path,
+      files: files,
       muxer: muxer,
+      publicStorage: publicStorage,
       clock: clock,
     );
     await repository.initialize();
@@ -48,6 +57,7 @@ void main() {
     videoRequests = 0;
     streamVideo = null;
     muxer = null;
+    publicStorage = null;
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((request) async {
       if (request.uri.path.startsWith('/video')) videoRequests++;
@@ -97,30 +107,143 @@ void main() {
     await root.delete(recursive: true);
   });
 
-  test('download completes with verified files and URL-free records', () async {
-    await repository.enqueue([item], const DownloadSelection());
-    await _waitFor(repository, DownloadStatus.completed);
-    final task = repository.current.tasks.single;
-    expect(task.tracks.length, 2);
-    expect(task.tracks.every((track) => track.complete), isTrue);
-    expect(await File('${task.directory}/video.m4s').length(), media.length);
-    expect(await File('${task.directory}/audio.m4s').length(), media.length);
-    expect(await File('${task.directory}/extras.json').exists(), isTrue);
-    expect(
-      (await File(
-        '${task.directory}/manifest.json',
-      ).readAsString()).contains('http'),
-      isFalse,
-    );
-    final record = await db
-        .customSelect('SELECT record_json FROM download_tasks')
-        .getSingle();
-    expect(record.read<String>('record_json').contains('http'), isFalse);
-    expect((await repository.offlineTask(task.id)).id, task.id);
-  });
+  test(
+    'public output survives restart without hidden media or source reads',
+    () async {
+      await repository.close();
+      await db.close();
+      publicStorage = _PublicStorage();
+      await openRepository();
+      await repository.enqueue([item], const DownloadSelection());
+      await _waitFor(repository, DownloadStatus.completed);
+      await repository.close();
+      final task = repository.current.tasks.single;
+      expect(task.publicDestination, 'downloads');
+      expect(task.publicFiles.length, 2);
+      expect(await File('${task.directory}/video.m4s').exists(), isFalse);
+      expect(await File('${task.directory}/audio.m4s').exists(), isFalse);
+      final requests = videoRequests;
+      await db.close();
+      await openRepository();
+      expect(
+        (await repository.offlineTask(task.id)).publicFiles,
+        task.publicFiles,
+      );
+      expect(videoRequests, requests);
+      publicStorage!.available = false;
+      await expectLater(
+        repository.offlineTask(task.id),
+        throwsA(isA<AppFailure>()),
+      );
+      expect(publicStorage!.deleted, isFalse);
+      publicStorage!.available = true;
+      await repository.refresh();
+      expect(
+        (await repository.offlineTask(task.id)).status,
+        DownloadStatus.completed,
+      );
+      await repository.remove(task.id, deleteFiles: true);
+      expect(publicStorage!.deleted, isTrue);
+    },
+  );
 
   test(
-    'reopening verifies completed files and rejects damaged media',
+    'public publication failure retains private originals for retry',
+    () async {
+      await repository.close();
+      await db.close();
+      publicStorage = _PublicStorage()..failPublish = true;
+      await openRepository();
+      await repository.enqueue([item], const DownloadSelection());
+      await _waitFor(repository, DownloadStatus.failed);
+      final task = repository.current.tasks.single;
+      expect(await File('${task.directory}/video.m4s').exists(), isTrue);
+      expect(task.publicFiles, isEmpty);
+      publicStorage!.failPublish = false;
+      publicStorage!.selected = 'content://other/tree/new';
+      final requests = videoRequests;
+      await repository.resume(task.id);
+      await _waitFor(repository, DownloadStatus.completed);
+      expect(videoRequests, requests);
+      expect(repository.current.tasks.single.publicFiles.length, 2);
+      expect(publicStorage!.destinations, ['downloads', 'downloads']);
+    },
+  );
+
+  test(
+    'download commits without media digests and keeps URL-free records',
+    () async {
+      await repository.enqueue([item], const DownloadSelection());
+      await _waitFor(repository, DownloadStatus.completed);
+      final task = repository.current.tasks.single;
+      expect(task.tracks.length, 2);
+      expect(task.tracks.every((track) => track.complete), isTrue);
+      expect(await File('${task.directory}/video.m4s').length(), media.length);
+      expect(await File('${task.directory}/audio.m4s').length(), media.length);
+      expect(await File('${task.directory}/extras.json').exists(), isTrue);
+      expect(
+        (await File(
+          '${task.directory}/manifest.json',
+        ).readAsString()).contains('http'),
+        isFalse,
+      );
+      final record = await db
+          .customSelect('SELECT record_json FROM download_tasks')
+          .getSingle();
+      expect(record.read<String>('record_json').contains('http'), isFalse);
+      expect((await repository.offlineTask(task.id)).id, task.id);
+    },
+  );
+
+  test(
+    'Android anchor supports legacy records through resume, offline and delete',
+    () async {
+      await repository.close();
+      await db.close();
+      final documents = await Directory('${root.path}/app_flutter').create();
+      final alias = await Link('${root.path}/system_alias')
+          .create(documents.path);
+      final files = DownloadFileStore(
+        trustedDocumentsDirectory: () async => documents.path,
+      );
+      final downloadRoot = '${documents.path}/BiliSail/offline';
+      await openRepository(files: files, directory: downloadRoot);
+      slow = true;
+      await repository.enqueue([item], const DownloadSelection());
+      await _waitFor(repository, DownloadStatus.downloading);
+      final id = repository.current.tasks.single.id;
+      final directory = repository.current.tasks.single.directory;
+      await repository.close();
+      final row = await db
+          .customSelect('SELECT record_json FROM download_tasks')
+          .getSingle();
+      final record =
+          jsonDecode(row.read<String>('record_json')) as Map<String, dynamic>;
+      final legacyPath = directory.replaceFirst(documents.path, alias.path);
+      record['directory'] = legacyPath;
+      await db.customStatement('UPDATE download_tasks SET record_json = ?', [
+        jsonEncode(record),
+      ]);
+      await db.close();
+      await openRepository(files: files, directory: downloadRoot);
+      expect(repository.current.tasks.single.status, DownloadStatus.paused);
+      expect(repository.current.tasks.single.directory, legacyPath);
+      slow = false;
+      await repository.resume(id);
+      await _waitFor(repository, DownloadStatus.completed);
+      expect((await repository.offlineTask(id)).directory, legacyPath);
+      expect(await File('$directory/video.m4s').length(), media.length);
+      await repository.remove(id, deleteFiles: true);
+      expect(await Directory(directory).exists(), isFalse);
+      expect(await Link(alias.path).exists(), isTrue);
+    },
+    skip: Platform.isWindows
+        ? 'Creating Windows symlinks requires additional privileges.'
+        : false,
+  );
+
+  test(
+    'modified media remains playable across refresh and process restart',
     () async {
       await repository.enqueue([item], const DownloadSelection());
       await _waitFor(repository, DownloadStatus.completed);
@@ -134,8 +257,33 @@ void main() {
         DownloadStatus.completed,
       );
       await File('$directory/video.m4s').writeAsBytes([1, 2, 3]);
-      await expectLater(repository.offlineTask(id), throwsException);
-      expect(repository.current.tasks.single.status, DownloadStatus.failed);
+      expect(
+        (await repository.offlineTask(id)).status,
+        DownloadStatus.completed,
+      );
+      await repository.refresh();
+      await repository.close();
+      await db.close();
+      await openRepository();
+      expect(
+        (await repository.offlineTask(id)).status,
+        DownloadStatus.completed,
+      );
+      expect(
+        repository.current.tasks.single.tracks.every((t) => t.sha256 == null),
+        isTrue,
+      );
+      await File('$directory/audio.m4s').delete();
+      await expectLater(
+        repository.offlineTask(id),
+        throwsA(
+          isA<AppFailure>().having(
+            (e) => e.message,
+            'missing track',
+            contains('音频'),
+          ),
+        ),
+      );
     },
   );
 
@@ -396,6 +544,37 @@ void main() {
     group(output.name, () {
       final mergedSelection = DownloadSelection(output: output);
 
+      test('public merge retries without remux', () async {
+        final native = await useMuxer();
+        await repository.close();
+        await db.close();
+        publicStorage = _PublicStorage()..failPublish = true;
+        await openRepository();
+        await repository.enqueue([item], mergedSelection);
+        await _waitFor(repository, DownloadStatus.failed);
+        final task = repository.current.tasks.single;
+        expect(task.publicFiles, isEmpty);
+        final mergedFile = File('${task.directory}/${output.fileName}');
+        expect(await mergedFile.exists(), isTrue);
+        publicStorage!.failPublish = false;
+        await repository.resume(task.id);
+        await _waitFor(repository, DownloadStatus.completed);
+        await repository.close();
+        expect(native.calls, 1);
+        expect(repository.current.tasks.single.publicFiles.keys, [
+          output.fileName,
+        ]);
+        for (final name in ['video.m4s', 'audio.m4s', output.fileName]) {
+          expect(await File('${task.directory}/$name').exists(), isFalse);
+        }
+        await db.close();
+        await openRepository();
+        expect(
+          (await repository.offlineTask(task.id)).status,
+          DownloadStatus.completed,
+        );
+      });
+
       test(
         'merged completion commits output and reopens after removing sources',
         () async {
@@ -423,9 +602,9 @@ void main() {
           expect(repository.current.tasks.single.selection.output, output);
           await File('${task.directory}/${output.fileName}')
               .writeAsBytes(List.filled(media.length * 2, 0));
-          await expectLater(
-            repository.offlineTask(task.id),
-            throwsA(isA<AppFailure>()),
+          expect(
+            (await repository.offlineTask(task.id)).status,
+            DownloadStatus.completed,
           );
         },
       );
@@ -535,7 +714,7 @@ void main() {
       );
 
       test(
-        'output-before-manifest interruption resumes from verified output only',
+        'committed output recovers without the legacy integrity manifest',
         () async {
           final native = await useMuxer();
           await repository.enqueue([item], mergedSelection);
@@ -556,7 +735,10 @@ void main() {
           );
           await db.close();
           await openRepository();
-          expect(repository.current.tasks.single.status, DownloadStatus.paused);
+          expect(
+            repository.current.tasks.single.status,
+            DownloadStatus.completed,
+          );
           final resolves = sources.resolveCalls;
           await repository.resume(task.id);
           await _waitFor(repository, DownloadStatus.completed);
@@ -594,27 +776,28 @@ void main() {
         );
       });
 
-      test('startup cleanup keeps source backups if merged output has been damaged', () async {
-        await useMuxer();
-        await repository.enqueue([item], mergedSelection);
-        await _waitFor(repository, DownloadStatus.completed);
-        await repository.close();
-        final task = repository.current.tasks.single;
-        await File('${task.directory}/video.m4s').writeAsBytes(media);
-        await File('${task.directory}/audio.m4s').writeAsBytes(media);
-        await File('${task.directory}/${output.fileName}')
-            .writeAsBytes(List.filled(media.length * 2, 0));
-        await db.close();
-        await openRepository();
-        expect(await File('${task.directory}/video.m4s').exists(), isTrue);
-        expect(await File('${task.directory}/audio.m4s').exists(), isTrue);
-        await expectLater(
-          repository.offlineTask(task.id),
-          throwsA(isA<AppFailure>()),
-        );
-        await repository.resume(task.id);
-        await _waitFor(repository, DownloadStatus.completed);
-      });
+      test(
+        'startup accepts modified merged output without original tracks',
+        () async {
+          await useMuxer();
+          await repository.enqueue([item], mergedSelection);
+          await _waitFor(repository, DownloadStatus.completed);
+          await repository.close();
+          final task = repository.current.tasks.single;
+          await File('${task.directory}/video.m4s').writeAsBytes(media);
+          await File('${task.directory}/audio.m4s').writeAsBytes(media);
+          await File('${task.directory}/${output.fileName}')
+              .writeAsBytes(List.filled(media.length * 2, 0));
+          await db.close();
+          await openRepository();
+          expect(
+            (await repository.offlineTask(task.id)).status,
+            DownloadStatus.completed,
+          );
+          expect(await File('${task.directory}/video.m4s').exists(), isFalse);
+          expect(await File('${task.directory}/audio.m4s').exists(), isFalse);
+        },
+      );
 
       test(
         'separate and merged versions have distinct queue identities',
@@ -758,4 +941,52 @@ final class _Sources implements DownloadSourceRepository {
     DownloadSelection selection, {
     required RequestCancellation cancellation,
   }) async => DownloadExtras();
+}
+
+final class _PublicStorage implements PublicDownloadStorage {
+  bool available = true, deleted = false, failPublish = false;
+  String selected = 'downloads';
+  final destinations = <String?>[];
+  final Map<String, Map<String, String>> published = {};
+  @override
+  Future<bool> hasDestination() async => true;
+  @override
+  Future<bool> requestDirectoryAccess() async => true;
+  @override
+  Future<DownloadFolderListing> listDirectories(String? directory) async =>
+      DownloadFolderListing(folders: const []);
+  @override
+  Future<void> chooseDestination(String directory) async {}
+  @override
+  Future<String> destination() async => selected;
+  @override
+  Future<Map<String, String>> publish(
+    DownloadTask task,
+    Map<String, String> files,
+    RequestCancellation cancellation,
+  ) async {
+    destinations.add(task.publicDestination);
+    if (failPublish) throw const AppFailure(AppFailureKind.storage, '空间不足');
+    for (final source in files.values) {
+      expect(await File(source).exists(), isTrue);
+    }
+    return published.putIfAbsent(
+      task.id,
+      () => {
+        for (final name in files.keys) name: 'content://test/${task.id}/$name',
+      },
+    );
+  }
+
+  @override
+  Future<void> verify(DownloadTask task) async {
+    if (!available) throw const AppFailure(AppFailureKind.permission, '授权已撤销');
+    expect(task.publicFiles, published[task.id]);
+  }
+
+  @override
+  Future<void> delete(DownloadTask task) async {
+    await verify(task);
+    deleted = true;
+  }
 }

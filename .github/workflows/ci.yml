@@ -150,6 +150,13 @@ jobs:
       - name: Check formatting, analysis and packaging boundaries
         shell: pwsh
         run: ./tool/check.ps1 -Stage Lint -EnforceLockfile
+      - name: Show pinned SDK formatting differences
+        if: failure()
+        shell: bash
+        run: |
+          dart format lib test integration_test packages/*/lib packages/*/test
+          git diff -- '*.dart'
+
       - name: Check Linux packaging, apt mirrors and download caches
         shell: bash
         run: |

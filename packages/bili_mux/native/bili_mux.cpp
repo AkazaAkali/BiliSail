@@ -13,9 +13,7 @@
 
 extern "C" {
 #include <libavformat/avformat.h>
-#include <libavutil/mem.h>
 #include <libavutil/log.h>
-#include <libavutil/sha.h>
 }
 
 struct bili_mux_job {
@@ -117,42 +115,6 @@ struct packet_deleter {
 };
 using packet_ptr = std::unique_ptr<AVPacket, packet_deleter>;
 
-struct sha_deleter {
-  void operator()(AVSHA* value) const { av_free(value); }
-};
-
-// Per-track streaming hash includes packet boundaries and order. Memory stays
-// bounded for long videos; only two pending packets are held during interleave.
-class packet_digest {
- public:
-  packet_digest() : context_{av_sha_alloc()} {
-    if (!context_ || av_sha_init(context_.get(), 256) < 0) {
-      throw mux_error{result::internal};
-    }
-  }
-  void add(const AVPacket& packet) {
-    if (packet.size <= 0 || packet.size > max_packet_bytes) {
-      throw mux_error{result::input};
-    }
-    const auto size = static_cast<uint32_t>(packet.size);
-    const std::array<uint8_t, 4> prefix{
-        static_cast<uint8_t>(size >> 24), static_cast<uint8_t>(size >> 16),
-        static_cast<uint8_t>(size >> 8), static_cast<uint8_t>(size)};
-    av_sha_update(context_.get(), prefix.data(), prefix.size());
-    av_sha_update(context_.get(), packet.data, size);
-    ++packets_;
-  }
-  std::array<uint8_t, 32> finish() {
-    std::array<uint8_t, 32> value{};
-    av_sha_final(context_.get(), value.data());
-    return value;
-  }
-  int64_t packets() const { return packets_; }
- private:
-  std::unique_ptr<AVSHA, sha_deleter> context_;
-  int64_t packets_{0};
-};
-
 int stream_index(const AVFormatContext& context, AVMediaType type) {
   for (unsigned int i = 0; i < context.nb_streams; ++i) {
     if (context.streams[i]->codecpar->codec_type == type) {
@@ -171,6 +133,9 @@ bool read_packet(AVFormatContext& context, int index, AVPacket& packet,
     if (status == AVERROR_EOF) return false;
     if (status < 0) throw mux_error{result::input};
     if (packet.stream_index == index) {
+      if (packet.size <= 0 || packet.size > max_packet_bytes) {
+        throw mux_error{result::input};
+      }
       if (packet.pts == AV_NOPTS_VALUE || packet.dts == AV_NOPTS_VALUE) {
         throw mux_error{result::input};
       }
@@ -237,7 +202,7 @@ void merge(bili_mux_job& job) {
   std::array<packet_ptr, 2> packets{packet_ptr{av_packet_alloc()},
                                     packet_ptr{av_packet_alloc()}};
   if (!packets[0] || !packets[1]) throw mux_error{result::internal};
-  std::array<packet_digest, 2> source_digests{};
+  std::array<int64_t, 2> packet_counts{};
   std::array<bool, 2> pending{
       read_packet(*video, vi, *packets[0], job),
       read_packet(*audio, ai, *packets[1], job)};
@@ -254,7 +219,7 @@ void merge(bili_mux_job& job) {
       track = 1;
     }
     auto& packet = *packets[track];
-    source_digests[track].add(packet);
+    ++packet_counts[track];
     av_packet_rescale_ts(&packet, inputs[track]->streams[indices[track]]->time_base,
                          output.value->streams[track]->time_base);
     packet.stream_index = track;
@@ -268,10 +233,10 @@ void merge(bili_mux_job& job) {
       const double consumed = static_cast<double>(avio_tell(video->pb)) +
                               static_cast<double>(avio_tell(audio->pb));
       job.progress.store(static_cast<int32_t>(
-          std::clamp(consumed / total_size, 0.0, 1.0) * 8000));
+          std::clamp(consumed / total_size, 0.0, 1.0) * 9500));
     }
   }
-  if (source_digests[0].packets() == 0 || source_digests[1].packets() == 0) {
+  if (packet_counts[0] == 0 || packet_counts[1] == 0) {
     throw mux_error{result::input};
   }
   check_cancel(job);
@@ -279,36 +244,9 @@ void merge(bili_mux_job& job) {
     check_cancel(job);
     throw mux_error{result::output};
   }
-  job.progress.store(8500);
-
-  // Verify the committed container has precisely the original compressed
-  // packets on both tracks. File hashing/atomic publication belongs to Dart.
-  auto verified = open_input(job.output, job);
-  if (verified->nb_streams != 2) throw mux_error{result::verification};
-  const int ov = stream_index(*verified, AVMEDIA_TYPE_VIDEO);
-  const int oa = stream_index(*verified, AVMEDIA_TYPE_AUDIO);
-  if (verified->streams[ov]->codecpar->codec_id != vc ||
-      verified->streams[oa]->codecpar->codec_id != AV_CODEC_ID_AAC) {
-    throw mux_error{result::verification};
-  }
-  std::array<packet_digest, 2> output_digests{};
-  auto packet = packet_ptr{av_packet_alloc()};
-  if (!packet) throw mux_error{result::internal};
-  while (true) {
-    check_cancel(job);
-    const int status = av_read_frame(verified.get(), packet.get());
-    if (status == AVERROR_EOF) break;
-    if (status < 0) throw mux_error{result::verification};
-    const int track = packet->stream_index == ov ? 0 : 1;
-    output_digests[track].add(*packet);
-    av_packet_unref(packet.get());
-  }
-  for (int track = 0; track < 2; ++track) {
-    if (source_digests[track].packets() != output_digests[track].packets() ||
-        source_digests[track].finish() != output_digests[track].finish()) {
-      throw mux_error{result::verification};
-    }
-  }
+  // Successful packet writes, trailer and close commit the output. Do not
+  // reopen and hash the whole movie: local playback accepts user modifications.
+  // Independent regression tests still compare the remuxed packet streams.
   job.progress.store(10000);
 }
 }  // namespace

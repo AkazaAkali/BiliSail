@@ -33,6 +33,32 @@ void main() {
   tearDown(() async => directory.delete(recursive: true));
 
   test(
+    'public video and audio are forwarded as URIs without local copies',
+    () async {
+      downloads.task = downloads.task.copyWith(
+        publicFiles: {
+          'video.m4s': 'content://media/external/downloads/1',
+          'audio.m4s': 'content://media/external/downloads/2',
+        },
+      );
+      final media = await repository.content.resolve(
+        const OfflinePlaybackTarget('task-1'),
+        quality: 80,
+        cancellation: RequestCancellation(),
+      );
+      expect(
+        media.video.urls.single.toString(),
+        'content://media/external/downloads/1',
+      );
+      expect(
+        media.audio!.urls.single.toString(),
+        'content://media/external/downloads/2',
+      );
+      expect(network.calls, isEmpty);
+    },
+  );
+
+  test(
     'production adapter forwards online high energy and skips offline sources',
     () async {
       final detail = _detail();
