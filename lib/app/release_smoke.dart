@@ -85,7 +85,9 @@ Future<void> verifyMacOSPlaybackWindows(
         throw StateError('Playback view did not attach');
       }
       final primary = FocusManager.instance.primaryFocus?.context;
-      if (primary == null || View.maybeOf(primary)?.viewId != playback.viewId) {
+      if (primary == null ||
+          !primary.mounted ||
+          View.maybeOf(primary)?.viewId != playback.viewId) {
         throw StateError('Initial playback has the wrong Flutter focus');
       }
       // Deliver through the real NSWindow responder/engine/host path, without
