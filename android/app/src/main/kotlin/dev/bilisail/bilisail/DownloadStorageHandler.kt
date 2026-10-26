@@ -37,6 +37,7 @@ internal class DownloadStorageHandler(private val activity: Activity, messenger:
     private val cancellations = ConcurrentHashMap<String, AtomicBoolean>()
     private val leases = ConcurrentHashMap<String, ParcelFileDescriptor>()
     private val taskLocks = ConcurrentHashMap<String, Any>()
+    private val closed = AtomicBoolean(false)
     private var picker: MethodChannel.Result? = null
     private val requestCode = 5714
     private val names = setOf("video.m4s", "audio.m4s", "media.mp4", "media.mkv")
@@ -44,6 +45,7 @@ internal class DownloadStorageHandler(private val activity: Activity, messenger:
     init { channel.setMethodCallHandler(::call) }
 
     private fun call(call: MethodCall, result: MethodChannel.Result) {
+        if (closed.get()) { result.error("storage", "存储服务已关闭", null); return }
         if (call.method == "choose") {
             if (call.argument<Boolean>("force") != true && prefs.contains("destination")) {
                 result.success(true)
@@ -318,15 +320,21 @@ internal class DownloadStorageHandler(private val activity: Activity, messenger:
         checkBoundary(record, uri)
         val fd = readable(uri)
         val lease = UUID.randomUUID().toString()
-        leases[lease] = fd
+        synchronized(leases) {
+            if (closed.get()) { fd.close(); throw IOException("存储服务已关闭") }
+            leases[lease] = fd
+        }
         return mapOf("lease" to lease, "fd" to fd.fd)
     }
 
     fun close() {
+        if (!closed.compareAndSet(false, true)) return
         channel.setMethodCallHandler(null)
         cancellations.values.forEach { it.set(true) }
         finishPicker(false)
-        worker.execute { leases.values.forEach { it.close() }; leases.clear() }
+        worker.execute {
+            synchronized(leases) { leases.values.forEach { it.close() }; leases.clear() }
+        }
         worker.shutdown()
     }
 }
