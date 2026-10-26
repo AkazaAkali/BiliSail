@@ -76,6 +76,10 @@ set_target_properties(${BINARY_NAME}
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
+# path_provider_android pulls in jni transitively. Linux uses path_provider_linux
+# and has no JVM integration. Do not let a host JDK make the optional jni plugin
+# bundle libdartjni.so linked to the runner's libjvm.so.
+set(CMAKE_DISABLE_FIND_PACKAGE_JNI TRUE)
 include(flutter/generated_plugins.cmake)
 
 

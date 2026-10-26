@@ -106,3 +106,12 @@ Windows x64／Flutter 3.47.6 本轮验证：
 [Runtime 检查脚本](../../tool/linux-runtime-validation.sh) 现在通过标准输入在已安装应用的 Runtime 中执行，统一检查主程序和共享库，打印失败路径、退出码及完整输出。非零退出和 `not found` 都继续使任务失败；未跳过库文件或放宽依赖要求。检查回归沿用 CI 的 `test_linux_*.py` 入口。
 
 本地 Debian 13 的 23 项 Python 回归及 4 项下载缓存检查通过；真实 GCC/ELF/ldd 探针验证完整依赖通过、移除共享库失败且显示缺失 SONAME。Shell 语法与 `git diff --check` 通过。本机没有 Flutter、PowerShell 和 Flatpak，未运行根检查脚本或完整 Linux 打包。具体 Runtime 失败原因仍待带诊断的新 CI 确认；这些检查不代表图形启动或实机播放验收。
+
+### 诊断 CI 确认的两个根因
+
+[诊断提交 5769b3f 的 Linux job](https://github.com/CKopoer/BiliSail/actions/runs/40257170639/job/121362968972) 明确报告：
+
+- `org.gnome.desktop.sound.gschema.xml` 被 `*.so*` 匹配，`ldd` 返回 `not a dynamic executable`。Runtime 检查原先缺少宿主 AppDir 校验已有的 ELF 文件头筛选，数据文件导致误报。现仅对 ELF 运行依赖检查，主程序缺失或不是 ELF 仍报错。
+- `/app/usr/bin/lib/libdartjni.so` 的 `libjvm.so => not found` 是真实缺依赖。锁定的 `path_provider_android 2.3.1` 传递引入 `jni 1.1.0`；后者作为桌面 FFI 插件，仅在发现 JDK 时生成 JNI 库并链接该 JDK。runner 安装了 JDK，宿主检查因而通过，但 Flatpak Runtime 不提供该 JVM。Linux 应用实际使用 `path_provider_linux`，源码没有 JVM 集成；在 Linux CMake 引入生成插件规则前设置 `CMAKE_DISABLE_FIND_PACKAGE_JNI`，使用上游支持的可选探测路径，不构建或分发这份 Android 传递依赖的桌面 JNI 库。Android 和其他平台配置不变，未修改 Pub 缓存、生成插件清单或锁文件，也未添加 JVM 运行时。
+
+两份上游包归档的 SHA-256 均与 `pubspec.lock` 一致。本地用锁定 JNI 源码、系统 JDK 与 CMake 3.31.6 对照验证：默认配置生成 `libdartjni.so` 并链接 `libjvm.so`；禁用 JNI 探测后配置和构建成功，不生成该库。更新后 25 项 Python 回归通过，新增精确 XML 文件名误匹配及非 ELF 主程序拒绝用例；真实缺库和 `ldd` 非零返回仍失败。最终应用构建、Flatpak Runtime 检查和产物上传以修复提交的后续 CI 结果为准。

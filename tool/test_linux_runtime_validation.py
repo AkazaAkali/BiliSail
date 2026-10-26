@@ -17,10 +17,10 @@ class RuntimeValidationTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.binary = self.root / "usr/bin/bilisail"
         self.binary.parent.mkdir(parents=True)
-        self.binary.touch()
+        self.binary.write_bytes(b"\x7fELFfixture")
         self.library = self.root / "usr/bin/lib/libexample.so"
         self.library.parent.mkdir()
-        self.library.touch()
+        self.library.write_bytes(b"\x7fELFfixture")
         commands = self.root / "commands"
         commands.mkdir()
         ldd = commands / "ldd"
@@ -80,6 +80,20 @@ printf 'libc.so.6 => /usr/lib/libc.so.6\\n'
         result = self.check()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Missing executable", result.stderr)
+
+    def test_sound_schema_is_not_passed_to_ldd(self):
+        schema = self.root / "usr/share/glib-2.0/schemas/org.gnome.desktop.sound.gschema.xml"
+        schema.parent.mkdir(parents=True)
+        schema.write_text("<schemalist/>")
+        result = self.check(schema, 1, "not a dynamic executable")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(str(schema), self.checked.read_text().splitlines())
+
+    def test_non_elf_executable_is_not_silently_skipped(self):
+        self.binary.write_text("not an executable")
+        result = self.check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Executable is not ELF", result.stderr)
 
 
 if __name__ == "__main__":

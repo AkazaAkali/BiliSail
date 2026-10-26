@@ -12,6 +12,21 @@ find "$root/usr" -type f \( -name '*.so*' -o -path "$root/usr/bin/bilisail" \) \
   -exec sh -c '
     failed=0
     for binary do
+      # The glob also matches data such as org.gnome.desktop.sound.gschema.xml.
+      # Match the host AppDir checker: only ELF files have loader dependencies.
+      magic=$(head -c 4 "$binary") || {
+        printf "Cannot read dependency candidate: %s\n" "$binary" >&2
+        failed=1
+        continue
+      }
+      if [ "$magic" != "$(printf "\177ELF")" ]; then
+        case "$binary" in
+          */usr/bin/bilisail)
+            printf "Executable is not ELF: %s\n" "$binary" >&2
+            failed=1 ;;
+        esac
+        continue
+      fi
       status=0
       result=$(ldd "$binary" 2>&1) || status=$?
       if [ "$status" -ne 0 ] || printf "%s\n" "$result" | grep -q "not found"; then
