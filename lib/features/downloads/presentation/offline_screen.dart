@@ -112,18 +112,18 @@ final class _OfflineScreenState extends ConsumerState<OfflineScreen> {
                     height: narrow ? 68 : 108,
                     child: cover == null
                         ? ColoredBox(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerHigh,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHigh,
                             child: const Icon(Icons.download_done_rounded),
                           )
                         : Image(
                             image: cover,
                             fit: BoxFit.cover,
                             errorBuilder: (_, _, _) => ColoredBox(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainerHigh,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHigh,
                               child: const Icon(Icons.download_done_rounded),
                             ),
                           ),

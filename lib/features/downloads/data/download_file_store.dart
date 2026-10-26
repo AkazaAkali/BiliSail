@@ -359,9 +359,8 @@ final class DownloadFileStore {
       if (!p.equals(recordedAnchor, boundary)) {
         try {
           final expected = await Directory(boundary).resolveSymbolicLinks();
-          final recorded = await Directory(
-            recordedAnchor,
-          ).resolveSymbolicLinks();
+          final recorded = await Directory(recordedAnchor)
+              .resolveSymbolicLinks();
           if (!p.equals(recorded, expected)) {
             throw const AppFailure(AppFailureKind.storage, '下载目录不在应用离线目录内');
           }
