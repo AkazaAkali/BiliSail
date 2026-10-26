@@ -232,12 +232,13 @@ internal class DownloadStorageHandler(private val activity: Activity, messenger:
             if (cancelled.get()) throw IOException("保存已暂停，临时文件已保留")
             require(name in names)
             val source = File(path)
-            val anchor = File(activity.applicationInfo.dataDir, "app_flutter").canonicalFile
-            require(source.canonicalPath.startsWith(anchor.path + File.separator) && source.name == name && source.parentFile?.name == id)
-            // Data-layer path checks already reject links throughout the task subtree.
-            val platformAnchor = activity.getDir("flutter", Activity.MODE_PRIVATE).absoluteFile
-            val boundary = if (source.absolutePath.startsWith(platformAnchor.path + File.separator)) platformAnchor else anchor
+            // Trust the exact platform-owned app directory, including its system
+            // ancestor aliases. Inspect only user-controlled descendants, just
+            // like the Dart file store; never canonicalize or walk above it.
+            val boundary = activity.getDir("flutter", Activity.MODE_PRIVATE).absoluteFile
+            require(source.name == name && source.parentFile?.name == id)
             require(source.absolutePath.startsWith(boundary.path + File.separator))
+            require(source.path.split(File.separatorChar).none { it == ".." || it == "." })
             var component = source.absoluteFile
             while (component != boundary) {
                 require(!OsConstants.S_ISLNK(Os.lstat(component.path).st_mode))
