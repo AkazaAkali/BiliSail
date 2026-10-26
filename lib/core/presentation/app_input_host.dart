@@ -356,18 +356,17 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
     _viewId = viewId;
     _resetInput();
     _nativeFocusChanged();
+    final synchronization = _windowFocus.synchronizeNativeFocusIfSupported();
     unawaited(
-      _windowFocus.synchronizeNativeFocusIfSupported().catchError(
-        (Object error, StackTrace stack) {
-          FlutterError.reportError(
-            FlutterErrorDetails(
-              exception: error,
-              stack: stack,
-              library: 'BiliSail window focus',
-            ),
-          );
-        },
-      ),
+      synchronization.catchError((Object error, StackTrace stack) {
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stack,
+            library: 'BiliSail window focus',
+          ),
+        );
+      }),
     );
   }
 

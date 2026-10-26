@@ -93,8 +93,16 @@ Future<void> verifyMacOSPlaybackWindows(
       await const MethodChannel('bilisail/application_window')
           .invokeMethod<void>('probeWindowSpace', {'viewId': playback.viewId})
           .timeout(const Duration(seconds: 2));
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      if (presses != 1) throw StateError('Playback Space was not handled');
+      final inputWait = Stopwatch()..start();
+      final keyboard = HardwareKeyboard.instance;
+      bool spaceHeld() => keyboard.isLogicalKeyPressed(LogicalKeyboardKey.space);
+      while ((presses == 0 || spaceHeld()) &&
+          inputWait.elapsed < const Duration(seconds: 2)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      if (presses != 1 || spaceHeld()) {
+        throw StateError('Playback Space sequence was not handled');
+      }
       await playback.windowService.bindTitleBarBack(
         owner: owner,
         onBack: () {},
