@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../core/platform/detached_playback_window.dart';
 import '../core/platform/macos_application_window.dart';
+import '../core/presentation/window_input_focus.dart';
 import '../core/storage/credential_store.dart';
 
 // Run only in the explicit startup smoke of the exact bundle being packaged.
@@ -33,6 +34,12 @@ Future<void> verifyMacOSPlaybackWindows(
     final owner = Object();
     try {
       await playback.prepare();
+      // Check before any second activation: the SDK installs its window
+      // delegate after makeKeyAndOrderFront, losing the initial focus event.
+      final focus = WindowInputFocus.instance;
+      if (!focus.observed || focus.viewId != playback.viewId) {
+        throw StateError('Initial native playback focus was not synchronized');
+      }
       mainWindow.present(
         app,
         additionalView: playback.buildView(
