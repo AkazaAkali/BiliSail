@@ -211,6 +211,11 @@ final class _DownloadDialogState extends ConsumerState<DownloadDialog> {
       _error = null;
     });
     try {
+      if (!await ref
+          .read(downloadControllerProvider.notifier)
+          .chooseDestination())
+        return;
+      if (!mounted || _accountChanged) return;
       await ref
           .read(downloadControllerProvider.notifier)
           .enqueue(

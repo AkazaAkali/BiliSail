@@ -237,9 +237,14 @@ final class DownloadTask {
     this.duration,
     this.mergedMedia,
     this.muxProgress,
-  }) : tracks = List.unmodifiable(tracks),
+    this.publicDestination,
+    Map<String, String> publicFiles = const {},
+  }) : publicFiles = Map.unmodifiable(publicFiles),
+       tracks = List.unmodifiable(tracks),
        warnings = List.unmodifiable(warnings);
   final String id, scope, directory;
+  final String? publicDestination;
+  final Map<String, String> publicFiles;
   final DownloadItem item;
   final DownloadSelection selection;
   final DownloadStatus status;
@@ -278,6 +283,7 @@ final class DownloadTask {
     DownloadMergedMedia? mergedMedia,
     bool clearMergedMedia = false,
     double? muxProgress,
+    Map<String, String>? publicFiles,
   }) => DownloadTask(
     id: id,
     scope: scope,
@@ -285,6 +291,8 @@ final class DownloadTask {
     selection: selection,
     status: status ?? this.status,
     directory: directory,
+    publicDestination: publicDestination,
+    publicFiles: publicFiles ?? this.publicFiles,
     createdAt: createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
     tracks: tracks ?? this.tracks,

@@ -1,3 +1,4 @@
+import '../features/downloads/data/android_public_download_storage.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -189,6 +190,9 @@ class AppDependencies {
       database,
       downloadSources,
       muxer: NativeDownloadMuxer(),
+      publicStorage: Platform.isAndroid
+          ? const AndroidPublicDownloadStorage()
+          : null,
       defaultDirectory: const FileAccessService().defaultDownloadDirectory,
       files: DownloadFileStore(
         trustedDocumentsDirectory:
@@ -306,6 +310,9 @@ class AppDependencies {
           PublicCommentVideoLinkRepository(api, requests),
         ),
         downloadRepositoryProvider.overrideWithValue(downloads),
+        publicDownloadStorageProvider.overrideWithValue(
+          Platform.isAndroid ? const AndroidPublicDownloadStorage() : null,
+        ),
         downloadSourceRepositoryProvider.overrideWithValue(downloadSources),
         sessionEpochProvider.overrideWithValue(() => requests.sessionEpoch),
         playbackViewerRepositoryProvider.overrideWithValue(

@@ -5,6 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../domain/app_failure.dart';
 import '../../../domain/request_cancellation.dart';
 import '../domain/download_repository.dart';
+import '../domain/public_download_storage.dart';
+
+final publicDownloadStorageProvider = Provider<PublicDownloadStorage?>(
+  (ref) => null,
+);
 
 final downloadRepositoryProvider = Provider<DownloadRepository>((ref) {
   final repository = _UnavailableDownloadRepository();
@@ -58,6 +63,12 @@ final class DownloadController extends Notifier<DownloadQueueState> {
   }) => ref
       .read(downloadSourceRepositoryProvider)
       .qualities(item, cancellation: cancellation);
+
+  Future<bool> chooseDestination({bool force = false}) async =>
+      await ref
+          .read(publicDownloadStorageProvider)
+          ?.chooseDestination(force: force) ??
+      true;
 
   Future<void> enqueue(List<DownloadItem> items, DownloadSelection selection) =>
       _repository.enqueue(items, selection);

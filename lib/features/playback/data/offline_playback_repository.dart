@@ -142,7 +142,11 @@ final class OfflinePlaybackRepository
         throw const AppFailure(AppFailureKind.storage, '离线文件索引无效');
       }
       return PlaybackTrack(
-        urls: [File(path.join(task.directory, track.fileName)).uri],
+        urls: [
+          task.publicFiles.containsKey(track.fileName)
+              ? Uri.parse(task.publicFiles[track.fileName]!)
+              : File(path.join(task.directory, track.fileName)).uri,
+        ],
         codec: track.codec,
         bandwidth: track.bandwidth,
       );
@@ -159,7 +163,11 @@ final class OfflinePlaybackRepository
           : PlaybackMediaKind.dash,
       video: task.selection.output.isMerged && merged != null
           ? PlaybackTrack(
-              urls: [File(path.join(task.directory, merged.fileName)).uri],
+              urls: [
+                task.publicFiles.containsKey(merged.fileName)
+                    ? Uri.parse(task.publicFiles[merged.fileName]!)
+                    : File(path.join(task.directory, merged.fileName)).uri,
+              ],
               codec: video.codec,
               bandwidth: video.bandwidth + audio.bandwidth,
             )

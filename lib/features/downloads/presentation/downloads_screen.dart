@@ -772,7 +772,24 @@ final class _DownloadSettingsDialogState
                 : (value) => setState(() => _concurrency = value.first),
           ),
           const SizedBox(height: 16),
-          const Text('默认保存在应用文档目录的离线文件夹。目录变更只影响之后新增的任务。'),
+          if (ref.watch(publicDownloadStorageProvider) != null)
+            TextButton.icon(
+              onPressed: _saving
+                  ? null
+                  : () async {
+                      try {
+                        await ref
+                            .read(downloadControllerProvider.notifier)
+                            .chooseDestination(force: true);
+                      } on AppFailure catch (e) {
+                        if (mounted) setState(() => _error = e.message);
+                      }
+                    },
+              icon: const Icon(Icons.folder_open),
+              label: const Text('公共下载位置（更改仅影响新任务）'),
+            )
+          else
+            const Text('默认保存在应用文档目录的离线文件夹。目录变更只影响之后新增的任务。'),
           if (widget.allowCustomDirectory) ...[
             const SizedBox(height: 12),
             TextField(
