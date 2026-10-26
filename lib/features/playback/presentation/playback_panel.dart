@@ -1827,7 +1827,7 @@ class _ControlBar extends StatelessWidget {
       onPressed: onFullScreen,
       icon: Icon(
         fullScreen ? Icons.fullscreen_exit : BiliIcons.fullscreen,
-        size: 20,
+        size: 18,
       ),
     );
     final media = session.media;
