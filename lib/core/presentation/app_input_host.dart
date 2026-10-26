@@ -261,6 +261,7 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
   final _windowFocus = WindowInputFocus.instance;
   bool? _lastEditing;
   bool _editingSyncScheduled = false;
+  String? _lastFocusDecision;
   bool get _active => _lifecycleActive && _viewFocused;
   @override
   void initState() {
@@ -355,6 +356,19 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
     _viewId = viewId;
     _resetInput();
     _nativeFocusChanged();
+    unawaited(
+      _windowFocus.synchronizeNativeFocusIfSupported().catchError(
+        (Object error, StackTrace stack) {
+          FlutterError.reportError(
+            FlutterErrorDetails(
+              exception: error,
+              stack: stack,
+              library: 'BiliSail window focus',
+            ),
+          );
+        },
+      ),
+    );
   }
 
   void _nativeFocusChanged() {
@@ -420,21 +434,39 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
     );
   }
 
+  void _traceFocusDecision(String reason) {
+    if (!_windowFocus.diagnostics) return;
+    final primary = FocusManager.instance.primaryFocus?.context;
+    final primaryView = primary == null ? null : View.maybeOf(primary)?.viewId;
+    final trace = [
+      'source=${_windowFocus.source}',
+      'revision=${_windowFocus.revision}',
+      'nativeView=${_windowFocus.viewId}',
+      'hostView=$_viewId active=$_active lifecycle=$_lifecycleActive',
+      'primaryView=$primaryView reason=$reason',
+    ].join(' ');
+    if (trace == _lastFocusDecision) return;
+    _lastFocusDecision = trace;
+    debugPrint('BILISAIL_FOCUS_INPUT $trace');
+  }
+
   KeyEventResult _key(KeyEvent event) {
-    if (!_active) return KeyEventResult.ignored;
+    if (!_active) {
+      _traceFocusDecision('inactive');
+      return KeyEventResult.ignored;
+    }
     final focusedContext = FocusManager.instance.primaryFocus?.context;
     if (focusedContext != null &&
         View.maybeOf(focusedContext)?.viewId != View.maybeOf(context)?.viewId) {
+      _traceFocusDecision('primary-view');
       return KeyEventResult.ignored;
     }
-    return widget.dispatcher
-            .dispatch(
-              _normalizer.key(event, viewId: View.maybeOf(context)?.viewId),
-              _context(),
-            )
-            .claimed
-        ? KeyEventResult.handled
-        : KeyEventResult.ignored;
+    final result = widget.dispatcher.dispatch(
+      _normalizer.key(event, viewId: View.maybeOf(context)?.viewId),
+      _context(),
+    );
+    _traceFocusDecision('dispatch-${result.reason.name}');
+    return result.claimed ? KeyEventResult.handled : KeyEventResult.ignored;
   }
 
   void _pointer(PointerEvent event) {

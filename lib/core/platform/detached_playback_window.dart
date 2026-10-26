@@ -12,6 +12,7 @@ import 'package:flutter/src/widgets/_window_macos.dart' as flutter_macos;
 import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
 
+import '../presentation/window_input_focus.dart';
 import 'window_service.dart';
 
 typedef DetachedPlaybackWindowFactory = DetachedPlaybackWindow Function({
@@ -451,6 +452,7 @@ class _FlutterDetachedPlaybackWindow extends DetachedPlaybackWindow {
   Future<void> prepare() async {
     await windowService.configurePlaybackTitleBar();
     await windowService.restorePlaybackGeometry();
+    await WindowInputFocus.instance.synchronizeNativeFocusIfSupported();
   }
 
   @override

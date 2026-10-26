@@ -10,6 +10,11 @@ final class MacOSApplication {
   private var systemFontsChannel: FlutterMethodChannel?
   private var imageExportChannel: FlutterMethodChannel?
   private var desktopWindows: DesktopWindowController?
+  private var focusObservers: [NSObjectProtocol] = []
+  private var focusRevision: Int64 = 0
+  private let focusDiagnostics =
+    ProcessInfo.processInfo.environment["BILISAIL_WINDOW_FOCUS_DIAGNOSTICS"] == "1" ||
+    ProcessInfo.processInfo.arguments.contains("--bilisail-release-smoke")
 
   init() {
     engine = FlutterEngine(name: "BiliSail", project: nil, allowHeadlessExecution: true)
@@ -23,6 +28,44 @@ final class MacOSApplication {
     applicationWindowChannel.setMethodCallHandler { [weak self] call, result in
       guard let self = self else {
         result(FlutterError(code: "engine_unavailable", message: "Flutter engine is unavailable.", details: nil))
+        return
+      }
+      if call.method == "getWindowFocus" {
+        result(self.windowFocusSnapshot())
+        return
+      }
+      if call.method == "probeWindowSpace" {
+        // Only the explicit packaging smoke can inject this fixed, harmless
+        // event into its own key window. Never use a global event tap or post.
+        guard ProcessInfo.processInfo.arguments.contains("--bilisail-release-smoke"),
+              ProcessInfo.processInfo.arguments.contains("startup"),
+              let args = call.arguments as? [String: Any],
+              let viewID = (args["viewId"] as? NSNumber)?.int64Value else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        DispatchQueue.main.async { [weak self] in
+          guard let self = self, NSApp.isActive,
+                let window = NSApp.keyWindow, window.isKeyWindow,
+                let controller = window.contentViewController as? FlutterViewController,
+                controller.engine === self.engine, controller.viewIdentifier == viewID else {
+            result(FlutterError(code: "focus_probe", message: "Probe window is not key.", details: nil))
+            return
+          }
+          for type in [NSEvent.EventType.keyDown, .keyUp] {
+            guard let event = NSEvent.keyEvent(
+              with: type, location: .zero, modifierFlags: [],
+              timestamp: ProcessInfo.processInfo.systemUptime,
+              windowNumber: window.windowNumber, context: nil,
+              characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49
+            ) else {
+              result(FlutterError(code: "focus_probe", message: "Probe event is unavailable.", details: nil))
+              return
+            }
+            window.sendEvent(event)
+          }
+          result(nil)
+        }
         return
       }
       if call.method == "prepareWindowing" {
@@ -50,6 +93,19 @@ final class MacOSApplication {
       result(nil)
     }
 
+    // Observe independently of FlutterWindowOwner: the pinned SDK installs that
+    // delegate only after the regular window has already become key.
+    for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
+                 NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
+      focusObservers.append(NotificationCenter.default.addObserver(
+        forName: name, object: nil, queue: .main
+      ) { [weak self] _ in
+        guard let self = self else { return }
+        self.focusRevision += 1
+        if self.focusDiagnostics { _ = self.windowFocusSnapshot() }
+      })
+    }
+
     // These plugins use the messenger/texture registry headlessly. Main-window
     // operations go through the per-view WindowService, never window_manager's
     // legacy registrar.view (which only looks up implicit view 0).
@@ -73,6 +129,44 @@ final class MacOSApplication {
     desktopWindows = DesktopWindowController(
       messenger: engine.binaryMessenger
     )
+  }
+
+  private func windowFocusSnapshot() -> [String: Any] {
+    let window = NSApp.keyWindow
+    let controller = window?.contentViewController as? FlutterViewController
+    let ownsView = controller?.engine === engine
+    let key = window?.isKeyWindow == true
+    let active = NSApp.isActive
+    let view: Any
+    if ownsView && key && active, let controller = controller {
+      view = NSNumber(value: controller.viewIdentifier)
+    } else {
+      view = NSNull()
+    }
+    let responder = (window?.firstResponder).map { String(describing: type(of: $0)) } ?? "none"
+    let responderInView: Bool
+    if let controller = controller, let first = window?.firstResponder {
+      responderInView = first === controller ||
+        (first as? NSView)?.isDescendant(of: controller.view) == true
+    } else {
+      responderInView = false
+    }
+    let result: [String: Any] = [
+      "revision": focusRevision, "viewId": view, "active": active,
+      "isKeyWindow": key, "responder": responder,
+      "responderInView": responderInView, "diagnostics": focusDiagnostics,
+    ]
+    if focusDiagnostics {
+      // No window titles, key identities, text, URLs or account data.
+      NSLog("BILISAIL_FOCUS_NATIVE revision=%lld active=%d key=%d view=%@ responder=%@ inView=%d",
+            focusRevision, active ? 1 : 0, key ? 1 : 0, String(describing: view), responder,
+            responderInView ? 1 : 0)
+    }
+    return result
+  }
+
+  deinit {
+    for observer in focusObservers { NotificationCenter.default.removeObserver(observer) }
   }
 
   func start() -> Bool { engine.run(withEntrypoint: nil) }

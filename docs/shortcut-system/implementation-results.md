@@ -190,3 +190,29 @@ Meta+W 逐媒体返回及历史耗尽关闭、尾键不误触主窗、重开窗�
 本次环境无 Flutter/Dart SDK，临时获取固定 SDK 的二进制下载被代理 403 阻断；
 本地只能执行源码检查与 git diff --check，格式／分析／测试和构建以修复分支 CI
 结果为准。Widget 回归与 CI 构建不能替代 macOS 实机首次打开、输入法和真实按键验收。
+
+
+### 后续首次聚焦事件缺失修正
+
+用户反馈首次打开空格仍失效、切窗后恢复；反馈时安装包 SHA 未确认，不能据此
+断言某个精确构建的设备结果。重新核对固定 Flutter 3.47.6 源码发现：
+`engine/src/flutter/shell/platform/darwin/macos/framework/Source/FlutterWindowController.mm`
+的 `createRegularWindow` 先 `makeKeyAndOrderFront`，后设置发送
+`windowDidBecomeKey` 的 delegate。首次事件可能根本未到 Dart；上一版的
+事件缓存及主动发送 focus 的测试漏掉了该边界。
+
+主窗／播放窗准备完成及输入宿主跨 view 迁移时，现通过只读原生快照核对当前
+`NSApp.keyWindow`、应用 active 状态和同引擎 Flutter view；不使用 mainWindow
+冒充键盘窗口，不切换原生窗口。请求代次、Dart 事件版本和原生通知版本隔离
+晚到回复；未知失焦状态最多重读三次，不因旧快照恢复已失焦窗口。
+
+macOS 打包 startup smoke 在任何再次 activate 前检查初始原生焦点和 Flutter
+primaryFocus，并通过目标 NSWindow 的 responder → engine → AppInputHost 路径
+发送固定 Space，验证独占消费；该注入仅在显式 startup smoke 参数下可用，
+不使用系统 event tap、不要求辅助功能权限。连续创建／销毁两次仍沿用原销毁顺序。
+组件回归另覆盖没有新窗 focus 事件、快照失焦、乱序回复、回复期间切窗及卸载。
+
+默认不打印诊断。设置 `BILISAIL_WINDOW_FOCUS_DIAGNOSTICS=1` 或运行显式打包
+smoke 时，记录 keyWindow/view、active、responder 类型／所属关系、焦点来源和
+版本、host view/active/primaryFocus 及入口分发原因；不记录按键名称、输入文本、
+窗口标题、URL、账号或凭据。原生受控事件测试仍不是用户设备上的物理按键验收。

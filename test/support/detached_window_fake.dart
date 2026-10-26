@@ -46,6 +46,7 @@ class FakeDetachedWindow extends DetachedPlaybackWindow {
   final FakeSecondaryFlutterView view;
   final VoidCallback onCloseRequested;
   bool disposed = false;
+  Future<void> Function()? onPrepare;
   int activationCount = 0;
   String title;
 
@@ -63,6 +64,11 @@ class FakeDetachedWindow extends DetachedPlaybackWindow {
   );
 
   void requestClose() => onCloseRequested();
+
+  @override
+  Future<void> prepare() async {
+    await onPrepare?.call();
+  }
 
   @override
   Widget buildView(Widget child) => View(view: view, child: child);

@@ -3,6 +3,7 @@ import 'dart:ui' show ViewFocusDirection, ViewFocusEvent, ViewFocusState;
 import 'package:bilisail/app/shell.dart';
 import 'package:bilisail/app/workspace_playback_window.dart';
 import 'package:bilisail/core/platform/detached_playback_window.dart';
+import 'package:bilisail/core/presentation/window_input_focus.dart';
 import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:bilisail/features/settings/domain/shortcut_settings.dart';
 import 'package:flutter/gestures.dart';
@@ -15,6 +16,34 @@ import '../support/detached_window_fake.dart';
 import '../support/input_test_app.dart';
 
 void main() {
+  testWidgets(
+    'native keyWindow snapshot restores Space without an engine focus event',
+    (tester) async {
+      final harness = _Harness(tester, 'Space', nativeSnapshot: true);
+      addTearDown(harness.router.dispose);
+      addTearDown(() {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          const MethodChannel('bilisail/application_window'),
+          null,
+        );
+      });
+      await harness.mount();
+      final window = harness.windows.lastWindow!;
+      expect(WindowInputFocus.instance.source, 'native');
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pumpAndSettle();
+      expect(window.disposed, isTrue);
+      expect(harness.activations, 1);
+      expect(
+        harness.router.routeInformationProvider.value.uri.path,
+        '/user/42',
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
   testWidgets(
     'early native focus enables Meta+W through history, blur and reopening',
     (tester) async {
@@ -276,6 +305,7 @@ class _Harness {
     this.tester,
     String key, {
     this.earlyFocus = false,
+    this.nativeSnapshot = false,
     this.returnFocusDuringCreation = false,
   }) : windows = FakeDetachedWindowFactory(tester.view),
        shortcuts = const ShortcutSettings.defaults().withKeys(
@@ -287,6 +317,7 @@ class _Harness {
   final FakeDetachedWindowFactory windows;
   final ShortcutSettings shortcuts;
   final bool earlyFocus;
+  final bool nativeSnapshot;
   final bool returnFocusDuringCreation;
   int buttons = 0;
 
@@ -298,6 +329,26 @@ class _Harness {
       title: title,
       onCloseRequested: onCloseRequested,
     );
+    if (nativeSnapshot) {
+      // Match createRegularWindow: the old delegate reports blur, but the new
+      // delegate is not installed until after its window has become key.
+      tester.binding.handleViewFocusChanged(
+        ViewFocusEvent(
+          viewId: tester.view.viewId,
+          state: ViewFocusState.unfocused,
+          direction: ViewFocusDirection.undefined,
+        ),
+      );
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('bilisail/application_window'),
+        (_) async => {
+          'viewId': window.viewId,
+          'revision': windows.creationCount,
+          'active': true,
+        },
+      );
+      window.onPrepare = WindowInputFocus.instance.synchronizeNativeFocus;
+    }
     if (earlyFocus) {
       focus(window.viewId);
       if (returnFocusDuringCreation) focus(tester.view.viewId);
@@ -416,7 +467,7 @@ class _Harness {
     await tester.pumpAndSettle();
     router.go('/video/BV1234567890');
     await tester.pumpAndSettle();
-    if (!earlyFocus) focus(windows.lastWindow!.viewId);
+    if (!earlyFocus && !nativeSnapshot) focus(windows.lastWindow!.viewId);
     await tester.pumpAndSettle();
   }
 }

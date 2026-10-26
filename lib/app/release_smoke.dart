@@ -1,10 +1,14 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../core/input/input_stroke.dart';
+import '../core/input/shortcut_dispatcher.dart';
 import '../core/platform/detached_playback_window.dart';
 import '../core/platform/macos_application_window.dart';
+import '../core/presentation/app_input_host.dart';
 import '../core/presentation/window_input_focus.dart';
 import '../core/storage/credential_store.dart';
 
@@ -32,6 +36,24 @@ Future<void> verifyMacOSPlaybackWindows(
       onCloseRequested: () {},
     );
     final owner = Object();
+    var presses = 0;
+    final input = ShortcutDispatcher<String>(
+      scopeFor: (_) => CommandScope.workspace,
+      repeats: (_) => false,
+      editorException: (_, _) => false,
+    );
+    input.replaceBindings({const ShortcutChord('Space'): 'probe'});
+    input.register(
+      owner: owner,
+      scope: CommandScope.workspace,
+      active: () => true,
+      commands: {
+        'probe': (stroke) {
+          if (stroke.phase == InputPhase.down) presses++;
+          return CommandOutcome.completed;
+        },
+      },
+    );
     try {
       await playback.prepare();
       // Check before any second activation: the SDK installs its window
@@ -43,9 +65,13 @@ Future<void> verifyMacOSPlaybackWindows(
       mainWindow.present(
         app,
         additionalView: playback.buildView(
-          const Directionality(
-            textDirection: TextDirection.ltr,
-            child: Center(child: Text('BiliSail window validation')),
+          AppInputHost<String>(
+            dispatcher: input,
+            routes: InputRouteObserver(),
+            child: const Directionality(
+              textDirection: TextDirection.ltr,
+              child: Center(child: Text('BiliSail window validation')),
+            ),
           ),
         ),
       );
@@ -58,6 +84,17 @@ Future<void> verifyMacOSPlaybackWindows(
           view.physicalSize.isEmpty) {
         throw StateError('Playback view did not attach');
       }
+      final primary = FocusManager.instance.primaryFocus?.context;
+      if (primary == null || View.maybeOf(primary)?.viewId != playback.viewId) {
+        throw StateError('Initial playback has the wrong Flutter focus');
+      }
+      // Deliver through the real NSWindow responder/engine/host path, without
+      // activating again. Native injection is gated to explicit startup smoke.
+      await const MethodChannel('bilisail/application_window')
+          .invokeMethod<void>('probeWindowSpace', {'viewId': playback.viewId})
+          .timeout(const Duration(seconds: 2));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      if (presses != 1) throw StateError('Playback Space was not handled');
       await playback.windowService.bindTitleBarBack(
         owner: owner,
         onBack: () {},
@@ -75,6 +112,7 @@ Future<void> verifyMacOSPlaybackWindows(
           // Native removal can pump frames. Leave the frame stack first.
           await Future<void>.delayed(Duration.zero);
           playback.dispose();
+          input.dispose();
         }
       }
     }

@@ -5,6 +5,7 @@ import 'dart:ui' show AppExitType;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../presentation/window_input_focus.dart';
 import 'detached_playback_window.dart';
 import 'window_service.dart';
 
@@ -46,12 +47,15 @@ class MacOSApplicationWindow {
 
   WindowService get service => window.windowService;
 
-  Future<void> prepare() => _channel
-      .invokeMethod<void>('attachMainWindow', {
-        'viewId': window.viewId,
-        'windowHandle': service.nativeWindowHandle,
-      })
-      .timeout(const Duration(seconds: 5));
+  Future<void> prepare() async {
+    await _channel
+        .invokeMethod<void>('attachMainWindow', {
+          'viewId': window.viewId,
+          'windowHandle': service.nativeWindowHandle,
+        })
+        .timeout(const Duration(seconds: 5));
+    await WindowInputFocus.instance.synchronizeNativeFocusIfSupported();
+  }
 
   Widget wrap(Widget app, {Widget? additionalView}) => window.buildView(
     WindowServiceScope(
