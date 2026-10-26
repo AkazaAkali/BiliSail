@@ -272,10 +272,10 @@ class _Harness {
     this.earlyFocus = false,
     this.returnFocusDuringCreation = false,
   }) : windows = FakeDetachedWindowFactory(tester.view),
-      shortcuts = const ShortcutSettings.defaults().withKeys(
-        ShortcutAction.closeTab,
-        ['Ctrl+W', if (earlyFocus) 'MouseBack', key],
-      );
+       shortcuts = const ShortcutSettings.defaults().withKeys(
+         ShortcutAction.closeTab,
+         ['Ctrl+W', if (earlyFocus) 'MouseBack', key],
+       );
 
   final WidgetTester tester;
   final FakeDetachedWindowFactory windows;
