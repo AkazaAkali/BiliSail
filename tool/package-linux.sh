@@ -62,20 +62,8 @@ flatpak install --user --assumeyes --noninteractive --no-related \
   "$output/BiliSail-$version-linux-x64.flatpak"
 # Check the actual exported package under the Runtime, where SDK-only libraries
 # cannot accidentally hide a missing dependency. This does not launch the UI.
-flatpak run --user --command=sh dev.bilisail.bilisail -ec '
-  export LD_LIBRARY_PATH=/app/usr/bin/lib:/app/usr/lib
-  find /app/usr -type f -name "*.so*" -exec sh -ec '\''
-    for library do
-      result=$(ldd "$library" 2>&1)
-      if printf "%s\n" "$result" | grep -q "not found"; then
-        printf "%s\n%s\n" "$library" "$result" >&2
-        exit 1
-      fi
-    done
-  '\'' sh {} +
-  ldd /app/usr/bin/bilisail > /tmp/bilisail-ldd.txt
-  ! grep -q "not found" /tmp/bilisail-ldd.txt
-'
+echo 'Checking dependencies inside the installed Flatpak Runtime'
+flatpak run --user --command=sh dev.bilisail.bilisail -s < "$repo/tool/linux-runtime-validation.sh"
 python3 - "$repo/linux/packaging/dev.bilisail.bilisail.json" "$(dirname "$output")/linux-packaging.json" <<'PY'
 import json, sys
 from pathlib import Path

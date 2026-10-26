@@ -96,3 +96,13 @@ Windows x64／Flutter 3.47.6 本轮验证：
 因此在刚增加的缓存之外，加入 [镜像优先级调整](../../tool/linux-apt-mirrors.py)：仅在 hosted CI 的既有镜像列表上将官方 archive／security 提前、Azure 后移，保留签名验证、其他镜像和元数据，不安装额外第三方 Action。安装脚本增加四个阶段的分组和耗时输出。新增 6 项镜像优先级回归，与原有 12 项 Python 和 4 项下载缓存回归在 Windows／Ubuntu 24.04 均通过；actionlint、Python 编译、Bash 语法和更新后的 41 条相对文档链接通过。`tool/check.ps1 -SkipPub` 再次完整通过 3430 项测试，10 项 mux 原生测试按配置跳过。实际新镜像链路及缓存提速仍须新 CI 验证。
 
 提交前另运行 `tool/check.ps1 -Stage Lint -EnforceLockfile`，五份锁文件的解析、格式、静态分析和打包边界检查通过。按用户后续要求，本次以源码版本 `1.2.1+3` 触发 Release，仅选择 Android、Windows、macOS、iOS，明确关闭 Linux；Linux 修复的远端完整打包与缓存命中继续保留为未验项。本次提交跳过重复的 push 矩阵，由手动 Release 运行全部检查及选中的四端构建，不修改工作流的平台默认值。
+
+## 同日补查：Flatpak Runtime 校验静默失败
+
+[CI #147 的 Linux job](https://github.com/CKopoer/BiliSail/actions/runs/40220618910/job/121252679168) 对应 `687a046bc3e01e09815fcafe1512c89a212328f7`。原始日志确认 Flutter Release 编译、AppImage 生成及 Flatpak 仓库导出完成，随后在安装及 Runtime 校验阶段仅报告 `bash failed: 1`。依赖缓存已命中，APT 安装耗时 35 秒；本次没有再出现旧的 Chrome 许可证错误。
+
+原 Runtime 检查在 `sh -e` 中将 `ldd` 的输出捕获到变量；命令返回非零时，shell 会在打印错误之前退出。主程序的依赖输出又被写入沙盒临时文件，未传回日志。因此现有日志不能确定具体失败库或 ABI，不能据此宣称依赖问题已修复。
+
+[Runtime 检查脚本](../../tool/linux-runtime-validation.sh) 现在通过标准输入在已安装应用的 Runtime 中执行，统一检查主程序和共享库，打印失败路径、退出码及完整输出。非零退出和 `not found` 都继续使任务失败；未跳过库文件或放宽依赖要求。检查回归沿用 CI 的 `test_linux_*.py` 入口。
+
+本地 Debian 13 的 23 项 Python 回归及 4 项下载缓存检查通过；真实 GCC/ELF/ldd 探针验证完整依赖通过、移除共享库失败且显示缺失 SONAME。Shell 语法与 `git diff --check` 通过。本机没有 Flutter、PowerShell 和 Flatpak，未运行根检查脚本或完整 Linux 打包。具体 Runtime 失败原因仍待带诊断的新 CI 确认；这些检查不代表图形启动或实机播放验收。
