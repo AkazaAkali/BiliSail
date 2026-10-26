@@ -3,7 +3,7 @@ param(
   [string]$DeviceId,
   [ValidatePattern('^[a-z0-9-]+$')]
   [string]$Label = 'optimized',
-  [ValidateSet('primary-switch', 'recommendation-updates')]
+  [ValidateSet('primary-switch', 'recommendation-updates', 'retained-cards')]
   [string]$Scenario = 'primary-switch',
   [switch]$SkipMuxBuild
 )
@@ -34,7 +34,9 @@ try {
   # deterministic fixture. All variants share the installed test app's data.
   & (Join-Path $PSScriptRoot 'build-android-development.ps1') -Mode Release -SkipMuxBuild
   $restorePackage = Join-Path $repoRoot 'build/development/android-arm64/BiliSail-test-arm64-release.apk'
-  $target = if ($Scenario -eq 'recommendation-updates') {
+  $target = if ($Scenario -eq 'retained-cards') {
+    'integration_test/android_retained_cards_test.dart'
+  } elseif ($Scenario -eq 'recommendation-updates') {
     'integration_test/android_recommendation_updates_test.dart'
   } else { 'integration_test/android_primary_switch_test.dart' }
 

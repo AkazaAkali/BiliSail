@@ -48,16 +48,74 @@ final class SmoothScrollBehavior extends MaterialScrollBehavior {
       TargetPlatform.linux => true,
       _ => false,
     };
-    if (!desktop || context is! StatefulElement) return decorated;
+    if (context is! StatefulElement) return decorated;
     final scrollable = context.state;
     if (scrollable is! ScrollableState) return decorated;
-    return _SmoothWheelScroll(
+    final childWithWheel = desktop
+        ? _SmoothWheelScroll(
+            scrollable: scrollable,
+            axisModifiers: pointerAxisModifiers,
+            horizontalMouseWheel: horizontalMouseWheel,
+            child: decorated,
+          )
+        : decorated;
+    return _RetainedScrollActivity(
       scrollable: scrollable,
-      axisModifiers: pointerAxisModifiers,
-      horizontalMouseWheel: horizontalMouseWheel,
-      child: decorated,
+      child: childWithWheel,
     );
   }
+}
+
+/// Offstage retains ScrollPosition, but does not stop its ballistic ticker.
+/// Pause hidden lists without replacing their controller or saved offset.
+class _RetainedScrollActivity extends StatefulWidget {
+  const _RetainedScrollActivity({
+    required this.scrollable,
+    required this.child,
+  });
+  final ScrollableState scrollable;
+  final Widget child;
+
+  @override
+  State<_RetainedScrollActivity> createState() =>
+      _RetainedScrollActivityState();
+}
+
+class _RetainedScrollActivityState extends State<_RetainedScrollActivity> {
+  bool _active = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final active =
+        WorkspaceActivity.isActive(context) &&
+        TickerMode.valuesOf(context).enabled;
+    if (_active && !active) {
+      // goIdle dispatches scroll notifications; defer until the page finishes
+      // building, and let a rapid reactivation supersede this stop.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _active || !widget.scrollable.mounted) return;
+        final position = widget.scrollable.position;
+        // Horizontal pagers own routed tab/snap animations independently.
+        if (position.axis != Axis.vertical) return;
+        if (position is ScrollActivityDelegate) {
+          (position as ScrollActivityDelegate).goIdle();
+          if (position.hasContentDimensions && position.outOfRange) {
+            position.jumpTo(
+              position.pixels.clamp(
+                position.minScrollExtent,
+                position.maxScrollExtent,
+              ),
+            );
+          }
+        }
+      });
+    }
+    _active = active;
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 final class _SmoothWheelScroll extends StatefulWidget {

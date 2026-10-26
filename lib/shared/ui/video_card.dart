@@ -12,6 +12,7 @@ import '../../features/video/domain/video_card_interactions.dart';
 import '../../core/presentation/workspace_activity.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 
 import '../../domain/video.dart';
 
@@ -114,6 +115,43 @@ final class VideoCard extends StatefulWidget {
   final VideoCardFeedback? feedback;
   final bool showWatchLaterButton;
 
+  // Home/history mappings may recreate a summary without changing its content.
+  // Compare everything consumed by this card and its preview, not callbacks:
+  // actions forward through State to the current page/query and queue.
+  Object get _content => (
+    video.id,
+    video.title,
+    video.coverUrl,
+    video.author,
+    video.duration,
+    video.playCount,
+    video.danmakuCount,
+    video.publishedAt,
+    video.authorAvatarUrl,
+    video.authorId,
+    video.recommendationReason,
+    video.previewCid,
+    video.access.kind,
+    video.access.canWatch,
+    video.access.canPreview,
+    progress,
+    onOpenUser != null,
+    showUpBadge,
+    showRecommendationReason,
+    highlightQuery,
+    playCountText,
+    danmakuCountText,
+    publishText,
+    publishTooltip,
+    showWatchLaterButton,
+    menu != null,
+    menu?.busy,
+    menu?.onSelected != null,
+    feedback != null,
+    feedback?.busy,
+    feedback?.onUndo != null,
+  );
+
   @override
   State<VideoCard> createState() => _VideoCardState();
 }
@@ -129,10 +167,17 @@ final class _VideoCardState extends State<VideoCard> {
   bool _addingWatchLater = false;
   int _addGeneration = 0;
   VideoCardInteractions? _interactions;
+  Widget? _card;
+
+  void _update(VoidCallback change) => setState(() {
+    _card = null;
+    change();
+  });
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _card = null;
     final interactions = VideoCardInteractionScope.maybeOf(context)
         ?.interactions;
     if (_interactions != interactions) {
@@ -145,6 +190,10 @@ final class _VideoCardState extends State<VideoCard> {
   @override
   void didUpdateWidget(VideoCard oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget._content != oldWidget._content ||
+        !listEquals(widget.menu?.actions, oldWidget.menu?.actions)) {
+      _card = null;
+    }
     if (widget.video.id != oldWidget.video.id) {
       _addGeneration++;
       _addingWatchLater = false;
@@ -152,7 +201,7 @@ final class _VideoCardState extends State<VideoCard> {
   }
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
+  Widget build(BuildContext context) => _card ??= LayoutBuilder(
     builder: (context, constraints) =>
         _buildCard(context, constraints.maxWidth),
   );
@@ -175,7 +224,7 @@ final class _VideoCardState extends State<VideoCard> {
     final highlighted = (_hovered || _focused) && !_authorHovered;
     final progress = widget.progress;
     return ScrollAwareHoverRegion(
-      onHover: (hovered) => setState(() => _hovered = hovered),
+      onHover: (hovered) => _update(() => _hovered = hovered),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
         decoration: BoxDecoration(
@@ -189,10 +238,10 @@ final class _VideoCardState extends State<VideoCard> {
           borderRadius: BorderRadius.circular(7),
           clipBehavior: Clip.none,
           child: InkWell(
-            onTap: widget.feedback == null ? widget.onTap : null,
+            onTap: widget.feedback == null ? () => widget.onTap() : null,
             hoverColor: Colors.transparent,
             hoverDuration: Duration.zero,
-            onFocusChange: (value) => setState(() => _focused = value),
+            onFocusChange: (value) => _update(() => _focused = value),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -200,7 +249,12 @@ final class _VideoCardState extends State<VideoCard> {
                   aspectRatio: 16 / 9,
                   child: switch (widget.feedback) {
                     final feedback? => VideoCardFeedbackCover(
-                      feedback: feedback,
+                      feedback: VideoCardFeedback(
+                        busy: feedback.busy,
+                        onUndo: feedback.onUndo == null
+                            ? null
+                            : () => widget.feedback?.onUndo?.call(),
+                      ),
                       background: video.coverUrl.isEmpty
                           ? _coverFallback(context)
                           : AppCoverImage(
@@ -319,11 +373,13 @@ final class _VideoCardState extends State<VideoCard> {
                       _AuthorMetadata(
                         video: video,
                         onOpenUser: widget.feedback == null
-                            ? widget.onOpenUser
+                            ? widget.onOpenUser == null
+                                  ? null
+                                  : (id) => widget.onOpenUser?.call(id)
                             : null,
                         hovered: _authorHovered,
                         onHover: (value) =>
-                            setState(() => _authorHovered = value),
+                            _update(() => _authorHovered = value),
                         showUpBadge: widget.showUpBadge,
                         reason: widget.showRecommendationReason
                             ? video.recommendationReason
@@ -343,6 +399,7 @@ final class _VideoCardState extends State<VideoCard> {
   }
 
   Widget _menuButton(VideoCardMenu menu, double cardWidth) {
+    final actions = menu.actions;
     final tier = _VideoCardWidthTier.fromWidth(cardWidth);
     final buttonSize = Size.square(tier.menuButtonSize);
     final progressSize = tier.menuIconSize * .8;
@@ -355,7 +412,7 @@ final class _VideoCardState extends State<VideoCard> {
     final busy = menu.busy || _addingWatchLater;
     return Focus(
       skipTraversal: true,
-      onFocusChange: (focused) => setState(() => _menuFocused = focused),
+      onFocusChange: (focused) => _update(() => _menuFocused = focused),
       child: Opacity(
         opacity: visible ? 1 : 0,
         child: IgnorePointer(
@@ -377,17 +434,17 @@ final class _VideoCardState extends State<VideoCard> {
                     .withValues(alpha: .6),
               ),
             ),
-            onOpened: () => setState(() => _menuOpen = true),
+            onOpened: () => _update(() => _menuOpen = true),
             onCanceled: () {
-              if (mounted) setState(() => _menuOpen = false);
+              if (mounted) _update(() => _menuOpen = false);
             },
             onSelected: (action) {
               if (!mounted) return;
-              setState(() => _menuOpen = false);
+              _update(() => _menuOpen = false);
               if (action == VideoCardMenuAction.watchLater) {
                 _addWatchLater();
               } else {
-                menu.onSelected?.call(action);
+                widget.menu?.onSelected?.call(action);
               }
             },
             icon: busy
@@ -413,7 +470,7 @@ final class _VideoCardState extends State<VideoCard> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             itemBuilder: (_) => [
-              for (final action in menu.actions)
+              for (final action in actions)
                 PopupMenuItem(
                   value: action,
                   child: Row(
@@ -452,7 +509,7 @@ final class _VideoCardState extends State<VideoCard> {
     if (scope == null || _addingWatchLater) return;
     final id = widget.video.id;
     final generation = ++_addGeneration;
-    setState(() => _addingWatchLater = true);
+    _update(() => _addingWatchLater = true);
     final result = await scope.interactions.addWatchLater(id);
     if (!mounted ||
         generation != _addGeneration ||
@@ -461,7 +518,7 @@ final class _VideoCardState extends State<VideoCard> {
             VideoCardInteractionScope.maybeOf(context)?.interactions) {
       return;
     }
-    setState(() => _addingWatchLater = false);
+    _update(() => _addingWatchLater = false);
     final message = switch (result) {
       WatchLaterResult.added || WatchLaterResult.alreadyAdded => '已加入稍后再看',
       WatchLaterResult.signIn => '请先登录后再添加稍后再看',

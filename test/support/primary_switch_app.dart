@@ -21,6 +21,7 @@ import 'package:bilisail/features/settings/application/settings_controller.dart'
 import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:bilisail/features/settings/domain/settings_repository.dart';
 import 'package:bilisail/shared/ui/app_network_image.dart';
+import 'package:bilisail/shared/ui/smooth_scroll_behavior.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -29,18 +30,23 @@ import 'input_test_app.dart';
 
 /// Real router/shell/pages, deterministic data and decoded covers; no account IO.
 class PrimarySwitchFixture {
-  PrimarySwitchFixture(Uint8List png, {SwitchFeedRepository? feed})
-    : feed = feed ?? SwitchFeedRepository(),
-      cache = AppImageCache(
-        ImageByteCache(
-          directory: () async => throw const FileSystemException('memory only'),
-          loader: (_, _) async => png,
-        ),
-      );
+  PrimarySwitchFixture(
+    Uint8List png, {
+    SwitchFeedRepository? feed,
+    SwitchHomeRepository? home,
+  }) : feed = feed ?? SwitchFeedRepository(),
+       home = home ?? SwitchHomeRepository(),
+       cache = AppImageCache(
+         ImageByteCache(
+           directory: () async =>
+               throw const FileSystemException('memory only'),
+           loader: (_, _) async => png,
+         ),
+       );
 
   final AppImageCache cache;
   final SwitchFeedRepository feed;
-  final home = SwitchHomeRepository();
+  final SwitchHomeRepository home;
   late final GoRouter router = createBiliRouter(
     playerBuilder: (_, _, _) => const SizedBox(),
     accountBuilder: (_) => const SizedBox(width: 24, height: 24),
@@ -61,6 +67,10 @@ class PrimarySwitchFixture {
       child: InputTestApp.router(
         theme: ThemeData(platform: TargetPlatform.android),
         routerConfig: router,
+        builder: (context, child) => ScrollConfiguration(
+          behavior: const SmoothScrollBehavior(),
+          child: child!,
+        ),
       ),
     ),
   );
@@ -97,6 +107,8 @@ class _Auth extends AuthController {
 }
 
 class SwitchFeedRepository implements FeedRepository {
+  SwitchFeedRepository({this.covers = true});
+  final bool covers;
   int reads = 0;
   @override
   Future<List<VideoCategory>> loadCategories({
@@ -116,7 +128,7 @@ class SwitchFeedRepository implements FeedRepository {
           id: VideoId('BV1abc${i.toString().padLeft(6, '0')}'),
           title: '推荐视频 $i：窄屏页面切换与列表保留测试',
           author: '测试作者',
-          coverUrl: 'https://i0.hdslb.com/switch-cover-$i.png',
+          coverUrl: covers ? 'https://i0.hdslb.com/switch-cover-$i.png' : '',
           duration: const Duration(minutes: 3),
         ),
       ),
@@ -132,6 +144,8 @@ class SwitchFeedRepository implements FeedRepository {
 }
 
 class SwitchHomeRepository implements HomeRepository {
+  SwitchHomeRepository({this.covers = true});
+  final bool covers;
   final reads = <String, int>{};
   @override
   String get accountScope => 'user:7';
@@ -150,7 +164,9 @@ class SwitchHomeRepository implements HomeRepository {
           title: '${query.channel.label}视频 $i：有封面的真实列表布局',
           kind: HomeEntryKind.video,
           bvid: 'BV1abc${i.toString().padLeft(6, '0')}',
-          coverUrl: Uri.parse('https://i0.hdslb.com/switch-cover-$i.png'),
+          coverUrl: covers
+              ? Uri.parse('https://i0.hdslb.com/switch-cover-$i.png')
+              : null,
           authorName: '测试作者',
           duration: const Duration(minutes: 3),
         ),

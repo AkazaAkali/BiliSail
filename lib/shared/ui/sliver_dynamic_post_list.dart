@@ -39,6 +39,7 @@ class _SliverDynamicPostListState extends State<SliverDynamicPostList> {
   double? _width;
   Widget? _sliver;
   bool _sizeUpdateScheduled = false;
+  Object? _textLayout;
 
   @override
   void initState() {
@@ -58,15 +59,30 @@ class _SliverDynamicPostListState extends State<SliverDynamicPostList> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Theme, locale, inherited text style and text scaling affect natural height.
-    Theme.of(context);
-    MediaQuery.of(context);
-    Directionality.of(context);
-    Localizations.localeOf(context);
-    DefaultTextStyle.of(context);
-    _extents.clear();
-    _pendingSizes.clear();
-    _sliver = null;
+    // Insets, viewport height and page activity do not change card heights.
+    // In particular, opening an IME elsewhere must not synchronously measure
+    // every loaded post in each retained/offstage dynamic list again.
+    final defaults = DefaultTextStyle.of(context);
+    final textLayout = (
+      Theme.of(context),
+      MediaQuery.textScalerOf(context),
+      MediaQuery.boldTextOf(context),
+      Directionality.of(context),
+      Localizations.localeOf(context),
+      defaults.style,
+      defaults.textAlign,
+      defaults.softWrap,
+      defaults.overflow,
+      defaults.maxLines,
+      defaults.textWidthBasis,
+      defaults.textHeightBehavior,
+    );
+    if (_textLayout != textLayout) {
+      _textLayout = textLayout;
+      _extents.clear();
+      _pendingSizes.clear();
+      _sliver = null;
+    }
   }
 
   @override
@@ -77,6 +93,7 @@ class _SliverDynamicPostListState extends State<SliverDynamicPostList> {
         (oldWidget.onOpenLink == null) != (widget.onOpenLink == null)) {
       _extents.clear();
     }
+    if (identical(oldWidget.posts, widget.posts)) return;
     final ids = widget.posts.map((post) => post.id).toSet();
     void retainOriginals(DynamicPost post, int depth) {
       ids.add(post.id);

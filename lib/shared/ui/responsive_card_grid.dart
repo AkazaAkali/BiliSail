@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderSliverList;
 
 const _desktopSpacing = 20.0;
 
@@ -122,7 +123,7 @@ final class _SliverResponsiveCardGridState
       // all visible cards; cross-axis layout and content changes still update it.
       if (_rows case final rows? when layout == _previousLayout) return rows;
       _previousLayout = layout;
-      return _rows = SliverList.builder(
+      return _rows = _CardRows(
         itemCount: (widget.itemCount / layout.columns).ceil(),
         itemBuilder: (context, row) => Padding(
           padding: EdgeInsets.only(bottom: layout.runSpacing),
@@ -149,4 +150,22 @@ final class _SliverResponsiveCardGridState
       );
     },
   );
+}
+
+class _CardRows extends SliverList {
+  _CardRows({required int itemCount, required IndexedWidgetBuilder itemBuilder})
+    : super(
+        delegate: SliverChildBuilderDelegate(
+          itemBuilder,
+          childCount: itemCount,
+        ),
+      );
+
+  @override
+  void updateRenderObject(BuildContext context, RenderSliverList renderObject) {
+    super.updateRenderObject(context, renderObject);
+    // Appended rows change the scroll range even when reused visible cards do
+    // not invalidate layout. Publish the new extent before a jump/scrollbar drag.
+    renderObject.markNeedsLayout();
+  }
 }
