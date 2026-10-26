@@ -41,10 +41,11 @@ void main() {
           showHeading: config.width < 600,
         );
         final clear = find.byKey(const ValueKey('history-clear'));
-        final wide = config.width >= 600;
+        final inset = config.width < 600 ? 4 : 20;
+        final showClearLabel = config.width - 2 * inset >= 280 * config.scale;
         expect(
           tester.widget(clear),
-          wide ? isA<TextButton>() : isA<IconButton>(),
+          showClearLabel ? isA<TextButton>() : isA<IconButton>(),
         );
         expect(tester.getSize(clear).height, greaterThanOrEqualTo(48));
         final menus = find.byKey(const ValueKey('video-card-title-menu'));
@@ -83,6 +84,50 @@ void main() {
         await tester.pumpAndSettle();
         expect(repository.clears, 1);
         expect(find.text('还没有云端观看记录'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  for (final config in [
+    (width: 320.0, scale: 1.0),
+    (width: 402.0, scale: 1.0),
+    (width: 600.0, scale: 1.0),
+    (width: 960.0, scale: 1.0),
+    (width: 320.0, scale: 2.0),
+    (width: 402.0, scale: 2.0),
+  ]) {
+    testWidgets(
+      'embedded history toolbar aligns at ${config.width} / ${config.scale}',
+      (tester) async {
+        tester.view.physicalSize = Size(config.width, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await _pump(
+          tester,
+          _HistoryRepository(_entries()),
+          platform: TargetPlatform.windows,
+          scale: config.scale,
+          showHeading: false,
+        );
+        final caption = find.text(
+          config.width - (config.width < 600 ? 8 : 40) < 600
+              ? '云端观看记录'
+              : '当前账号的云端观看记录',
+        );
+        final clear = find.byKey(const ValueKey('history-clear'));
+        expect(
+          (tester.getCenter(caption).dy - tester.getCenter(clear).dy).abs(),
+          lessThan(1),
+        );
+        expect(
+          tester.getRect(find.byType(VideoCard).first).top -
+              tester.getRect(clear).bottom,
+          closeTo(8, 1),
+        );
+        if (config.scale == 1) expect(find.text('清空历史'), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
       },

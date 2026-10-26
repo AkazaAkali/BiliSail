@@ -126,18 +126,18 @@ final class HistoryScreen extends ConsumerWidget {
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverCardGridPadding(
-              top: 16,
+              top: showHeading ? 16 : 8,
               bottom: 84,
               sliver: SliverMainAxisGroup(
                 slivers: [
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.only(bottom: 18),
+                      padding: const EdgeInsets.only(bottom: 8),
                       child: LayoutBuilder(
                         builder: (context, constraints) {
-                          final wide =
+                          final showClearLabel =
                               constraints.maxWidth >=
-                              480 *
+                              280 *
                                   MediaQuery.textScalerOf(context).scale(14) /
                                   14;
                           final repository = ref.watch(
@@ -161,7 +161,7 @@ final class HistoryScreen extends ConsumerWidget {
                               ? () => _confirmClear(context, ref)
                               : null;
                           return Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               Expanded(
                                 child: Column(
@@ -178,7 +178,9 @@ final class HistoryScreen extends ConsumerWidget {
                                       const SizedBox(height: 7),
                                     ],
                                     Text(
-                                      '当前账号的云端观看记录',
+                                      constraints.maxWidth < 600
+                                          ? '云端观看记录'
+                                          : '当前账号的云端观看记录',
                                       style: TextStyle(
                                         color: Theme.of(context)
                                             .colorScheme
@@ -191,7 +193,7 @@ final class HistoryScreen extends ConsumerWidget {
                                 ),
                               ),
                               const SizedBox(width: 12),
-                              if (wide)
+                              if (showClearLabel)
                                 TextButton.icon(
                                   key: const ValueKey('history-clear'),
                                   onPressed: action,
