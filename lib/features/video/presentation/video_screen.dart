@@ -50,6 +50,8 @@ typedef VideoPlayerBuilder = Widget Function(
   VideoPart part,
 );
 
+const _descriptionTransitionDuration = Duration(milliseconds: 220);
+
 final class VideoScreen extends ConsumerStatefulWidget {
   const VideoScreen({
     super.key,
@@ -288,11 +290,19 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(_descriptionExpanded ? '收起' : '展开'),
-                                    Icon(
-                                      _descriptionExpanded
-                                          ? Icons.expand_less
-                                          : Icons.expand_more,
-                                      size: 16,
+                                    AnimatedRotation(
+                                      turns: _descriptionExpanded ? .5 : 0,
+                                      duration:
+                                          MediaQuery.disableAnimationsOf(
+                                            context,
+                                          )
+                                          ? Duration.zero
+                                          : _descriptionTransitionDuration,
+                                      curve: Curves.easeInOutCubic,
+                                      child: const Icon(
+                                        Icons.expand_more,
+                                        size: 16,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -328,22 +338,31 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                           ],
                           if (widget.actionsBuilder != null)
                             widget.actionsBuilder!(context, video, selected),
-                          if (_descriptionExpanded) ...[
-                            const SizedBox(height: 12),
-                            SelectionArea(
-                              child: Text(
-                                video.description.isEmpty
-                                    ? 'UP 主还没有填写简介'
-                                    : video.description,
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(height: 1.6),
-                              ),
+                          _VideoDescriptionTransition(
+                            key: ValueKey(('description', widget.id)),
+                            expanded: _descriptionExpanded,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                const SizedBox(height: 12),
+                                SelectionArea(
+                                  child: Text(
+                                    video.description.isEmpty
+                                        ? 'UP 主还没有填写简介'
+                                        : video.description,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(height: 1.6),
+                                  ),
+                                ),
+                                VideoTagsPanel(
+                                  id: widget.id,
+                                  onSearch: widget.onSearchTag,
+                                ),
+                              ],
                             ),
-                            VideoTagsPanel(
-                              id: widget.id,
-                              onSearch: widget.onSearchTag,
-                            ),
-                          ],
+                          ),
                           _separator('intro'),
                           if (video.parts.length > 1 ||
                               video.collection != null) ...[
@@ -730,6 +749,81 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
     thickness: 0.7,
     color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.55),
   );
+}
+
+final class _VideoDescriptionTransition extends StatefulWidget {
+  const _VideoDescriptionTransition({
+    super.key,
+    required this.expanded,
+    required this.child,
+  });
+
+  final bool expanded;
+  final Widget child;
+
+  @override
+  State<_VideoDescriptionTransition> createState() =>
+      _VideoDescriptionTransitionState();
+}
+
+final class _VideoDescriptionTransitionState
+    extends State<_VideoDescriptionTransition>
+    with SingleTickerProviderStateMixin {
+  late final _controller =
+      AnimationController(vsync: this, value: widget.expanded ? 1 : 0)
+        ..addStatusListener((status) {
+          if (status == AnimationStatus.dismissed) setState(() {});
+        });
+  late final _animation = _controller.drive(
+    CurveTween(curve: Curves.easeInOutCubic),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _controller.duration = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : _descriptionTransitionDuration;
+    if (_controller.duration == Duration.zero) {
+      _controller.value = widget.expanded ? 1 : 0;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoDescriptionTransition oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.expanded != widget.expanded) {
+      widget.expanded ? _controller.forward() : _controller.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Mount tags on expansion and release them only after the exit completes.
+    if (!widget.expanded && _controller.isDismissed) {
+      return const SizedBox.shrink();
+    }
+    return ExcludeFocus(
+      excluding: !widget.expanded,
+      child: ExcludeSemantics(
+        excluding: !widget.expanded,
+        child: IgnorePointer(
+          ignoring: !widget.expanded,
+          child: SizeTransition(
+            sizeFactor: _animation,
+            alignment: Alignment.topCenter,
+            child: FadeTransition(opacity: _animation, child: widget.child),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 final class _RelatedVideosSliver extends ConsumerStatefulWidget {

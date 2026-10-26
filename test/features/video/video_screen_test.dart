@@ -852,6 +852,119 @@ void main() {
     );
   }
 
+  for (final width in [360.0, 1100.0]) {
+    for (final reducedMotion in [false, true]) {
+      testWidgets(
+        'description transition at $width reducedMotion=$reducedMotion',
+        (tester) async {
+          tester.view.devicePixelRatio = 1;
+          tester.view.physicalSize = Size(width, 800);
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          const id = VideoId('BV1abc123456');
+          final container = ProviderContainer(
+            overrides: [
+              authControllerProvider.overrideWith(_GuestAuthController.new),
+              videoRepositoryProvider.overrideWithValue(_VideoRepository()),
+              videoExtrasRepositoryProvider.overrideWithValue(
+                _ExtrasRepository(tags: const ['Flutter']),
+              ),
+            ],
+          );
+          addTearDown(container.dispose);
+          var created = 0;
+          var playerBuilds = 0;
+          await tester.pumpWidget(
+            UncontrolledProviderScope(
+              container: container,
+              child: InputTestApp(
+                builder: (context, child) => MediaQuery(
+                  data: MediaQuery.of(context)
+                      .copyWith(disableAnimations: reducedMotion),
+                  child: child!,
+                ),
+                home: Scaffold(
+                  body: VideoScreen(
+                    id: id,
+                    playerBuilder: (_, _, _) {
+                      playerBuilds++;
+                      return _TrackedPlayer(
+                        onCreate: () => created++,
+                        onDispose: () {},
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(container.exists(videoTagsProvider(id)), isFalse);
+          final description = find.text('测试简介');
+          final transition = find
+              .ancestor(of: description, matching: find.byType(SizeTransition))
+              .first;
+
+          await tester.tap(find.text('展开'));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 55));
+          final builds = playerBuilds;
+          final openingHeight = tester.getSize(transition).height;
+          await tester.pumpAndSettle();
+          final expandedHeight = tester.getSize(transition).height;
+          expect(openingHeight, greaterThan(0));
+          expect(
+            openingHeight,
+            reducedMotion ? expandedHeight : lessThan(expandedHeight),
+          );
+          expect(playerBuilds, builds);
+          expect(find.widgetWithText(ActionChip, 'Flutter'), findsOneWidget);
+
+          await tester.tap(find.text('收起'));
+          await tester.pump();
+          if (!reducedMotion) {
+            await tester.pump(const Duration(milliseconds: 55));
+            expect(tester.getSize(transition).height, greaterThan(0));
+            expect(tester.getSize(transition).height, lessThan(expandedHeight));
+            final pointer = tester.widget<IgnorePointer>(
+              find
+                  .ancestor(
+                    of: description,
+                    matching: find.byType(IgnorePointer),
+                  )
+                  .first,
+            );
+            expect(pointer.ignoring, isTrue);
+            expect(container.exists(videoTagsProvider(id)), isTrue);
+
+            // Reverse an unfinished collapse without duplicating content.
+            await tester.tap(find.text('展开'));
+            await tester.pump();
+            final reversingHeight = tester.getSize(transition).height;
+            await tester.pump(const Duration(milliseconds: 40));
+            expect(
+              tester.getSize(transition).height,
+              greaterThan(reversingHeight),
+            );
+            expect(description, findsOneWidget);
+            await tester.pumpAndSettle();
+            await tester.tap(find.text('收起'));
+            await tester.pump();
+          } else {
+            expect(description, findsNothing);
+          }
+          await tester.pumpAndSettle();
+          expect(description, findsNothing);
+          expect(find.widgetWithText(ActionChip, 'Flutter'), findsNothing);
+          expect(container.exists(videoTagsProvider(id)), isFalse);
+          expect(created, 1);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
+  }
+
   for (final initialSize in [const Size(480, 660), const Size(1100, 800)]) {
     testWidgets(
       'video info defaults to expanded at ${initialSize.width} and retains user choice',
