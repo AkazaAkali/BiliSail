@@ -356,9 +356,8 @@ Map<String, Object?> _comment(String id, int positionMs) => {
 };
 
 Future<void> _writeExtras(Directory directory, Map<String, Object?> body) =>
-    File(
-      '${directory.path}${Platform.pathSeparator}extras.json',
-    ).writeAsString(jsonEncode(body));
+    File('${directory.path}${Platform.pathSeparator}extras.json')
+        .writeAsString(jsonEncode(body));
 
 DownloadTask _task(
   String directory, {

@@ -30,9 +30,8 @@ void main() {
       };
       try {
         for (final name in ['video.m4s', 'audio.m4s']) {
-          final file = await File(
-            '${staging.path}/$name',
-          ).writeAsBytes([1, 2, 3]);
+          final file = await File('${staging.path}/$name')
+              .writeAsBytes([1, 2, 3]);
           files[name] = file.path;
         }
         final uris = await channel.invokeMapMethod<String, String>('publish', {

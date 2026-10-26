@@ -60,7 +60,7 @@ internal class DownloadStorageHandler(private val activity: Activity, messenger:
                 val value: Any? = when (call.method) {
                     "destination" -> {
                         val destination = prefs.getString("destination", null)
-                        if (destination != null && destination != "downloads") root(destination)
+                        if (destination != null && destination != "downloads") root(destination, write = true)
                         destination
                     }
                     "publish" -> synchronized(taskLocks.getOrPut(key(call)) { Any() }) { publish(call, cancel!!) }
@@ -154,10 +154,10 @@ internal class DownloadStorageHandler(private val activity: Activity, messenger:
         val obj = record.getJSONObject("items")
         return obj.keys().asSequence().associateWith { obj.getString(it) }
     }
-    private fun root(destination: String): Uri {
+    private fun root(destination: String, write: Boolean = false): Uri {
         val tree = Uri.parse(destination)
         require(tree.scheme == "content" && DocumentsContract.isTreeUri(tree))
-        if (resolver.persistedUriPermissions.none { it.uri == tree && it.isReadPermission && it.isWritePermission }) {
+        if (resolver.persistedUriPermissions.none { it.uri == tree && it.isReadPermission && (!write || it.isWritePermission) }) {
             throw SecurityException()
         }
         return DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
@@ -222,7 +222,7 @@ internal class DownloadStorageHandler(private val activity: Activity, messenger:
             }
             deleteRecord(key, record)
         }
-        if (destination == "downloads") require(Build.VERSION.SDK_INT >= 29) else root(destination)
+        if (destination == "downloads") require(Build.VERSION.SDK_INT >= 29) else root(destination, write = true)
         val id = call.argument<String>("id")!!
         val relative = "${Environment.DIRECTORY_DOWNLOADS}/BiliSail/$id/"
         record = JSONObject().put("destination", destination).put("relativePath", relative)
@@ -254,7 +254,7 @@ internal class DownloadStorageHandler(private val activity: Activity, messenger:
                 resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: throw IOException("无法创建下载文件")
             } else {
                 // Unique per-task names avoid collisions without deleting existing documents.
-                DocumentsContract.createDocument(resolver, root(destination), mime, "${id}_$name")
+                DocumentsContract.createDocument(resolver, root(destination, write = true), mime, "${id}_$name")
                     ?: throw IOException("无法创建下载文件")
             }
             record.getJSONObject("items").put(name, uri.toString())
