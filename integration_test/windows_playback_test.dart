@@ -1507,8 +1507,43 @@ void main() {
         expect(find.text('本地工作区首页'), findsOneWidget);
         expect(find.byType(PlaybackPanel, skipOffstage: false), findsNothing);
         expect(PlatformDispatcher.instance.views.length, viewCount);
+        for (var reopen = 0; reopen < 2; reopen++) {
+          router.go('/video/BV1abc123456');
+          await _until(
+            tester,
+            () =>
+                panelPresented(detached: true) &&
+                !session.isResolving &&
+                (engine.currentSnapshot.phase == PlaybackPhase.playing ||
+                    engine.currentSnapshot.phase == PlaybackPhase.paused),
+          );
+          final reopenedView = View.of(
+            tester.element(find.byType(PlaybackPanel)),
+          );
+          final reopenedWindow = NativePlaybackWindow(reopenedView.viewId);
+          expect(reopenedView.viewId, isNot(playbackView.viewId));
+          // The Dart view mounts before the engine's first-frame ShowWindow.
+          // Native first-show tests separately reject any visible normal size.
+          await _until(tester, () => reopenedWindow.isMaximized);
+          expect(reopenedWindow.isMaximized, isTrue);
+          expect(
+            find.byType(VideoSurface, skipOffstage: false),
+            findsOneWidget,
+          );
+          reopenedWindow.close();
+          await _until(
+            tester,
+            () =>
+                engine.currentSnapshot.phase == PlaybackPhase.idle &&
+                PlatformDispatcher.instance.views.length == viewCount &&
+                find
+                    .byType(PlaybackPanel, skipOffstage: false)
+                    .evaluate()
+                    .isEmpty,
+          );
+        }
         debugPrint(
-          'NATIVE_DUAL_WINDOWS oneSession=true twoViews=true reusedWindow=true restoredPosition=true restoredPause=true restoredRate=true preservesResize=true preservesMaximize=true nativeBack=true closeReturnsToBrowse=true',
+          'NATIVE_DUAL_WINDOWS oneSession=true twoViews=true reusedWindow=true restoredPosition=true restoredPause=true restoredRate=true preservesResize=true preservesMaximize=true nativeBack=true closeReturnsToBrowse=true maximizedReopenTwice=true',
         );
         expect(tester.takeException(), isNull);
       } finally {

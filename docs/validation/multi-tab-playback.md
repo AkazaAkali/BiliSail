@@ -2,6 +2,24 @@
 
 日期：2026-10-06；默认值更新于 2026-10-24。当前“允许多个标签页同时播放”默认关闭，已保存的有效选择继续保留；以下 2026-10-06 记录中的默认开启为历史行为。
 
+## Windows 播放窗首次可见即最大化（2026-10-27）
+
+- 后续反馈确认延迟感来自窗口先按普通尺寸出现，再展开到最大化。固定 SDK 首帧仍调用 `SW_SHOWNORMAL`；此前 `InitialShowMaximizer` 在 `WM_WINDOWPOSCHANGED` 中恢复最大化，此时普通窗口已经可见。新增首显观察回归在旧代码上失败，日志为 `build/first-maximize-before.log`，不能将此前只检查最终最大化状态的通过记录当作“首次可见即最大化”。
+- 当前改为在第一次 `WM_WINDOWPOSCHANGING` 中清除 `SWP_SHOWWINDOW`，让 SDK 完成普通矩形恢复时保持隐藏；本次位置变更结束后直接以 `SW_MAXIMIZE` 显示。这个消息中修改 `WINDOWPOS.flags` 的契约见 [Microsoft 文档](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-windowposchanging)。处理仍在首帧回调的同一原生消息栈内完成，无新增定时等待；用户以后主动还原、最小化和最大化继续沿用系统行为。
+- 转发原生消息可能同步触发 Flutter 监听；恢复期间继续保护几何租约，并在转发后再次确认未取消或被新 owner 接管。取消中的窗口保持隐藏，不能在消息回栈后重新显示。原生回归同时检查普通尺寸从未可见、真正的最大化状态、还原矩形、最小化、首帧前关闭、回调中取消、旧 owner 隔离和全屏。
+- `tool/test-window-geometry.ps1` 原生回归通过（`build/first-maximize-native.log`）；真实 Flutter 本地分轨工作区回归通过，新增连续两次关闭后以最大化重开，同时覆盖普通／最大化全屏和关闭回收（`build/first-maximize-media-final.log`）。集成夹具复用同一会话，重开允许保留暂停意图；Dart view 挂载与首帧后的原生显示分别等待，首次可见尺寸由上述原生消息观察回归验证。
+- `tool/check.ps1 -SkipPub` 全量通过：根应用 3004、API 478、播放器 83、弹幕 93、封装 5，共 3663 项；根应用 13 项按原有条件跳过，另有 10 项 mux 原生用例因未设置 `BILI_MUX_LIBRARY` 跳过，格式、静态分析和打包边界通过（`build/first-maximize-check.log`）。本轮原生首显修正不改变播放器释放实现。
+- Windows Release 主入口重建成功：`build/windows/x64/runner/Release/bilisail.exe`（`build/first-maximize-release.log`），须保留整个 Release 目录；未替换或关闭用户正在运行的已安装应用。最终静态分析再次通过（`build/first-maximize-analysis-final.log`）。窗口首显状态与媒体加载耗时分别看待；本轮未测点击到首显的端到端耗时、跨屏 DPI、Windows 10 或 Android／macOS，不推导固定毫秒收益。
+
+## Windows 播放窗顶部边框与开关等待（2026-10-27）
+
+- 本轮反馈指向最小化／最大化／关闭按钮上方的原生空白带。普通播放窗的 Flutter 客户区改为覆盖到窗口顶边，44 逻辑像素的标题栏直接绘制到顶；简介／评论／更多工具行保留原位置。最大化时仍扣除屏幕工作区外的 resize inset，避免按钮被裁剪；普通窗口补上顶边和两个顶角的原生缩放命中测试。窗口样式、侧边／底边缩放和全屏沿用现有实现。自定义客户区与命中测试依据 [Microsoft 文档](https://learn.microsoft.com/en-us/windows/win32/dwm/customframe)。
+- 创建／激活窗口直接排到当前 Flutter 调用栈之后的事件，不再额外等待一帧；继续合并同轮请求并检查关闭／重开代次。原生创建、标题和激活仍不在构建或绘制栈内执行。
+- Windows 关闭改为一次原生调用按 view／owner 保存尺寸、隐藏窗口并退休几何租约，随后再拆除标题栏适配。Flutter 内容卸载及原生 view 销毁仍按原有安全顺序等待；等待期间窗口已隐藏，避免按钮上方的系统边框在关闭时重新闪现。旧窗口的迟到保存不能隐藏或退休新窗口。
+- 本轮定向窗口组件回归 56 项通过（`build/dual-window-targeted-final.log`），覆盖事件在下一帧前启动、退出构建栈、关闭／快速重开和 view 转移。`tool/test-window-geometry.ps1` 通过真实 HWND 顶部原点、顶边／顶角缩放、最大化／全屏、隐藏后尺寸保留和旧 owner 隔离；`tool/test-windows-video-dispose.ps1` 的 9 项原生回归通过。原生分轨工作区用例通过，覆盖窗口转移、普通／最大化全屏、单会话和关闭返回（`build/dual-window-native-final.log`）。
+- `tool/check.ps1 -SkipPub` 的打包边界、五处格式和静态分析通过；根测试已有 3000 项通过、13 项跳过，但 `profile_folder_performance_test.dart` 的分页卡片断言和 `video_card_content_reuse_test.dart` 的滚动边界断言失败，最后的同期新增 `retained_card_pages_test.dart` 多分钟无进展，本次主动结束该测试进程，未修改这些测试／列表代码（`build/dual-window-check.log`）。四个包另行完成脚本检查，478／83／93／5 项通过，mux 原生 10 项因未设置 `BILI_MUX_LIBRARY` 跳过（`build/dual-window-packages.log`）；不把这轮根检查记为全量通过。
+- 本机真实 Flutter 验证窗口已检查普通／最大化下标题栏贴顶、按钮完整和关闭回收，并执行成功的热重载。Windows Release 主入口重建成功：`build/windows/x64/runner/Release/bilisail.exe`（`build/dual-window-release.log`），须保留整个 Release 目录。Android／macOS、Windows 10、跨屏 DPI 与真实视频开关耗时未测；不以 Debug 窗口观感或减少等帧次数推导毫秒级性能收益。
+
 ## Windows 播放窗深色顶部边框（2026-10-26）
 
 - 双标签播放窗由 Flutter SDK 创建，未经过主窗口 `Win32Window::UpdateTheme`。此前仅 Flutter 内容和 44 逻辑像素自绘标题栏切换深色，保留用于窗口缩放的原生顶部边框仍按浅色绘制，形成白条。

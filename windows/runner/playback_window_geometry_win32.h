@@ -76,8 +76,8 @@ inline bool RestoreNormalBounds(HWND window, const GeometrySession& session) {
 // Flutter 3.47.6 HostWindow captures SW_SHOWNORMAL at creation and executes it
 // after the first rendered frame. Maximizing during prepare would show a blank
 // window early, then that SDK callback would unmaximize it. Consume only the
-// first native show, after its normal placement is applied, in the same message
-// stack. Later user Restore commands must pass through without intervention.
+// first native show while it is still hidden, then show it maximized after the
+// SDK's normal placement completes. Later user Restore commands pass through.
 class InitialShowMaximizer {
  public:
   explicit InitialShowMaximizer(HWND window) : window_(window) {}
@@ -91,7 +91,7 @@ class InitialShowMaximizer {
       ShowWindow(window_, SW_MAXIMIZE);
       return true;
     }
-    return SetWindowSubclass(window_, WindowProc, SubclassId(), 1) != FALSE;
+    return SetWindowSubclass(window_, WindowProc, SubclassId(), kArmed) != FALSE;
   }
 
   bool pending() const {
@@ -102,6 +102,10 @@ class InitialShowMaximizer {
   }
 
  private:
+  static constexpr DWORD_PTR kArmed = 1;
+  static constexpr DWORD_PTR kSuppressed = 2;
+  static constexpr DWORD_PTR kCompleting = 3;
+
   static UINT_PTR SubclassId() {
     return reinterpret_cast<UINT_PTR>(&WindowProc);
   }
@@ -122,15 +126,33 @@ class InitialShowMaximizer {
                                      DWORD_PTR pending) {
     if (message == WM_NCDESTROY) {
       RemoveWindowSubclass(window, WindowProc, subclass_id);
-    } else if (message == WM_WINDOWPOSCHANGED && pending != 0 &&
-               (reinterpret_cast<const WINDOWPOS*>(lparam)->flags &
-                SWP_SHOWWINDOW) != 0) {
-      // Disarm before forwarding: DefSubclassProc sends WM_SIZE, which calls
-      // Dart listeners synchronously, and maximization reenters this procedure.
+    } else if (message == WM_WINDOWPOSCHANGING && pending == kArmed) {
+      auto& position = *reinterpret_cast<WINDOWPOS*>(lparam);
+      if ((position.flags & SWP_SHOWWINDOW) != 0 && !IsWindowVisible(window) &&
+          !IsIconic(window) &&
+          (GetWindowLongPtr(window, GWL_STYLE) & WS_CAPTION) == WS_CAPTION) {
+        SetWindowSubclass(window, WindowProc, subclass_id, kSuppressed);
+        position.flags &= ~SWP_SHOWWINDOW;
+        // Ensure a completion message even when the SDK's normal rectangle is
+        // unchanged and suppressing visibility would otherwise be a no-op.
+        position.flags |= SWP_FRAMECHANGED;
+      }
+    } else if (message == WM_WINDOWPOSCHANGED &&
+               (pending == kSuppressed ||
+                (pending == kArmed &&
+                 (reinterpret_cast<const WINDOWPOS*>(lparam)->flags &
+                  SWP_SHOWWINDOW) != 0))) {
+      // WM_SIZE can synchronously call Dart. Keep the lease armed for capture,
+      // prevent nested completion, and check cancellation after forwarding.
+      SetWindowSubclass(window, WindowProc, subclass_id, kCompleting);
+      const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
+      DWORD_PTR current = 0;
+      if (!IsWindow(window) ||
+          !GetWindowSubclass(window, WindowProc, subclass_id, &current) ||
+          current != kCompleting) return result;
       SetWindowSubclass(window, WindowProc, subclass_id, 0);
       RemoveWindowSubclass(window, WindowProc, subclass_id);
-      const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
-      if (IsWindow(window) && IsWindowVisible(window) && !IsIconic(window) &&
+      if (!IsIconic(window) &&
           (GetWindowLongPtr(window, GWL_STYLE) & WS_CAPTION) == WS_CAPTION) {
         ShowWindow(window, SW_MAXIMIZE);
       }
@@ -168,6 +190,17 @@ class WindowGeometrySession {
     // and erase the maximized state remembered by the previous playback window.
     if (initial_show_ && initial_show_->pending()) return true;
     return CaptureNormalBounds(window, view, owner, geometry_, last_maximized);
+  }
+
+  bool SaveAndHide(HWND window, int64_t view, int64_t owner,
+                   std::optional<bool> last_maximized = std::nullopt) {
+    if (!Owns(view, owner)) return true;
+    const bool captured = Capture(window, view, owner, last_maximized);
+    // Hide before frame hooks are detached or Flutter removes the native view.
+    // This also prevents the system caption flashing during asynchronous close.
+    ShowWindow(window, SW_HIDE);
+    Retire(view, owner);
+    return captured;
   }
 
   void Retire(int64_t view, int64_t owner) {

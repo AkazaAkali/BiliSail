@@ -253,7 +253,7 @@ void main() {
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
       call,
     ) async {
-      if (call.method == 'captureGeometry') {
+      if (call.method == 'captureGeometry' || call.method == 'saveGeometry') {
         captures.add(call.arguments as Map<Object?, Object?>);
       }
       return null;
@@ -339,8 +339,12 @@ void main() {
         'captureGeometry',
         'fullscreen:true',
         'fullscreen:false',
-        'captureGeometry',
-        'retireGeometry',
+        if (Platform.isWindows)
+          'saveGeometry'
+        else ...[
+          'captureGeometry',
+          'retireGeometry',
+        ],
       ]);
       final owner = (calls.first.arguments as Map)['owner'];
       for (final call in calls) {
@@ -358,48 +362,59 @@ void main() {
     },
   );
 
-  testWidgets(
-    'save queues retirement only after capture with the original owner',
-    (tester) async {
-      const channel = MethodChannel('bilisail/desktop_window');
-      final capture = Completer<void>();
-      final calls = <MethodCall>[];
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
-        call,
-      ) async {
-        calls.add(call);
-        if (call.method == 'captureGeometry') await capture.future;
-        return null;
-      });
-      addTearDown(
-        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-          channel,
-          null,
-        ),
-      );
-      WindowService service() => WindowService.forView(
-        viewId: 51,
-        setFullScreen: (_) async {},
-        activate: () async {},
-      );
-      final old = service(), current = service();
-      await old.restorePlaybackGeometry();
-      final saving = old.savePlaybackGeometry();
-      await tester.pump();
+  testWidgets('save retains its original owner while a new window prepares', (
+    tester,
+  ) async {
+    const channel = MethodChannel('bilisail/desktop_window');
+    final capture = Completer<void>();
+    final calls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      calls.add(call);
+      if (call.method == 'captureGeometry' || call.method == 'saveGeometry') {
+        await capture.future;
+      }
+      return null;
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+    WindowService service() => WindowService.forView(
+      viewId: 51,
+      setFullScreen: (_) async {},
+      activate: () async {},
+    );
+    final old = service(), current = service();
+    await old.restorePlaybackGeometry();
+    final saving = old.savePlaybackGeometry();
+    await tester.pump();
+    expect(calls.map((call) => call.method), [
+      'restoreGeometry',
+      Platform.isWindows ? 'saveGeometry' : 'captureGeometry',
+    ]);
+    await current.restorePlaybackGeometry();
+    final currentOwner = (calls.last.arguments as Map)['owner'];
+    capture.complete();
+    await saving;
+    final oldOwner = (calls.first.arguments as Map)['owner'];
+    if (Platform.isWindows) {
       expect(calls.map((call) => call.method), [
         'restoreGeometry',
-        'captureGeometry',
+        'saveGeometry',
+        'restoreGeometry',
       ]);
-      await current.restorePlaybackGeometry();
-      final currentOwner = (calls.last.arguments as Map)['owner'];
-      capture.complete();
-      await saving;
+      expect((calls[1].arguments as Map)['owner'], oldOwner);
+      expect((calls.last.arguments as Map)['owner'], currentOwner);
+    } else {
       expect(calls.last.method, 'retireGeometry');
-      final oldOwner = (calls.first.arguments as Map)['owner'];
       expect((calls.last.arguments as Map)['owner'], oldOwner);
-      expect(oldOwner, isNot(currentOwner));
-    },
-  );
+    }
+    expect(oldOwner, isNot(currentOwner));
+  });
 
   testWidgets(
     'missing geometry reply times out before fullscreen mutates the controller',

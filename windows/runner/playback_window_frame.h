@@ -2,13 +2,14 @@
 #define RUNNER_PLAYBACK_WINDOW_FRAME_H_
 
 #include <windows.h>
+#include <windowsx.h>
 #include <commctrl.h>
 #include <dwmapi.h>
 
 namespace playback_window {
 
-// Keep the native resize frame and window styles. Flutter supplies the taller
-// caption inside the client area; fullscreen still follows the SDK's styles.
+// Flutter paints the caption up to the window's top edge. Keep native styles
+// and supply resize hit tests for the top band now covered by the client area.
 class PlaybackWindowFrame {
  public:
   explicit PlaybackWindowFrame(HWND window) : window_(window) {
@@ -60,10 +61,35 @@ class PlaybackWindowFrame {
           : reinterpret_cast<RECT*>(lparam);
       const LONG top = rect->top;
       const LRESULT result = DefSubclassProc(window, message, wparam, lparam);
+      // A maximized HWND extends its resize border beyond the work area. Keep
+      // that inset only when zoomed so the Flutter caption is not clipped.
       const UINT dpi = GetDpiForWindow(window);
-      rect->top = top + GetSystemMetricsForDpi(SM_CYFRAME, dpi) +
-                  GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+      const int inset = IsZoomed(window)
+          ? GetSystemMetricsForDpi(SM_CYFRAME, dpi) +
+                GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
+          : 0;
+      rect->top = top + inset;
       return result;
+    }
+    if (message == WM_NCHITTEST && !IsZoomed(window) &&
+        (GetWindowLongPtr(window, GWL_STYLE) & WS_OVERLAPPEDWINDOW) ==
+            WS_OVERLAPPEDWINDOW) {
+      RECT bounds{};
+      if (GetWindowRect(window, &bounds)) {
+        const UINT dpi = GetDpiForWindow(window);
+        const int border_y = GetSystemMetricsForDpi(SM_CYFRAME, dpi) +
+            GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+        const int x = GET_X_LPARAM(lparam);
+        const int y = GET_Y_LPARAM(lparam);
+        if (x >= bounds.left && x < bounds.right &&
+            y >= bounds.top && y < bounds.top + border_y) {
+          const int border_x = GetSystemMetricsForDpi(SM_CXFRAME, dpi) +
+              GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+          if (x < bounds.left + border_x) return HTTOPLEFT;
+          if (x >= bounds.right - border_x) return HTTOPRIGHT;
+          return HTTOP;
+        }
+      }
     }
     if (message == WM_NCDESTROY) {
       RemoveWindowSubclass(window, WindowProc, subclass_id);

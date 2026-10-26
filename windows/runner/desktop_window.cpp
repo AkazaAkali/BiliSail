@@ -226,6 +226,7 @@ DesktopWindowChannel::DesktopWindowChannel(flutter::BinaryMessenger* messenger,
         }
         const bool geometry_call = call.method_name() == "restoreGeometry" ||
             call.method_name() == "captureGeometry" ||
+            call.method_name() == "saveGeometry" ||
             call.method_name() == "retireGeometry";
         const int64_t owner = geometry_call ? ReadInteger(*arguments, "owner") : -1;
         if (geometry_call && owner <= 0) {
@@ -243,7 +244,8 @@ DesktopWindowChannel::DesktopWindowChannel(flutter::BinaryMessenger* messenger,
           result->Success();
           return;
         }
-        if (call.method_name() == "captureGeometry" && !geometry_.Owns(id, owner)) {
+        if ((call.method_name() == "captureGeometry" ||
+             call.method_name() == "saveGeometry") && !geometry_.Owns(id, owner)) {
           result->Success();
           return;
         }
@@ -312,7 +314,8 @@ DesktopWindowChannel::DesktopWindowChannel(flutter::BinaryMessenger* messenger,
             return;
           }
           result->Success();
-        } else if (call.method_name() == "captureGeometry") {
+        } else if (call.method_name() == "captureGeometry" ||
+                   call.method_name() == "saveGeometry") {
           std::optional<bool> maximized;
           const auto state = arguments->find(flutter::EncodableValue("maximized"));
           if (state != arguments->end()) {
@@ -323,7 +326,15 @@ DesktopWindowChannel::DesktopWindowChannel(flutter::BinaryMessenger* messenger,
             }
             maximized = *value;
           }
-          if (!geometry_.Capture(window, id, owner, maximized)) {
+          const bool save = call.method_name() == "saveGeometry";
+          const bool captured = save
+              ? geometry_.SaveAndHide(window, id, owner, maximized)
+              : geometry_.Capture(window, id, owner, maximized);
+          if (save && frame_view_ == id) {
+            playback_frame_.reset();
+            frame_view_ = -1;
+          }
+          if (!captured) {
             result->Error("geometry_capture_failed", "Cannot read playback bounds.");
             return;
           }

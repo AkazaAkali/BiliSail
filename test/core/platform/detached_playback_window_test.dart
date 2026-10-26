@@ -145,6 +145,43 @@ void main() {
   });
 
   testWidgets(
+    'opening queues a native event without waiting for another frame',
+    (tester) async {
+      var frameFinished = false;
+      var creations = 0;
+      bool? frameAtCreation;
+      SchedulerPhase? phaseAtCreation;
+      Widget build(bool open) => DesktopPlaybackWindow(
+        playback: open ? const SizedBox() : null,
+        onCloseRequested: () {},
+        onError: (error) => fail('$error'),
+        windowFactory: ({required title, required onCloseRequested}) {
+          frameAtCreation = frameFinished;
+          phaseAtCreation = SchedulerBinding.instance.schedulerPhase;
+          creations++;
+          return _FakeWindow(tester.view, onCloseRequested);
+        },
+        child: const SizedBox(),
+      );
+      await tester.pumpWidget(build(false));
+      tester.binding.addPostFrameCallback((_) => frameFinished = true);
+      final element = tester.element(find.byType(DesktopPlaybackWindow));
+      tester.binding.buildOwner!.buildScope(
+        element,
+        () => element.update(build(true)),
+      );
+      expect(creations, 0);
+      await tester.pump(Duration.zero);
+      expect(creations, 1);
+      expect(frameAtCreation, isFalse);
+      expect(phaseAtCreation, SchedulerPhase.idle);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'close waits for playback to unmount before destroying its view',
     (tester) async {
       late _FakeWindow window;

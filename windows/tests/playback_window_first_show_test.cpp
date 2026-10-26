@@ -57,6 +57,82 @@ class TestWindow {
   HWND window_;
 };
 
+class FirstVisiblePresentation {
+ public:
+  explicit FirstVisiblePresentation(HWND window) : window_(window) {
+    Require(SetWindowSubclass(window_, WindowProc, SubclassId(),
+                               reinterpret_cast<DWORD_PTR>(this)) != FALSE,
+            "Cannot observe the first visible presentation.");
+  }
+  ~FirstVisiblePresentation() {
+    RemoveWindowSubclass(window_, WindowProc, SubclassId());
+  }
+  FirstVisiblePresentation(const FirstVisiblePresentation&) = delete;
+  FirstVisiblePresentation& operator=(const FirstVisiblePresentation&) = delete;
+
+  bool saw_visible_normal() const { return saw_visible_normal_; }
+  bool saw_visible_maximized() const { return saw_visible_maximized_; }
+
+ private:
+  static UINT_PTR SubclassId() {
+    return reinterpret_cast<UINT_PTR>(&WindowProc);
+  }
+  static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam,
+                                     LPARAM lparam, UINT_PTR, DWORD_PTR data) {
+    if (message == WM_WINDOWPOSCHANGED && IsWindowVisible(window)) {
+      auto& probe = *reinterpret_cast<FirstVisiblePresentation*>(data);
+      if (IsZoomed(window)) {
+        probe.saw_visible_maximized_ = true;
+      } else {
+        probe.saw_visible_normal_ = true;
+      }
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
+  }
+  HWND window_;
+  bool saw_visible_normal_ = false;
+  bool saw_visible_maximized_ = false;
+};
+
+// Model a Dart/native listener retiring the lease during first-show delivery.
+class CancelDuringFirstShow {
+ public:
+  CancelDuringFirstShow(HWND window,
+                       playback_window::WindowGeometrySession& session)
+      : window_(window), session_(session) {
+    Require(SetWindowSubclass(window_, WindowProc, SubclassId(),
+                               reinterpret_cast<DWORD_PTR>(this)) != FALSE,
+            "Cannot install reentrant cancellation probe.");
+  }
+  ~CancelDuringFirstShow() {
+    RemoveWindowSubclass(window_, WindowProc, SubclassId());
+  }
+  CancelDuringFirstShow(const CancelDuringFirstShow&) = delete;
+  CancelDuringFirstShow& operator=(const CancelDuringFirstShow&) = delete;
+
+  void Arm() { armed_ = true; }
+  bool fired() const { return fired_; }
+
+ private:
+  static UINT_PTR SubclassId() {
+    return reinterpret_cast<UINT_PTR>(&WindowProc);
+  }
+  static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam,
+                                     LPARAM lparam, UINT_PTR, DWORD_PTR data) {
+    auto& probe = *reinterpret_cast<CancelDuringFirstShow*>(data);
+    if (probe.armed_ && message == WM_WINDOWPOSCHANGED) {
+      probe.armed_ = false;
+      probe.fired_ = true;
+      probe.session_.Retire(80, 80);
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
+  }
+  HWND window_;
+  playback_window::WindowGeometrySession& session_;
+  bool armed_ = false;
+  bool fired_ = false;
+};
+
 void RequireBounds(HWND window, const playback_window::Bounds& expected) {
   RECT rectangle{};
   Require(GetWindowRect(window, &rectangle) != FALSE, "Cannot read normal bounds.");
@@ -98,11 +174,21 @@ void RunFrameTests() {
     RECT client{};
     Require(GetClientRect(window, &client) != FALSE, "Cannot read custom client.");
     Require(client.bottom - original.bottom ==
-                GetSystemMetricsForDpi(SM_CYCAPTION, dpi),
-            "Custom frame did not remove exactly the native caption.");
+                GetSystemMetricsForDpi(SM_CYCAPTION, dpi) +
+                    GetSystemMetricsForDpi(SM_CYFRAME, dpi) +
+                    GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi),
+            "Custom frame left space above the Flutter caption.");
     RequireBounds(window, playback_window::RectBounds(frame));
     POINT origin{};
     ClientToScreen(window, &origin);
+    Require(origin.y == frame.top, "Client does not reach the top window edge.");
+    for (const auto& hit : {std::pair<LONG, LRESULT>{frame.left + 1, HTTOPLEFT},
+                           {frame.left + 100, HTTOP},
+                           {frame.right - 1, HTTOPRIGHT}}) {
+      Require(SendMessage(window, WM_NCHITTEST, 0,
+                          MAKELPARAM(hit.first, frame.top + 1)) == hit.second,
+              "Client caption lost top-edge resize hit testing.");
+    }
     Require(SendMessage(window, WM_NCHITTEST, 0,
                         MAKELPARAM(frame.right - 30, origin.y + 22)) == HTCLIENT,
             "Native caption buttons overlap Flutter controls.");
@@ -135,6 +221,24 @@ void RunFrameTests() {
 }
 
 void RunTests() {
+  {
+    playback_window::WindowGeometrySession closing;
+    const TestWindow old, current;
+    Require(closing.Restore(old.get(), 91, 91), "Close preparation failed.");
+    ShowWindow(old.get(), SW_SHOWNORMAL);
+    ShowWindow(old.get(), SW_MAXIMIZE);
+    Require(closing.SaveAndHide(old.get(), 91, 91), "Save and hide failed.");
+    Require(!IsWindowVisible(old.get()), "Closing window stayed visible.");
+    Require(closing.saved().maximized(), "Hiding erased maximized memory.");
+    Require(closing.Restore(current.get(), 92, 92), "Rapid reopen failed.");
+    ShowWindow(current.get(), SW_SHOWNORMAL);
+    Require(IsZoomed(current.get()) != FALSE, "Rapid reopen lost maximization.");
+    Require(closing.SaveAndHide(current.get(), 91, 91), "Stale close failed.");
+    Require(IsWindowVisible(current.get()) != FALSE && closing.Owns(92, 92),
+            "Stale save hid or retired the new window.");
+    Require(closing.SaveAndHide(current.get(), 92, 92), "New close failed.");
+    Require(!IsWindowVisible(current.get()), "Reopened window stayed visible.");
+  }
   // Reproduce the original implementation and the pinned SDK's first-frame
   // callback. The second call finishes unmaximized despite the earlier zoom.
   {
@@ -169,10 +273,13 @@ void RunTests() {
     Require(!IsWindowVisible(reopened.get()), "Prepare showed a blank window.");
     playback_window::ActivateWindow(reopened.get(), reopened.get());
     Require(!IsWindowVisible(reopened.get()), "Early activation consumed first show.");
+    const FirstVisiblePresentation first_show(reopened.get());
     // This is the engine's actual SW_SHOWNORMAL. Assert only after the whole
     // Win32 call returns, so remaining native processing cannot undo the fix.
     ShowWindow(reopened.get(), SW_SHOWNORMAL);
     Require(IsZoomed(reopened.get()) != FALSE, "SDK first show undid maximization.");
+    Require(!first_show.saw_visible_normal() && first_show.saw_visible_maximized(),
+            "Maximized reopen first exposed an ordinary window.");
     Require(session.Capture(reopened.get(), 2, 2), "Reopen capture failed.");
     playback_window::ActivateWindow(reopened.get(), reopened.get());
     Require(IsZoomed(reopened.get()) != FALSE, "Activation undid maximization.");
@@ -208,6 +315,18 @@ void RunTests() {
     session.Retire(4, 4);
     ShowWindow(before_frame.get(), SW_SHOWNORMAL);
     Require(!IsZoomed(before_frame.get()), "Retired owner retained first-show hook.");
+  }
+
+  {
+    const TestWindow cancelled;
+    CancelDuringFirstShow cancel(cancelled.get(), session);
+    Require(session.Restore(cancelled.get(), 80, 80), "Reentrant prepare failed.");
+    cancel.Arm();
+    ShowWindow(cancelled.get(), SW_SHOWNORMAL);
+    Require(cancel.fired(), "Reentrant cancellation was not delivered.");
+    Require(!IsWindowVisible(cancelled.get()), "Retired first show became visible.");
+    Require(!session.Owns(80, 80), "Reentrant cancellation retained the old lease.");
+    Require(session.saved().maximized(), "Reentrant cancellation erased zoom.");
   }
 
   {
@@ -250,7 +369,7 @@ int main() {
     RunTests();
     RunFrameTests();
     UnregisterClassW(window_class.lpszClassName, window_class.hInstance);
-    std::cout << "PASS native first show and caption: SDK restore reproduction, maximized reopen, user Restore, normal bounds, minimize, pending close, stale owner, fullscreen, custom client frame, app brightness and detach\n";
+    std::cout << "PASS native first show and caption: SDK restore reproduction, directly visible maximized reopen, user Restore, normal bounds, minimize, pending close, reentrant cancellation, stale owner, fullscreen, custom client frame, app brightness and detach\n";
     return 0;
   } catch (const std::exception& error) {
     std::cerr << "FAIL native first show: " << error.what() << '\n';

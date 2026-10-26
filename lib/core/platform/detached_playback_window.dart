@@ -148,32 +148,26 @@ class _DesktopPlaybackWindowState extends State<DesktopPlaybackWindow> {
     _pendingWindowUpdate = request;
     // Native window operations can pump messages and reenter Flutter frame
     // callbacks. Leave the entire frame stack before entering the embedder.
-    final binding = WidgetsBinding.instance;
-    binding.addPostFrameCallback((_) {
+    _windowUpdateTimer = Timer(Duration.zero, () {
+      _windowUpdateTimer = null;
       if (!mounted || !identical(_pendingWindowUpdate, request)) return;
-      _windowUpdateTimer = Timer(Duration.zero, () {
-        _windowUpdateTimer = null;
-        if (!mounted || !identical(_pendingWindowUpdate, request)) return;
-        _pendingWindowUpdate = null;
-        final create = _createRequested;
-        final activate = _activateRequested;
-        final title = _titleRequested;
-        _createRequested = false;
-        _activateRequested = false;
-        _titleRequested = false;
-        if (widget.playback == null || _closeRequested) return;
-        if (_window == null && create) {
-          unawaited(_open());
-          return;
-        }
-        final window = _window;
-        if (window == null || !window.isOpen) return;
-        if (title) window.setTitle(widget.title);
-        if (activate) window.activate();
-      });
-      binding.ensureVisualUpdate();
+      _pendingWindowUpdate = null;
+      final create = _createRequested;
+      final activate = _activateRequested;
+      final title = _titleRequested;
+      _createRequested = false;
+      _activateRequested = false;
+      _titleRequested = false;
+      if (widget.playback == null || _closeRequested) return;
+      if (_window == null && create) {
+        unawaited(_open());
+        return;
+      }
+      final window = _window;
+      if (window == null || !window.isOpen) return;
+      if (title) window.setTitle(widget.title);
+      if (activate) window.activate();
     });
-    binding.ensureVisualUpdate();
   }
 
   void _afterFrame(VoidCallback callback) {

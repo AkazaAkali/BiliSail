@@ -135,6 +135,15 @@ class WindowService {
   }
 
   Future<void> savePlaybackGeometry() async {
+    if (Platform.isWindows &&
+        _geometryAttached &&
+        _isViewAvailable?.call() != false) {
+      _geometryAttached = false;
+      // Capture and hide in one native turn. Destruction still waits until the
+      // Flutter subtree has unmounted, but that wait is no longer visible.
+      await _geometryCall('saveGeometry');
+      return;
+    }
     try {
       await capturePlaybackGeometry();
     } finally {
@@ -147,7 +156,8 @@ class WindowService {
         'viewId': viewId,
         'windowHandle': ?nativeWindowHandle,
         'owner': _geometryOwner,
-        if (method == 'captureGeometry') 'maximized': ?_normalWindowMaximized,
+        if (method == 'captureGeometry' || method == 'saveGeometry')
+          'maximized': ?_normalWindowMaximized,
       })
       .timeout(_geometryTimeout);
 
