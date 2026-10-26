@@ -169,3 +169,52 @@ Windows 原生媒体套件通过播放／全屏／工作区 8 项、故障诊断
 自动事件均由 Flutter 测试框架注入，未采集物理侧键／中文输入法失败轨迹。没有验证驱动未交付给 Flutter 的事件、系统标题栏／原生 WebView／窗口外操作、Windows 发布包实键矩阵，也未做 macOS Ctrl／Meta、真实侧键／原生全屏或 Android 触控／返回／外接设备实机验收。重构解决已确认的输入所有权与执行一致性问题，不能据此声称已确认所有物理输入间歇失效的根因。未增加原生键盘 Hook 或系统全局热键。
 
 工作区同期有预览播放器／原生首帧、评论和图标资源改动，本次保留原有修改；完整检查基于共同的当前工作区。相邻参考仓库与三个包未由本次快捷键重构修改。
+
+
+## 2026-10-26 macOS 独立播放窗口首次焦点同步
+
+原生窗口创建可在播放子树仍位于主 view 的 Offstage 内时发出新 view
+聚焦事件。旧输入宿主此时记为失焦，GlobalKey 迁移后不会收到第二次事件，
+导致包括用户配置 Meta+W 在内的快捷键在第一次打开时被窗口过滤拒绝。
+
+应用启动时（包括 macOS 主窗口创建前）订阅共享原生 view 焦点账本；
+宿主所属 view 改变时重新核对账本并清理键盘／鼠标旧序列。
+迟到的 A 失焦不清除 B 的新焦点。挂载后仅在原生焦点、view 身份和事件版本
+仍匹配且 Flutter primaryFocus 属于其他 view 时修复宿主 FocusScope；
+保留同 view 编辑器焦点和窗口过滤，不改默认绑定、原生 performClose 或播放返回历史。
+
+回归覆盖提前聚焦、准备期间切回主窗、迟到失焦、失焦拒绝、切窗恢复、
+Meta+W 逐媒体返回及历史耗尽关闭、尾键不误触主窗、重开窗口，
+以及保留 State 的跨 view 迁移与旧按键 repeat/up 清理。
+
+本次环境无 Flutter/Dart SDK，临时获取固定 SDK 的二进制下载被代理 403 阻断；
+本地只能执行源码检查与 git diff --check，格式／分析／测试和构建以修复分支 CI
+结果为准。Widget 回归与 CI 构建不能替代 macOS 实机首次打开、输入法和真实按键验收。
+
+
+### 后续首次聚焦事件缺失修正
+
+用户反馈首次打开空格仍失效、切窗后恢复；反馈时安装包 SHA 未确认，不能据此
+断言某个精确构建的设备结果。重新核对固定 Flutter 3.47.6 源码发现：
+`engine/src/flutter/shell/platform/darwin/macos/framework/Source/FlutterWindowController.mm`
+的 `createRegularWindow` 先 `makeKeyAndOrderFront`，后设置发送
+`windowDidBecomeKey` 的 delegate。首次事件可能根本未到 Dart；上一版的
+事件缓存及主动发送 focus 的测试漏掉了该边界。
+
+主窗／播放窗准备完成及输入宿主跨 view 迁移时，现通过只读原生快照核对当前
+`NSApp.keyWindow`、应用 active 状态和同引擎 Flutter view；不使用 mainWindow
+冒充键盘窗口，不切换原生窗口。请求代次、Dart 事件版本和原生通知版本隔离
+晚到回复；未知失焦状态最多重读三次，不因旧快照恢复已失焦窗口。
+
+macOS 打包 startup smoke 在任何再次 activate 前检查初始原生焦点和 Flutter
+primaryFocus，并通过目标 NSWindow 的 responder → engine → AppInputHost 路径
+发送固定 Space，验证独占消费；该注入仅在显式 startup smoke 参数下可用，
+不使用系统 event tap、不要求辅助功能权限。连续创建／销毁两次仍沿用原销毁顺序。
+组件回归另覆盖没有新窗 focus 事件、快照失焦、乱序回复、回复期间切窗及卸载。
+
+默认不打印诊断。设置 `BILISAIL_WINDOW_FOCUS_DIAGNOSTICS=1` 或运行显式打包
+smoke 时，记录 keyWindow/view、active、responder 类型／所属关系、焦点来源和
+版本、host view/active/primaryFocus 及入口分发原因；不记录按键名称、输入文本、
+窗口标题、URL、账号或凭据。原生受控事件测试仍不是用户设备上的物理按键验收。
+
+- 原生烟测前置条件：CI 直接启动二进制会保持后台（924a63c 的脱敏轨迹为 active=0/key=0/view=null）。烟测先激活主窗口并核实原生焦点，再创建播放窗口；不会重新激活播放窗口来绕过首次焦点缺失。生产快照继续拒绝非活动应用。

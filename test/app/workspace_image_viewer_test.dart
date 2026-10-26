@@ -111,6 +111,16 @@ void main() {
           );
           final registry = flutter_window.WindowRegistry.of(content);
           final playback = windows.windows.single;
+          // A fake window has no embedder to report activation. Keyboard input
+          // must belong to the native focused view, even when a tap focused UI.
+          tester.binding.handleViewFocusChanged(
+            ui.ViewFocusEvent(
+              viewId: playback.viewId,
+              state: ui.ViewFocusState.focused,
+              direction: ui.ViewFocusDirection.undefined,
+            ),
+          );
+          await tester.pumpAndSettle();
           expect(View.of(content).viewId, playback.viewId);
           expect(registry.windows, isEmpty);
 

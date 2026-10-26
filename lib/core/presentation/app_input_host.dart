@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show ViewFocusEvent, ViewFocusState;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -9,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../input/input_stroke.dart';
 import '../input/shortcut_dispatcher.dart';
 import 'input_scope.dart';
+import 'window_input_focus.dart';
 
 final class InputNormalizer {
   InputNormalizer({TargetPlatform? platform})
@@ -255,14 +255,19 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
     with WidgetsBindingObserver {
   final _normalizer = InputNormalizer();
   bool _lifecycleActive = true;
-  bool _viewFocused = true;
+  bool _viewFocused = false;
+  int? _viewId;
+  final _focusScope = FocusScopeNode(debugLabel: 'Window input');
+  final _windowFocus = WindowInputFocus.instance;
   bool? _lastEditing;
   bool _editingSyncScheduled = false;
+  String? _lastFocusDecision;
   bool get _active => _lifecycleActive && _viewFocused;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _windowFocus.addListener(_nativeFocusChanged);
     FocusManager.instance.addEarlyKeyEventHandler(_key);
     FocusManager.instance.addListener(_focusChanged);
     GestureBinding.instance.pointerRouter.addGlobalRoute(_pointer);
@@ -344,16 +349,54 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
   }
 
   @override
-  void didChangeViewFocus(ViewFocusEvent event) {
-    final ownView = View.maybeOf(context)?.viewId;
-    if (ownView != null && event.viewId != ownView) {
-      if (event.state != ViewFocusState.focused) return;
-      _viewFocused = false;
-      _windowActivityChanged();
-      return;
-    }
-    _viewFocused = event.state == ViewFocusState.focused;
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final viewId = View.maybeOf(context)?.viewId;
+    if (_viewId == viewId) return;
+    _viewId = viewId;
+    _resetInput();
+    _nativeFocusChanged();
+    final synchronization = _windowFocus.synchronizeNativeFocusIfSupported();
+    unawaited(
+      synchronization.catchError((Object error, StackTrace stack) {
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stack,
+            library: 'BiliSail window focus',
+          ),
+        );
+      }),
+    );
+  }
+
+  void _nativeFocusChanged() {
+    // Before platforms emit view events, retain the implicit single-view
+    // behavior. Once observed, only the native focused view may dispatch.
+    _viewFocused = _windowFocus.observed
+        ? _viewId != null && _windowFocus.viewId == _viewId
+        : _viewId ==
+              WidgetsBinding.instance.platformDispatcher.implicitView?.viewId;
     _windowActivityChanged();
+    if (!_active || !_windowFocus.observed) return;
+    final viewId = _viewId;
+    final revision = _windowFocus.revision;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !_active ||
+          _viewId != viewId ||
+          _windowFocus.revision != revision ||
+          _windowFocus.viewId != viewId) {
+        return;
+      }
+      final focused = FocusManager.instance.primaryFocus?.context;
+      // The native event may precede View construction. Repair only a stale
+      // cross-view focus; preserve editors and controls already in this view.
+      if (focused == null || View.maybeOf(focused)?.viewId != viewId) {
+        _focusScope.requestFocus();
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   void _windowActivityChanged() {
@@ -390,21 +433,39 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
     );
   }
 
+  void _traceFocusDecision(String reason) {
+    if (!_windowFocus.diagnostics) return;
+    final primary = FocusManager.instance.primaryFocus?.context;
+    final primaryView = primary == null ? null : View.maybeOf(primary)?.viewId;
+    final trace = [
+      'source=${_windowFocus.source}',
+      'revision=${_windowFocus.revision}',
+      'nativeView=${_windowFocus.viewId}',
+      'hostView=$_viewId active=$_active lifecycle=$_lifecycleActive',
+      'primaryView=$primaryView reason=$reason',
+    ].join(' ');
+    if (trace == _lastFocusDecision) return;
+    _lastFocusDecision = trace;
+    debugPrint('BILISAIL_FOCUS_INPUT $trace');
+  }
+
   KeyEventResult _key(KeyEvent event) {
-    if (!_active) return KeyEventResult.ignored;
+    if (!_active) {
+      _traceFocusDecision('inactive');
+      return KeyEventResult.ignored;
+    }
     final focusedContext = FocusManager.instance.primaryFocus?.context;
     if (focusedContext != null &&
         View.maybeOf(focusedContext)?.viewId != View.maybeOf(context)?.viewId) {
+      _traceFocusDecision('primary-view');
       return KeyEventResult.ignored;
     }
-    return widget.dispatcher
-            .dispatch(
-              _normalizer.key(event, viewId: View.maybeOf(context)?.viewId),
-              _context(),
-            )
-            .claimed
-        ? KeyEventResult.handled
-        : KeyEventResult.ignored;
+    final result = widget.dispatcher.dispatch(
+      _normalizer.key(event, viewId: View.maybeOf(context)?.viewId),
+      _context(),
+    );
+    _traceFocusDecision('dispatch-${result.reason.name}');
+    return result.claimed ? KeyEventResult.handled : KeyEventResult.ignored;
   }
 
   void _pointer(PointerEvent event) {
@@ -417,6 +478,8 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
   @override
   void dispose() {
     _cancel();
+    _windowFocus.removeListener(_nativeFocusChanged);
+    _focusScope.dispose();
     widget.routes.onChanged = null;
     FocusManager.instance.removeEarlyKeyEventHandler(_key);
     FocusManager.instance.removeListener(_focusChanged);
@@ -432,7 +495,11 @@ class _AppInputHostState<C> extends State<AppInputHost<C>>
     child: InputScope<C>(
       dispatcher: widget.dispatcher,
       routes: widget.routes,
-      child: FocusScope(autofocus: true, child: widget.child),
+      child: FocusScope(
+        node: _focusScope,
+        autofocus: _viewFocused,
+        child: widget.child,
+      ),
     ),
   );
 }

@@ -1,10 +1,16 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../core/input/input_stroke.dart';
+import '../core/input/shortcut_dispatcher.dart';
 import '../core/platform/detached_playback_window.dart';
 import '../core/platform/macos_application_window.dart';
+import '../core/presentation/app_input_host.dart';
+import '../core/presentation/window_input_focus.dart';
 import '../core/storage/credential_store.dart';
 
 // Run only in the explicit startup smoke of the exact bundle being packaged.
@@ -20,6 +26,21 @@ Future<void> verifyMacOSPlaybackWindows(
       mainWindow.window.viewId == dispatcher.implicitView?.viewId) {
     throw StateError('macOS requires an explicit main window');
   }
+  // Direct binary launches on CI start in the background. Establish the
+  // user's foreground-main-window precondition before creating playback;
+  // never reactivate playback to hide its missing initial focus event.
+  stderr.writeln('BILISAIL_FOCUS_STAGE:foreground');
+  await mainWindow.service.activate();
+  final foregroundWait = Stopwatch()..start();
+  final nativeFocus = WindowInputFocus.instance;
+  do {
+    await nativeFocus.synchronizeNativeFocusIfSupported();
+    if (nativeFocus.viewId == mainWindow.window.viewId) break;
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  } while (foregroundWait.elapsed < const Duration(seconds: 2));
+  if (nativeFocus.viewId != mainWindow.window.viewId) {
+    throw StateError('Smoke requires a foreground main window');
+  }
   final baseline = dispatcher.views.length;
   final explicitViews = dispatcher.views.where(
     (view) => view.viewId != dispatcher.implicitView?.viewId,
@@ -31,14 +52,44 @@ Future<void> verifyMacOSPlaybackWindows(
       onCloseRequested: () {},
     );
     final owner = Object();
+    var presses = 0;
+    final input = ShortcutDispatcher<String>(
+      scopeFor: (_) => CommandScope.workspace,
+      repeats: (_) => false,
+      editorException: (_, _) => false,
+    );
+    input.replaceBindings({const ShortcutChord('Space'): 'probe'});
+    input.register(
+      owner: owner,
+      scope: CommandScope.workspace,
+      active: () => true,
+      commands: {
+        'probe': (stroke) {
+          if (stroke.phase == InputPhase.down) presses++;
+          return CommandOutcome.completed;
+        },
+      },
+    );
     try {
+      stderr.writeln('BILISAIL_FOCUS_STAGE:prepare');
       await playback.prepare();
+      // Check before any second activation: the SDK installs its window
+      // delegate after makeKeyAndOrderFront, losing the initial focus event.
+      final focus = WindowInputFocus.instance;
+      if (!focus.observed || focus.viewId != playback.viewId) {
+        throw StateError('Initial native playback focus was not synchronized');
+      }
+      stderr.writeln('BILISAIL_FOCUS_STAGE:present');
       mainWindow.present(
         app,
         additionalView: playback.buildView(
-          const Directionality(
-            textDirection: TextDirection.ltr,
-            child: Center(child: Text('BiliSail window validation')),
+          AppInputHost<String>(
+            dispatcher: input,
+            routes: InputRouteObserver(),
+            child: const Directionality(
+              textDirection: TextDirection.ltr,
+              child: Center(child: Text('BiliSail window validation')),
+            ),
           ),
         ),
       );
@@ -51,6 +102,30 @@ Future<void> verifyMacOSPlaybackWindows(
           view.physicalSize.isEmpty) {
         throw StateError('Playback view did not attach');
       }
+      stderr.writeln('BILISAIL_FOCUS_STAGE:primary');
+      final primary = FocusManager.instance.primaryFocus?.context;
+      if (primary == null ||
+          !primary.mounted ||
+          View.maybeOf(primary)?.viewId != playback.viewId) {
+        throw StateError('Initial playback has the wrong Flutter focus');
+      }
+      // Deliver through the real NSWindow responder/engine/host path, without
+      // activating again. Native injection is gated to explicit startup smoke.
+      stderr.writeln('BILISAIL_FOCUS_STAGE:space');
+      await const MethodChannel('bilisail/application_window')
+          .invokeMethod<void>('probeWindowSpace', {'viewId': playback.viewId})
+          .timeout(const Duration(seconds: 2));
+      final inputWait = Stopwatch()..start();
+      final keyboard = HardwareKeyboard.instance;
+      bool held() => keyboard.isLogicalKeyPressed(LogicalKeyboardKey.space);
+      while ((presses == 0 || held()) &&
+          inputWait.elapsed < const Duration(seconds: 2)) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      if (presses != 1 || held()) {
+        throw StateError('Playback Space sequence was not handled');
+      }
+      stderr.writeln('BILISAIL_FOCUS_STAGE:passed');
       await playback.windowService.bindTitleBarBack(
         owner: owner,
         onBack: () {},
@@ -68,6 +143,7 @@ Future<void> verifyMacOSPlaybackWindows(
           // Native removal can pump frames. Leave the frame stack first.
           await Future<void>.delayed(Duration.zero);
           playback.dispose();
+          input.dispose();
         }
       }
     }

@@ -9,12 +9,14 @@ import 'app/bili_app.dart';
 import 'app/dependencies.dart';
 import 'app/release_smoke.dart';
 import 'core/presentation/bili_widgets_binding.dart';
+import 'core/presentation/window_input_focus.dart';
 import 'core/platform/macos_application_window.dart';
 import 'core/storage/app_database.dart';
 import 'core/storage/credential_store.dart';
 
 Future<void> main(List<String> arguments) async {
   BiliWidgetsBinding.ensureInitialized();
+  WindowInputFocus.instance.initialize();
   ReleaseSmokeRequest? smoke;
   var smokeHadError = false;
   try {
