@@ -27,6 +27,7 @@ import 'package:bilisail/features/playback/application/playback_manager.dart';
 import 'package:bilisail/features/playback/domain/playback_repository.dart';
 import 'package:bilisail/features/playback/domain/content_playback.dart';
 import 'package:bilisail/features/playback/presentation/playback_panel.dart';
+import 'package:bilisail/features/playback/presentation/player_seek_controls.dart';
 import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:bilisail/features/settings/application/settings_controller.dart';
 import 'package:bilisail/features/settings/domain/settings_repository.dart';
@@ -45,6 +46,231 @@ import 'package:flutter_test/flutter_test.dart';
 final _composerScopeProvider = Provider<String>((ref) => 'root');
 
 void main() {
+  for (final fullscreen in [false, true]) {
+    for (final controlsVisible in [true, false]) {
+      testWidgets(
+        'picture seek previews locally (fullscreen: $fullscreen, controls: $controlsVisible)',
+        (tester) async {
+          final engine = _FakeEngine();
+          final session = _session(engine);
+          addTearDown(session.close);
+          final composition = _PaintCountingComposition();
+          await tester.pumpWidget(
+            VideoCompositionScope(
+              adapter: composition,
+              child: _app(
+                session,
+                _FakeWindowService(),
+                const AppSettings.defaults().copyWith(
+                  danmakuEnabled: false,
+                  fullscreenSwipeControls: false,
+                  playerControlsMode: PlayerControlsMode.click,
+                ),
+              ),
+            ),
+          );
+          await _pumpFrames(tester);
+          if (fullscreen) {
+            await tester.tap(find.byTooltip('全屏（F）'));
+            await _pumpFrames(tester);
+          }
+          if (controlsVisible) {
+            await session.pause();
+          } else if (!session.snapshots.value.desiredPlaying) {
+            await session.togglePlaying();
+          }
+          await session.seek(const Duration(seconds: 30));
+          await _pumpFrames(tester);
+          if (!controlsVisible) {
+            await tester.tapAt(_surfacePoint(tester));
+            await _pumpSurfaceTap(tester);
+          }
+          final picture = tester.getRect(
+            find.byKey(const ValueKey('player-surface-tap-target')),
+          );
+          final before = engine.currentSnapshot;
+          final seeks = engine.seeks;
+          final opens = engine.opens;
+          final paints = composition.paints;
+          final drag = await tester.startGesture(
+            picture.topLeft + Offset(picture.width * .3, picture.height * .35),
+          );
+          for (var i = 0; i < 10; i++) {
+            await drag.moveBy(Offset(picture.width * .02, 0));
+            await tester.pump(const Duration(milliseconds: 16));
+          }
+          final seekControls = tester.widget<PlayerSeekControls>(
+            find.byType(PlayerSeekControls),
+          );
+          expect(seekControls.enabled, isTrue);
+          expect(
+            seekControls.preview.value,
+            const Duration(seconds: 54),
+            reason:
+                'picture $picture; duration ${seekControls.duration}; foreground ${tester.binding.lifecycleState}; phase ${engine.currentSnapshot.phase}',
+          );
+          expect(find.text('00:54 / 03:00'), findsOneWidget);
+          expect(
+            find.byKey(const ValueKey('player-swipe-seek-preview')),
+            findsOneWidget,
+          );
+          expect(engine.currentSnapshot.position, before.position);
+          expect(engine.seeks, seeks);
+          expect(engine.currentSnapshot.volume, before.volume);
+          expect(engine.currentSnapshot.rate, before.rate);
+          expect(engine.currentSnapshot.desiredPlaying, before.desiredPlaying);
+          expect(composition.paints, paints);
+          if (controlsVisible) {
+            expect(
+              tester
+                  .widget<Slider>(
+                    find.byKey(const ValueKey('playback-timeline-slider')),
+                  )
+                  .value,
+              closeTo(54000, 1),
+            );
+          } else {
+            expect(
+              tester
+                  .widget<LinearProgressIndicator>(
+                    find.byKey(const ValueKey('player-collapsed-progress')),
+                  )
+                  .value,
+              closeTo(54 / 180, .001),
+            );
+          }
+          await drag.up();
+          await _pumpFrames(tester);
+          expect(engine.currentSnapshot.position, const Duration(seconds: 54));
+          expect(engine.seeks, seeks + 1);
+          expect(engine.opens, opens);
+          expect(engine.currentSnapshot.desiredPlaying, before.desiredPlaying);
+          expect(
+            find.byKey(const ValueKey('player-swipe-seek-preview')),
+            findsNothing,
+          );
+          await tester.pumpWidget(const SizedBox());
+          await _pumpFrames(tester);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  for (final action in ['hide', 'dispose']) {
+    testWidgets('$action during a picture drag discards its preview', (
+      tester,
+    ) async {
+      final engine = _FakeEngine();
+      final session = _session(engine);
+      final window = _FakeWindowService();
+      addTearDown(session.close);
+      await tester.pumpWidget(
+        _app(session, window, const AppSettings.defaults()),
+      );
+      await _pumpFrames(tester);
+      final drag = await tester.startGesture(_surfacePoint(tester));
+      await drag.moveBy(const Offset(80, 0));
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('player-swipe-seek-preview')),
+        findsOneWidget,
+      );
+      final seeks = engine.seeks;
+      await tester.pumpWidget(
+        action == 'hide'
+            ? _app(session, window, const AppSettings.defaults(), active: false)
+            : const SizedBox(),
+      );
+      await _pumpFrames(tester);
+      await drag.up();
+      expect(engine.seeks, seeks);
+      if (action == 'hide') {
+        await tester.pumpWidget(
+          _app(session, window, const AppSettings.defaults()),
+        );
+        await _pumpFrames(tester);
+        expect(
+          tester
+              .widget<Slider>(
+                find.byKey(const ValueKey('playback-timeline-slider')),
+              )
+              .value,
+          engine.currentSnapshot.position.inMilliseconds.toDouble(),
+        );
+      }
+      expect(
+        find.byKey(const ValueKey('player-swipe-seek-preview')),
+        findsNothing,
+      );
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
+    'a source change before the next frame discards the old release',
+    (tester) async {
+      final engine = _FakeEngine();
+      final session = _session(engine);
+      addTearDown(session.close);
+      await tester.pumpWidget(
+        _app(session, _FakeWindowService(), const AppSettings.defaults()),
+      );
+      await _pumpFrames(tester);
+      final drag = await tester.startGesture(_surfacePoint(tester));
+      await drag.moveBy(const Offset(80, 0));
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('player-swipe-seek-preview')),
+        findsOneWidget,
+      );
+      await session.retry();
+      final seeks = engine.seeks;
+      // Release before pumping a frame with the new source generation.
+      await drag.up();
+      expect(engine.seeks, seeks);
+      await _pumpFrames(tester);
+      expect(
+        find.byKey(const ValueKey('player-swipe-seek-preview')),
+        findsNothing,
+      );
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+    },
+  );
+
+  testWidgets(
+    'live picture does not scrub even when the engine reports a duration',
+    (tester) async {
+      final engine = _FakeEngine();
+      final session = _session(engine);
+      addTearDown(session.close);
+      await tester.pumpWidget(
+        _app(
+          session,
+          _FakeWindowService(),
+          const AppSettings.defaults(),
+          target: const LivePlaybackTarget('123'),
+        ),
+      );
+      await _pumpFrames(tester);
+      final before = engine.currentSnapshot;
+      final seeks = engine.seeks;
+      await tester.dragFrom(_surfacePoint(tester), const Offset(80, 0));
+      await _pumpFrames(tester);
+      expect(engine.seeks, seeks);
+      expect(engine.currentSnapshot.position, before.position);
+      expect(
+        find.byKey(const ValueKey('player-swipe-seek-preview')),
+        findsNothing,
+      );
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+    },
+  );
+
   for (final fullscreen in [false, true]) {
     for (final enabled in [true, false]) {
       testWidgets(
@@ -5327,6 +5553,7 @@ final class _FakeEngine implements PlayerEngine, VideoOutputSource {
   );
   int opens = 0;
   int pauses = 0;
+  int seeks = 0;
   int activeSurfaces = 0;
   int maxSurfaces = 0;
   Completer<void>? nextRate;
@@ -5376,8 +5603,11 @@ final class _FakeEngine implements PlayerEngine, VideoOutputSource {
   }
 
   @override
-  Future<void> seek(Duration target) async =>
-      _emit(_current.copyWith(position: target));
+  Future<void> seek(Duration target) async {
+    seeks++;
+    _emit(_current.copyWith(position: target));
+  }
+
   @override
   Future<void> setRate(double rate) async {
     final gate = nextRate;

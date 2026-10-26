@@ -24,6 +24,7 @@ import '../domain/playback_repository.dart';
 import '../domain/content_playback.dart';
 import 'player_settings_dialog.dart';
 import 'player_swipe_controls.dart';
+import 'player_seek_controls.dart';
 import 'playback_timeline_bar.dart';
 import 'playback_snapshot_builder.dart';
 import 'live_stream_menu.dart';
@@ -491,6 +492,7 @@ class _PlayerView extends StatefulWidget {
 
 class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
   _ControlsLayout? _cachedControlsLayout;
+  final _swipeSeekPreview = ValueNotifier<Duration?>(null);
   final FocusNode _focusNode = FocusNode(debugLabel: 'video player');
   final GlobalKey _playerBoundsKey = GlobalKey();
   bool _exitingFullScreen = false;
@@ -589,6 +591,7 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
   void didUpdateWidget(covariant _PlayerView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.active != widget.active) {
+      _swipeSeekPreview.value = null;
       _syncHighEnergyVisibility();
       _mouseInside = false;
       _pressedPointers.clear();
@@ -617,6 +620,7 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
     widget.session.setHighEnergySurfaceVisible(this, false);
     FocusManager.instance.removeListener(_onControlsFocusChanged);
     widget.shortcuts.endTouchHold();
+    _swipeSeekPreview.dispose();
     _focusNode.dispose();
     super.dispose();
   }
@@ -883,6 +887,7 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                   snapshot.volume,
                 ),
                 builder: (context, snapshot) {
+                  final sourceGeneration = session.sourceGeneration;
                   final settings = widget.settings.value;
                   final controls =
                       widget.controlsVisible.value || session.error != null;
@@ -915,60 +920,103 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                 },
                               ),
                             Positioned.fill(
-                              child: PlayerSwipeControls(
-                                enabled:
-                                    settings.fullscreenSwipeControls &&
-                                    widget.active,
-                                sourceGeneration: session.sourceGeneration,
-                                volume: snapshot.volume,
-                                setVolume: session.setVolume,
-                                child: RawGestureDetector(
-                                  // The recognizer's deadline is fixed at creation.
-                                  key: ValueKey(settings.shortcuts.holdDelayMs),
-                                  behavior: HitTestBehavior.translucent,
-                                  excludeFromSemantics: true,
-                                  gestures: {
-                                    if (!session.isLive)
-                                      LongPressGestureRecognizer:
-                                          GestureRecognizerFactoryWithHandlers<
-                                            LongPressGestureRecognizer
-                                          >(
-                                            () => LongPressGestureRecognizer(
-                                              duration: Duration(
-                                                milliseconds: settings
-                                                    .shortcuts
-                                                    .holdDelayMs,
-                                              ),
-                                              supportedDevices: {
-                                                PointerDeviceKind.touch,
-                                              },
-                                            ),
-                                            (recognizer) {
-                                              recognizer.onLongPressDown =
-                                                  (_) => widget.shortcuts
-                                                      .prepareTouchHold();
-                                              recognizer.onLongPressStart =
-                                                  (_) => widget.shortcuts
-                                                      .beginTouchHold();
-                                              recognizer.onLongPressEnd = (_) =>
-                                                  widget.shortcuts
-                                                      .endTouchHold();
-                                              recognizer.onLongPressCancel =
-                                                  widget.shortcuts.endTouchHold;
-                                            },
-                                          ),
+                              child: RepaintBoundary(
+                                child: PlayerSeekControls(
+                                  enabled:
+                                      widget.active &&
+                                      !session.isLive &&
+                                      !session.isResolving &&
+                                      session.media != null &&
+                                      session.error == null &&
+                                      snapshot.phase != PlaybackPhase.opening &&
+                                      snapshot.phase != PlaybackPhase.idle,
+                                  sourceGeneration: sourceGeneration,
+                                  position: () =>
+                                      session.snapshots.value.position,
+                                  duration: snapshot.duration,
+                                  preview: _swipeSeekPreview,
+                                  storyboard: session.storyboard,
+                                  storyboardLoading: session.storyboardLoading,
+                                  onPreviewRequest: () {
+                                    if (session.sourceGeneration ==
+                                        sourceGeneration) {
+                                      unawaited(session.ensureStoryboard());
+                                    }
                                   },
-                                  child: GestureDetector(
-                                    key: const ValueKey(
-                                      'player-surface-tap-target',
+                                  onSeek: (position) {
+                                    // A source may change before the next UI frame.
+                                    if (widget.active &&
+                                        _appActive &&
+                                        session.sourceGeneration ==
+                                            sourceGeneration &&
+                                        !session.isResolving &&
+                                        !session.isLive &&
+                                        session.media != null &&
+                                        session.error == null) {
+                                      unawaited(session.seek(position));
+                                    }
+                                  },
+                                  child: PlayerSwipeControls(
+                                    enabled:
+                                        settings.fullscreenSwipeControls &&
+                                        widget.active,
+                                    sourceGeneration: sourceGeneration,
+                                    volume: snapshot.volume,
+                                    setVolume: session.setVolume,
+                                    child: RawGestureDetector(
+                                      // The recognizer's deadline is fixed at creation.
+                                      key: ValueKey(
+                                        settings.shortcuts.holdDelayMs,
+                                      ),
+                                      behavior: HitTestBehavior.translucent,
+                                      excludeFromSemantics: true,
+                                      gestures: {
+                                        if (!session.isLive)
+                                          LongPressGestureRecognizer:
+                                              GestureRecognizerFactoryWithHandlers<
+                                                LongPressGestureRecognizer
+                                              >(
+                                                () =>
+                                                    LongPressGestureRecognizer(
+                                                      duration: Duration(
+                                                        milliseconds: settings
+                                                            .shortcuts
+                                                            .holdDelayMs,
+                                                      ),
+                                                      supportedDevices: {
+                                                        PointerDeviceKind.touch,
+                                                      },
+                                                    ),
+                                                (recognizer) {
+                                                  recognizer.onLongPressDown =
+                                                      (_) => widget.shortcuts
+                                                          .prepareTouchHold();
+                                                  recognizer.onLongPressStart =
+                                                      (_) => widget.shortcuts
+                                                          .beginTouchHold();
+                                                  recognizer.onLongPressEnd =
+                                                      (_) => widget.shortcuts
+                                                          .endTouchHold();
+                                                  recognizer.onLongPressCancel =
+                                                      widget
+                                                          .shortcuts
+                                                          .endTouchHold;
+                                                },
+                                              ),
+                                      },
+                                      child: GestureDetector(
+                                        key: const ValueKey(
+                                          'player-surface-tap-target',
+                                        ),
+                                        behavior: HitTestBehavior.translucent,
+                                        onTap: _onSurfaceTap,
+                                        onDoubleTap: () {
+                                          if (!widget.active) return;
+                                          _focusNode.requestFocus();
+                                          _toggleFullScreen();
+                                        },
+                                      ),
                                     ),
-                                    behavior: HitTestBehavior.translucent,
-                                    onTap: _onSurfaceTap,
-                                    onDoubleTap: () {
-                                      if (!widget.active) return;
-                                      _focusNode.requestFocus();
-                                      _toggleFullScreen();
-                                    },
                                   ),
                                 ),
                               ),
@@ -1220,23 +1268,32 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                                 color: Colors.white38,
                                                 backgroundColor: Colors.white24,
                                               ),
-                                              LinearProgressIndicator(
-                                                key: const ValueKey(
-                                                  'player-collapsed-progress',
-                                                ),
-                                                minHeight: 2,
-                                                borderRadius: BorderRadius.zero,
-                                                value:
-                                                    (snapshot
-                                                                .position
-                                                                .inMilliseconds /
-                                                            snapshot
-                                                                .duration
-                                                                .inMilliseconds)
-                                                        .clamp(0, 1),
-                                                color: const Color(0xffdf6589),
-                                                backgroundColor:
-                                                    Colors.transparent,
+                                              ValueListenableBuilder<Duration?>(
+                                                valueListenable:
+                                                    _swipeSeekPreview,
+                                                builder: (context, preview, _) =>
+                                                    LinearProgressIndicator(
+                                                      key: const ValueKey(
+                                                        'player-collapsed-progress',
+                                                      ),
+                                                      minHeight: 2,
+                                                      borderRadius:
+                                                          BorderRadius.zero,
+                                                      value:
+                                                          ((preview ??
+                                                                          snapshot
+                                                                              .position)
+                                                                      .inMilliseconds /
+                                                                  snapshot
+                                                                      .duration
+                                                                      .inMilliseconds)
+                                                              .clamp(0, 1),
+                                                      color: const Color(
+                                                        0xffdf6589,
+                                                      ),
+                                                      backgroundColor:
+                                                          Colors.transparent,
+                                                    ),
                                               ),
                                             ],
                                           ),
@@ -1406,45 +1463,59 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                                       snapshot.duration,
                                                       snapshot.buffered,
                                                     ),
-                                                    builder: (context, snapshot) => PlaybackTimelineBar(
-                                                      key: ValueKey(
-                                                        session
-                                                            .sourceGeneration,
-                                                      ),
-                                                      playerBoundsKey:
-                                                          _playerBoundsKey,
-                                                      position:
-                                                          snapshot.position,
-                                                      duration:
-                                                          snapshot.duration,
-                                                      buffered:
-                                                          snapshot.buffered,
-                                                      chapters:
-                                                          session.chapters,
-                                                      highEnergy:
-                                                          session.highEnergy,
-                                                      storyboard:
-                                                          session.storyboard,
-                                                      storyboardLoading: session
-                                                          .storyboardLoading,
-                                                      storyboardMessage: session
-                                                          .storyboardMessage,
-                                                      sourceGeneration: session
-                                                          .sourceGeneration,
-                                                      onPreviewRequest: () =>
-                                                          unawaited(
-                                                            session
-                                                                .ensureStoryboard(),
-                                                          ),
-                                                      onSeek: (position) =>
-                                                          unawaited(
-                                                            session.seek(
-                                                              position,
+                                                    builder: (context, snapshot) =>
+                                                        ValueListenableBuilder<
+                                                          Duration?
+                                                        >(
+                                                          valueListenable:
+                                                              _swipeSeekPreview,
+                                                          builder: (context, preview, _) => PlaybackTimelineBar(
+                                                            key: ValueKey(
+                                                              session
+                                                                  .sourceGeneration,
                                                             ),
+                                                            playerBoundsKey:
+                                                                _playerBoundsKey,
+                                                            position:
+                                                                preview ??
+                                                                snapshot
+                                                                    .position,
+                                                            duration: snapshot
+                                                                .duration,
+                                                            buffered: snapshot
+                                                                .buffered,
+                                                            chapters: session
+                                                                .chapters,
+                                                            highEnergy: session
+                                                                .highEnergy,
+                                                            storyboard: session
+                                                                .storyboard,
+                                                            storyboardLoading:
+                                                                session
+                                                                    .storyboardLoading,
+                                                            storyboardMessage:
+                                                                session
+                                                                    .storyboardMessage,
+                                                            sourceGeneration:
+                                                                session
+                                                                    .sourceGeneration,
+                                                            onPreviewRequest:
+                                                                () => unawaited(
+                                                                  session
+                                                                      .ensureStoryboard(),
+                                                                ),
+                                                            onSeek:
+                                                                (
+                                                                  position,
+                                                                ) => unawaited(
+                                                                  session.seek(
+                                                                    position,
+                                                                  ),
+                                                                ),
+                                                            onMenuChanged:
+                                                                _onControlsMenuChanged,
                                                           ),
-                                                      onMenuChanged:
-                                                          _onControlsMenuChanged,
-                                                    ),
+                                                        ),
                                                   ),
                                                 Padding(
                                                   padding:
