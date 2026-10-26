@@ -13,6 +13,48 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final failSave in [false, true]) {
+    testWidgets('default comments save or roll back (failure: $failSave)', (
+      tester,
+    ) async {
+      final repository = _SettingsRepository()..failSave = failSave;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [settingsRepositoryProvider.overrideWithValue(repository)],
+          child: MaterialApp(
+            builder: AppNoticeHost.builder,
+            home: const Scaffold(
+              body: SettingsScreen(category: SettingsCategory.playback),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final toggle = find.widgetWithText(SwitchListTile, '进入播放页默认显示评论区');
+      expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+      await tester.ensureVisible(toggle);
+      await tester.pumpAndSettle();
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(repository.settings.defaultShowComments, !failSave);
+      expect(repository.settings.autoPlay, isTrue);
+      expect(tester.widget<SwitchListTile>(toggle).value, !failSave);
+      if (failSave) {
+        expect(find.text('设置保存失败，请重试'), findsOneWidget);
+      }
+      ProviderScope.containerOf(tester.element(toggle))
+          .invalidate(settingsControllerProvider);
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(toggle).value, !failSave);
+      if (!failSave) {
+        await tester.ensureVisible(toggle);
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect(repository.settings.defaultShowComments, isFalse);
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
   for (final player in [false, true]) {
     for (final failSave in [false, true]) {
       testWidgets(
@@ -68,6 +110,7 @@ void main() {
       );
       final repository = _SettingsRepository()
         ..settings = defaults.copyWith(
+          defaultShowComments: true,
           fullscreenSwipeControls: false,
           sidebarStyle: SidebarStyle.compact,
           sidebarCollapsed: true,
@@ -102,6 +145,7 @@ void main() {
       await tester.tap(find.text('确认恢复'));
       await tester.pumpAndSettle();
       expect(repository.settings.theme, AppThemePreference.system);
+      expect(repository.settings.defaultShowComments, isFalse);
       expect(repository.settings.danmakuArea, .5);
       expect(repository.settings.danmakuFontScale, .6);
       expect(repository.settings.shortcuts.enabled, isTrue);

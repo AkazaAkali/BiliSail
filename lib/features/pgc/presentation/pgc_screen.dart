@@ -44,6 +44,7 @@ final class PgcScreen extends ConsumerStatefulWidget {
     super.key,
     this.seasonId,
     this.episodeId,
+    this.defaultShowComments = false,
     required this.playerBuilder,
     this.onEpisodeChanged,
     this.onOpenSeason,
@@ -52,6 +53,7 @@ final class PgcScreen extends ConsumerStatefulWidget {
   });
 
   final String? seasonId, episodeId;
+  final bool? defaultShowComments;
   final PgcPlayerBuilder playerBuilder;
   final ValueChanged<PgcEpisode>? onEpisodeChanged;
   final ValueChanged<PgcSeasonSummary>? onOpenSeason;
@@ -64,7 +66,7 @@ final class PgcScreen extends ConsumerStatefulWidget {
 
 final class _PgcScreenState extends ConsumerState<PgcScreen> {
   late PgcLocator _locator;
-  int _tab = 0;
+  int? _tab;
   bool _infoVisible = true;
   final ScrollController _introScroll = ScrollController();
   PgcSeason? _playerSeason;
@@ -103,7 +105,7 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
     final next = _fromWidget();
     if (oldWidget.seasonId != widget.seasonId) {
       _locator = next;
-      _tab = 0;
+      _tab = null;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _introScroll.hasClients) _introScroll.jumpTo(0);
       });
@@ -117,7 +119,7 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
                   ?.episode(episodeId) ==
               null) {
         _locator = next;
-        _tab = 0;
+        _tab = null;
         return;
       }
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -174,6 +176,11 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
   }
 
   Widget _buildPage(BuildContext context) {
+    final defaultShowComments = widget.defaultShowComments;
+    if (_tab == null && defaultShowComments != null) {
+      _tab = defaultShowComments ? 1 : 0;
+    }
+    final tab = _tab ?? 0;
     if (_locator.seasonId == null && _locator.episodeId == null) {
       return const StateView.empty(message: '缺少剧集或作品编号');
     }
@@ -235,11 +242,11 @@ final class _PgcScreenState extends ConsumerState<PgcScreen> {
                         ),
                         null => null,
                       },
-                      enabled: _tab == 1 && widget.commentsBuilder != null,
+                      enabled: tab == 1 && widget.commentsBuilder != null,
                       builder: (context, detailOpen) => PlaybackInfoTabs(
                         showNavigation: !detailOpen,
                         key: ValueKey(season.id),
-                        value: _tab.clamp(
+                        value: tab.clamp(
                           0,
                           widget.commentsBuilder != null && selected != null
                               ? 1

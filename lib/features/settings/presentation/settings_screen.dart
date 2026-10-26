@@ -391,6 +391,12 @@ final class _SettingsCategoryPageState
                             '视频和影视播放时，在画面底部显示细进度条',
                           ),
                           _toggle(
+                            '进入播放页默认显示评论区',
+                            s.defaultShowComments,
+                            controller.setDefaultShowComments,
+                            '打开视频或影视时优先显示评论区；关闭时默认显示简介',
+                          ),
+                          _toggle(
                             '自动播放',
                             s.autoPlay,
                             controller.setAutoPlay,

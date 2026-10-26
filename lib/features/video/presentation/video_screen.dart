@@ -57,6 +57,7 @@ final class VideoScreen extends ConsumerStatefulWidget {
     super.key,
     required this.id,
     this.initialCid,
+    this.defaultShowComments = false,
     this.onPartChanged,
     this.onOpenVideo,
     required this.playerBuilder,
@@ -72,6 +73,7 @@ final class VideoScreen extends ConsumerStatefulWidget {
   });
   final VideoId id;
   final String? initialCid;
+  final bool? defaultShowComments;
   final ValueChanged<VideoPart>? onPartChanged;
   final ValueChanged<VideoSummary>? onOpenVideo;
   final VideoPlayerBuilder playerBuilder;
@@ -90,7 +92,7 @@ final class VideoScreen extends ConsumerStatefulWidget {
 
 final class _VideoScreenState extends ConsumerState<VideoScreen> {
   String? _selectedCid;
-  int _tab = 0;
+  int? _tab;
   bool _infoVisible = true;
   bool _descriptionExpanded = false;
   bool _queueExpanded = true;
@@ -156,7 +158,7 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
     _syncQueue();
     if (oldWidget.id != widget.id) {
       _selectedCid = widget.initialCid;
-      _tab = 0;
+      _tab = null;
       _descriptionExpanded = false;
     }
     if (oldWidget.initialCid != widget.initialCid) {
@@ -166,6 +168,12 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Null waits for async settings; an explicit selection always takes priority.
+    final defaultShowComments = widget.defaultShowComments;
+    if (_tab == null && defaultShowComments != null) {
+      _tab = defaultShowComments ? 1 : 0;
+    }
+    final tab = _tab ?? 0;
     final originalQueue = _validQueue;
     final removals = originalQueue == null
         ? null
@@ -399,11 +407,11 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                           ),
                           null => null,
                         },
-                        enabled: _tab == 1,
+                        enabled: tab == 1,
                         builder: (context, detailOpen) => PlaybackInfoTabs(
                           key: ValueKey(video.summary.id),
                           showNavigation: !detailOpen,
-                          value: _tab,
+                          value: tab,
                           onChanged: (tab) => setState(() => _tab = tab),
                           viewKey: const ValueKey('video-info-swipe'),
                           labels: [

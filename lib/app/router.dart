@@ -590,6 +590,15 @@ final class _WorkspacePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final defaultShowComments = tab.isVideo || tab.isPgc
+        ? ref.watch(
+            settingsControllerProvider.select(
+              (settings) =>
+                  settings.value?.defaultShowComments ??
+                  (settings.isLoading ? null : false),
+            ),
+          )
+        : false;
     final account = observeAccount
         ? ref.watch(
             authControllerProvider.select(
@@ -651,6 +660,7 @@ final class _WorkspacePage extends ConsumerWidget {
                   }
                   return PgcScreen(
                     key: PageStorageKey('pgc-${tab.id}'),
+                    defaultShowComments: defaultShowComments,
                     seasonId: uri.pathSegments[1] == 'season' ? id : null,
                     episodeId: uri.pathSegments[1] == 'episode'
                         ? id
@@ -766,6 +776,7 @@ final class _WorkspacePage extends ConsumerWidget {
                   return id.isValid
                       ? VideoScreen(
                           key: PageStorageKey('video-${tab.id}'),
+                          defaultShowComments: defaultShowComments,
                           id: id,
                           queue: queue?.indexOf(id) == -1 ? null : queue,
                           initialCid: uri.queryParameters['cid'],

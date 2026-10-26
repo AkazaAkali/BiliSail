@@ -57,6 +57,122 @@ final _season = PgcSeason(
 );
 
 void main() {
+  for (final (comments, width) in [
+    for (final comments in [false, true])
+      for (final width in [390.0, 1200.0]) (comments, width),
+  ]) {
+    testWidgets(
+      'PGC default comments=$comments retains manual choice at $width',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = Size(width, 844);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        final auth = _Auth();
+        addTearDown(auth.dispose);
+        final repo = _Repo();
+        var seasonId = 's1';
+        var episodeId = 'e1';
+        var preference = comments;
+        var created = 0;
+        var disposed = 0;
+        late StateSetter update;
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              pgcRepositoryProvider.overrideWithValue(repo),
+              authRepositoryProvider.overrideWithValue(auth),
+            ],
+            child: InputTestApp(
+              home: Scaffold(
+                body: StatefulBuilder(
+                  builder: (context, setState) {
+                    update = setState;
+                    return PgcScreen(
+                      seasonId: seasonId,
+                      episodeId: episodeId,
+                      defaultShowComments: preference,
+                      playerBuilder: (_, _, episode) => _TrackedPlayer(
+                        title: episode.title,
+                        onCreate: () => created++,
+                        onDispose: () => disposed++,
+                      ),
+                      commentsBuilder: (_, _, _) => const Text('默认评论内容'),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        int? selectedTab() => tester
+            .widget<PagingTabStrip<int>>(find.byType(PagingTabStrip<int>))
+            .value;
+        expect(selectedTab(), comments ? 1 : 0);
+        expect(
+          find.text('默认评论内容').hitTestable(),
+          comments ? findsOneWidget : findsNothing,
+        );
+        await tester.tap(
+          find.byKey(ValueKey('pgc-tab-${comments ? '简介' : '评论'}')),
+        );
+        await tester.pumpAndSettle();
+        update(() {
+          preference = !comments;
+          episodeId = 'e2';
+        });
+        await tester.pumpAndSettle();
+        update(() => preference = comments);
+        await tester.pumpAndSettle();
+        expect(selectedTab(), comments ? 0 : 1);
+        expect(created, 1);
+        expect(disposed, 0);
+        repo.value = PgcSeason(
+          id: const PgcSeasonId('s2'),
+          title: '下一部作品',
+          episodes: _season.episodes,
+        );
+        update(() => seasonId = 's2');
+        await tester.pumpAndSettle();
+        expect(selectedTab(), comments ? 1 : 0);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+  testWidgets(
+    'PGC without a comments tab keeps intro when default is comments',
+    (tester) async {
+      final auth = _Auth();
+      addTearDown(auth.dispose);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            pgcRepositoryProvider.overrideWithValue(_Repo()),
+            authRepositoryProvider.overrideWithValue(auth),
+          ],
+          child: InputTestApp(
+            home: Scaffold(
+              body: PgcScreen(
+                seasonId: 's1',
+                defaultShowComments: true,
+                playerBuilder: (_, _, _) => const SizedBox(),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('评论'), findsNothing);
+      expect(
+        tester
+            .widget<PagingTabStrip<int>>(find.byType(PagingTabStrip<int>))
+            .value,
+        0,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
   for (final width in [390.0, 1200.0]) {
     testWidgets('series stay lazy and local controls retain player at $width', (
       tester,

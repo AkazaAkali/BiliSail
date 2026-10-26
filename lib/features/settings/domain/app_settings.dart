@@ -59,6 +59,7 @@ final class AppSettings {
     this.danmakuOpacity = 0.8,
     this.danmakuFontScale = 1.0,
     this.autoPlay = true,
+    this.defaultShowComments = false,
     this.videoCardHoverPlayback = true,
     this.continuousPlayback = false,
     this.resumePlayback = true,
@@ -122,6 +123,7 @@ final class AppSettings {
        danmakuEnabled = true,
        danmakuOpacity = 0.8,
        autoPlay = true,
+       defaultShowComments = false,
        continuousPlayback = false,
        resumePlayback = true,
        showCollapsedProgress = true,
@@ -177,6 +179,7 @@ final class AppSettings {
   final double danmakuOpacity;
   final double danmakuFontScale;
   final bool autoPlay;
+  final bool defaultShowComments;
   final bool videoCardHoverPlayback;
   final bool continuousPlayback;
   final bool resumePlayback;
@@ -246,6 +249,7 @@ final class AppSettings {
     double? danmakuOpacity,
     double? danmakuFontScale,
     bool? autoPlay,
+    bool? defaultShowComments,
     bool? videoCardHoverPlayback,
     bool? continuousPlayback,
     bool? resumePlayback,
@@ -301,6 +305,7 @@ final class AppSettings {
     danmakuOpacity: danmakuOpacity ?? this.danmakuOpacity,
     danmakuFontScale: danmakuFontScale ?? this.danmakuFontScale,
     autoPlay: autoPlay ?? this.autoPlay,
+    defaultShowComments: defaultShowComments ?? this.defaultShowComments,
     videoCardHoverPlayback:
         videoCardHoverPlayback ?? this.videoCardHoverPlayback,
     continuousPlayback: continuousPlayback ?? this.continuousPlayback,

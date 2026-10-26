@@ -77,6 +77,66 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final manualChoice in [false, true]) {
+    _workspaceTestWidgets(
+      'video deep link applies delayed comment preference unless selected manually=$manualChoice',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1200, 850);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        final settings = _PendingSettingsRepository();
+        final router = createBiliRouter(
+          initialLocation: '/video/BV1234567890',
+          playerBuilder: (_, _, _) => const SizedBox(),
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              settingsRepositoryProvider.overrideWithValue(settings),
+              videoRepositoryProvider.overrideWithValue(_VideoRepository()),
+              relatedVideosProvider.overrideWith((ref, id) async => []),
+              videoTagsProvider.overrideWith((ref, id) async => []),
+              feedRepositoryProvider.overrideWithValue(_FeedRepository()),
+              homeRepositoryProvider.overrideWithValue(_HomeRepository()),
+            ],
+            child: InputTestApp.router(routerConfig: router),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final screen = tester.state(find.byType(VideoScreen));
+        int selectedTab() => tester
+            .widget<PlaybackInfoTabs>(find.byType(PlaybackInfoTabs))
+            .value;
+        expect(selectedTab(), 0);
+        if (manualChoice) {
+          await tester.tap(find.text('评论'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('简介'));
+          await tester.pumpAndSettle();
+        }
+        settings.loaded.complete(
+          const AppSettings.defaults().copyWith(defaultShowComments: true),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.state(find.byType(VideoScreen)), same(screen));
+        expect(selectedTab(), manualChoice ? 0 : 1);
+        final container = ProviderScope.containerOf(
+          tester.element(find.byType(VideoScreen)),
+        );
+        await container
+            .read(settingsControllerProvider.notifier)
+            .setDefaultShowComments(false);
+        await tester.pumpAndSettle();
+        expect(selectedTab(), manualChoice ? 0 : 1);
+        router.go('/video/BV0987654321');
+        await tester.pumpAndSettle();
+        expect(selectedTab(), 0);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
   for (final platform in [TargetPlatform.android, TargetPlatform.windows]) {
     _workspaceTestWidgets(
       'single page avatar returns to the same video, part and session on $platform',
