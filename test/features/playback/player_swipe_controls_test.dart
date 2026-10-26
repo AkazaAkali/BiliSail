@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:bilisail/core/platform/window_brightness_service.dart';
-import 'package:bilisail/features/playback/presentation/fullscreen_swipe_controls.dart';
+import 'package:bilisail/features/playback/presentation/player_swipe_controls.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -207,7 +207,7 @@ Widget _app({
       child: SizedBox(
         width: 400,
         height: 200,
-        child: FullscreenSwipeControls(
+        child: PlayerSwipeControls(
           enabled: enabled,
           sourceGeneration: generation,
           volume: 50,

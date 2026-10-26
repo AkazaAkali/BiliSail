@@ -151,7 +151,7 @@ class _PlayerSettingsDialogState extends ConsumerState<_PlayerSettingsDialog> {
                           (c, v) => c.copyWith(autoPlay: v),
                         ),
                         _switch(
-                          '全屏滑动调节亮度和音量（左侧亮度，右侧音量）',
+                          '滑动调节亮度和音量（左侧亮度，右侧音量）',
                           s.fullscreenSwipeControls,
                           (c, v) => c.copyWith(fullscreenSwipeControls: v),
                         ),

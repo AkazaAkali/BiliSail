@@ -45,6 +45,77 @@ import 'package:flutter_test/flutter_test.dart';
 final _composerScopeProvider = Provider<String>((ref) => 'root');
 
 void main() {
+  for (final fullscreen in [false, true]) {
+    for (final enabled in [true, false]) {
+      testWidgets(
+        'picture swipes adjust brightness and volume (fullscreen: $fullscreen, enabled: $enabled)',
+        (tester) async {
+          final engine = _FakeEngine();
+          final session = _session(engine);
+          final window = _FakeWindowService();
+          addTearDown(session.close);
+          await tester.pumpWidget(
+            _app(
+              session,
+              window,
+              AppSettings(fullscreenSwipeControls: enabled),
+            ),
+          );
+          await _pumpFrames(tester);
+          if (fullscreen) {
+            await tester.tap(find.byTooltip('全屏（F）'));
+            await _pumpFrames(tester);
+          }
+          await session.setVolume(50);
+          await _pumpFrames(tester);
+          final before = engine.currentSnapshot;
+          final opens = engine.opens;
+          final picture = tester.getRect(
+            find.byKey(const ValueKey('player-surface-tap-target')),
+          );
+          final delta = picture.height * .1;
+          await tester.dragFrom(
+            picture.topLeft + Offset(picture.width * .75, picture.height * .4),
+            Offset(0, -delta),
+          );
+          await _pumpFrames(tester);
+          expect(
+            engine.currentSnapshot.volume,
+            closeTo(enabled ? 60 : 50, .01),
+          );
+          expect(find.text('音量 60%'), enabled ? findsOneWidget : findsNothing);
+
+          await tester.dragFrom(
+            picture.topLeft + Offset(picture.width * .25, picture.height * .4),
+            Offset(0, delta),
+          );
+          await _pumpFrames(tester);
+          expect(find.text('亮度 90%'), enabled ? findsOneWidget : findsNothing);
+          final dimmer = find.byKey(const ValueKey('player-brightness-dimmer'));
+          expect(dimmer, enabled ? findsOneWidget : findsNothing);
+          if (enabled) {
+            expect(tester.widget<ColoredBox>(dimmer).color.a, closeTo(.1, .01));
+          }
+          expect(
+            engine.currentSnapshot.volume,
+            closeTo(enabled ? 60 : 50, .01),
+          );
+          expect(engine.currentSnapshot.desiredPlaying, before.desiredPlaying);
+          expect(engine.currentSnapshot.rate, before.rate);
+          expect(engine.currentSnapshot.position, before.position);
+          expect(engine.opens, opens);
+          if (fullscreen) {
+            await tester.tap(find.byTooltip('退出全屏（Esc）'));
+            await _pumpFrames(tester);
+          }
+          await tester.pumpWidget(const SizedBox());
+          await _pumpFrames(tester);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
   testWidgets(
     'workspace visibility updates player navigation inline and fullscreen without reopening',
     (tester) async {

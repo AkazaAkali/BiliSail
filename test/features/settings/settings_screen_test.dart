@@ -16,7 +16,7 @@ void main() {
   for (final player in [false, true]) {
     for (final failSave in [false, true]) {
       testWidgets(
-        'fullscreen swipe toggle saves or rolls back (player: $player, failure: $failSave)',
+        'player swipe toggle saves or rolls back (player: $player, failure: $failSave)',
         (tester) async {
           final repository = _SettingsRepository()..failSave = failSave;
           await tester.pumpWidget(
@@ -47,7 +47,7 @@ void main() {
           await tester.pumpAndSettle();
           final toggle = find.widgetWithText(
             SwitchListTile,
-            player ? '全屏滑动调节亮度和音量（左侧亮度，右侧音量）' : '全屏滑动调节亮度和音量',
+            player ? '滑动调节亮度和音量（左侧亮度，右侧音量）' : '滑动调节亮度和音量',
           );
           await tester.ensureVisible(toggle);
           await tester.tap(toggle);

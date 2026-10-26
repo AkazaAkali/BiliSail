@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import '../../../core/platform/window_brightness_service.dart';
 
 /// Only the picture participates; buttons above this layer keep their gestures.
-class FullscreenSwipeControls extends StatefulWidget {
-  const FullscreenSwipeControls({
+class PlayerSwipeControls extends StatefulWidget {
+  const PlayerSwipeControls({
     super.key,
     required this.enabled,
     required this.sourceGeneration,
@@ -25,11 +25,10 @@ class FullscreenSwipeControls extends StatefulWidget {
   final WindowBrightnessService? brightness;
 
   @override
-  State<FullscreenSwipeControls> createState() =>
-      _FullscreenSwipeControlsState();
+  State<PlayerSwipeControls> createState() => _PlayerSwipeControlsState();
 }
 
-class _FullscreenSwipeControlsState extends State<FullscreenSwipeControls>
+class _PlayerSwipeControlsState extends State<PlayerSwipeControls>
     with WidgetsBindingObserver {
   late final _brightnessService =
       widget.brightness ?? WindowBrightnessService();
@@ -64,7 +63,7 @@ class _FullscreenSwipeControlsState extends State<FullscreenSwipeControls>
   }
 
   @override
-  void didUpdateWidget(covariant FullscreenSwipeControls oldWidget) {
+  void didUpdateWidget(covariant PlayerSwipeControls oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.sourceGeneration != widget.sourceGeneration ||
         oldWidget.enabled != widget.enabled) {

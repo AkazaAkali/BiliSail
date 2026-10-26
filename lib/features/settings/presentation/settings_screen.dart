@@ -362,10 +362,10 @@ final class _SettingsCategoryPageState
                       if (widget.category == SettingsCategory.playback)
                         _section('播放', [
                           _toggle(
-                            '全屏滑动调节亮度和音量',
+                            '滑动调节亮度和音量',
                             s.fullscreenSwipeControls,
                             controller.setFullscreenSwipeControls,
-                            '触摸画面左侧上下滑动调亮度，右侧调音量',
+                            '普通和全屏画面均可用，触摸左侧上下滑动调亮度，右侧调音量',
                           ),
                           PlayerControlsModeSetting(
                             value: s.playerControlsMode,

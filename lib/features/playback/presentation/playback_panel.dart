@@ -23,7 +23,7 @@ import '../application/playback_viewers_controller.dart';
 import '../domain/playback_repository.dart';
 import '../domain/content_playback.dart';
 import 'player_settings_dialog.dart';
-import 'fullscreen_swipe_controls.dart';
+import 'player_swipe_controls.dart';
 import 'playback_timeline_bar.dart';
 import 'playback_snapshot_builder.dart';
 import 'live_stream_menu.dart';
@@ -915,9 +915,8 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                 },
                               ),
                             Positioned.fill(
-                              child: FullscreenSwipeControls(
+                              child: PlayerSwipeControls(
                                 enabled:
-                                    widget.fullScreen &&
                                     settings.fullscreenSwipeControls &&
                                     widget.active,
                                 sourceGeneration: session.sourceGeneration,
