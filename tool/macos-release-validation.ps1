@@ -64,6 +64,15 @@ function Invoke-MacOSReleaseSmokePhase {
     if (!$process.WaitForExit($TimeoutSeconds * 1000)) { throw "macOS Release smoke phase '$Phase' timed out." }
     $output = $outputTask.GetAwaiter().GetResult()
     $errors = $errorTask.GetAwaiter().GetResult()
+    # Export only the fixed smoke stages and numeric native focus state.
+    # Discard responder names and every other native/network output field.
+    foreach ($line in (($output + "`n" + $errors) -split '\r?\n')) {
+      if ($line -cmatch '^BILISAIL_FOCUS_STAGE:(prepare|present|primary|space|passed)$') {
+        Write-Host $Matches[0]
+      } elseif ($line -cmatch 'BILISAIL_FOCUS_NATIVE revision=(\d+) active=([01]) key=([01]) view=(\d+|<null>) responder=[A-Za-z0-9_.]+ inView=([01])$') {
+        Write-Host "BILISAIL_FOCUS_NATIVE revision=$($Matches[1]) active=$($Matches[2]) key=$($Matches[3]) view=$($Matches[4]) inView=$($Matches[5])"
+      }
+    }
     # Never persist raw native/network output, which can contain URL queries.
     $status = [ordered]@{
       phase = $Phase

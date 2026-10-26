@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -55,6 +56,7 @@ Future<void> verifyMacOSPlaybackWindows(
       },
     );
     try {
+      stderr.writeln('BILISAIL_FOCUS_STAGE:prepare');
       await playback.prepare();
       // Check before any second activation: the SDK installs its window
       // delegate after makeKeyAndOrderFront, losing the initial focus event.
@@ -62,6 +64,7 @@ Future<void> verifyMacOSPlaybackWindows(
       if (!focus.observed || focus.viewId != playback.viewId) {
         throw StateError('Initial native playback focus was not synchronized');
       }
+      stderr.writeln('BILISAIL_FOCUS_STAGE:present');
       mainWindow.present(
         app,
         additionalView: playback.buildView(
@@ -84,6 +87,7 @@ Future<void> verifyMacOSPlaybackWindows(
           view.physicalSize.isEmpty) {
         throw StateError('Playback view did not attach');
       }
+      stderr.writeln('BILISAIL_FOCUS_STAGE:primary');
       final primary = FocusManager.instance.primaryFocus?.context;
       if (primary == null ||
           !primary.mounted ||
@@ -92,6 +96,7 @@ Future<void> verifyMacOSPlaybackWindows(
       }
       // Deliver through the real NSWindow responder/engine/host path, without
       // activating again. Native injection is gated to explicit startup smoke.
+      stderr.writeln('BILISAIL_FOCUS_STAGE:space');
       await const MethodChannel('bilisail/application_window')
           .invokeMethod<void>('probeWindowSpace', {'viewId': playback.viewId})
           .timeout(const Duration(seconds: 2));
@@ -105,6 +110,7 @@ Future<void> verifyMacOSPlaybackWindows(
       if (presses != 1 || held()) {
         throw StateError('Playback Space sequence was not handled');
       }
+      stderr.writeln('BILISAIL_FOCUS_STAGE:passed');
       await playback.windowService.bindTitleBarBack(
         owner: owner,
         onBack: () {},
