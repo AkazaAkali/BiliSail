@@ -29,8 +29,9 @@ import 'input_test_app.dart';
 
 /// Real router/shell/pages, deterministic data and decoded covers; no account IO.
 class PrimarySwitchFixture {
-  PrimarySwitchFixture(Uint8List png)
-    : cache = AppImageCache(
+  PrimarySwitchFixture(Uint8List png, {SwitchFeedRepository? feed})
+    : feed = feed ?? SwitchFeedRepository(),
+      cache = AppImageCache(
         ImageByteCache(
           directory: () async => throw const FileSystemException('memory only'),
           loader: (_, _) async => png,
@@ -38,7 +39,7 @@ class PrimarySwitchFixture {
       );
 
   final AppImageCache cache;
-  final feed = SwitchFeedRepository();
+  final SwitchFeedRepository feed;
   final home = SwitchHomeRepository();
   late final GoRouter router = createBiliRouter(
     playerBuilder: (_, _, _) => const SizedBox(),

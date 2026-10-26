@@ -8,11 +8,13 @@ import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/domain/video.dart';
 import 'package:bilisail/features/feed/application/feed_controller.dart';
 import 'package:bilisail/features/feed/domain/feed_repository.dart';
+import 'package:bilisail/features/feed/domain/home_channel.dart';
 import 'package:bilisail/features/feed/presentation/feed_screen.dart';
 import 'package:bilisail/features/video/application/video_card_preview_playback.dart';
 import 'package:bilisail/features/video/domain/video_card_interactions.dart';
 import 'package:bilisail/features/video/domain/video_actions_repository.dart';
 import 'package:bilisail/shared/ui/app_notice.dart';
+import 'package:bilisail/shared/ui/paged_scroll_viewport.dart';
 import 'package:bilisail/shared/ui/video_card.dart';
 import 'package:bilisail/shared/ui/video_card_cover.dart';
 import 'package:bilisail/shared/ui/video_card_interaction_scope.dart';
@@ -68,6 +70,16 @@ void main() {
       final neighbor = find.byType(VideoCard).last;
       final firstRect = tester.getRect(first);
       final neighborRect = tester.getRect(neighbor);
+      var neighborBuilds = 0;
+      var viewportBuilds = 0;
+      debugOnRebuildDirtyWidget = (element, builtOnce) {
+        if (element.widget is PagedScrollViewport) viewportBuilds++;
+        if (element.widget case VideoCard(:final video)
+            when video.id == _neighbor.id) {
+          neighborBuilds++;
+        }
+      };
+      addTearDown(() => debugOnRebuildDirtyWidget = null);
       await tester.tap(
         find.byKey(const ValueKey('video-card-title-menu')).first,
       );
@@ -93,6 +105,12 @@ void main() {
       expect(tester.getRect(first), firstRect);
       expect(tester.getRect(neighbor), neighborRect);
       expect(find.byType(VideoCardCover), findsNWidgets(2));
+      expect(neighborBuilds, 0, reason: 'Feedback only updates its own card');
+      expect(
+        viewportBuilds,
+        0,
+        reason: 'Feedback does not invalidate the viewport',
+      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -134,6 +152,53 @@ void main() {
       },
     );
   }
+
+  testWidgets('retained recommendation actions use the latest login state', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    await tester.pumpWidget(_feed(repository, signedIn: false));
+    await tester.pumpAndSettle();
+    final card = tester.widget<VideoCard>(find.byType(VideoCard).first);
+    card.menu!.onSelected!(VideoCardMenuAction.notInterested);
+    await tester.pumpAndSettle();
+    expect(repository.writes, isEmpty);
+    expect(find.text('请先登录后再反馈推荐'), findsOneWidget);
+    await tester.pumpWidget(_feed(repository));
+    await tester.pumpAndSettle();
+    expect(tester.widget<VideoCard>(find.byType(VideoCard).first), same(card));
+    card.menu!.onSelected!(VideoCardMenuAction.notInterested);
+    await tester.pump();
+    expect(repository.writes, hasLength(1));
+    repository.writes.single.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('内容不感兴趣'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('feedback finishing in a hidden channel is retained on return', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    await tester.pumpWidget(_feed(repository, retainChannels: true));
+    await tester.pumpAndSettle();
+    tester.widget<VideoCard>(find.byType(VideoCard).first).menu!.onSelected!(
+      VideoCardMenuAction.notInterested,
+    );
+    await tester.pump();
+    await tester.pumpWidget(
+      _feed(repository, channel: HomeChannel.popular, retainChannels: true),
+    );
+    await tester.pumpAndSettle();
+    repository.writes.single.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('内容不感兴趣'), findsNothing);
+    await tester.pumpWidget(_feed(repository, retainChannels: true));
+    await tester.pumpAndSettle();
+    expect(find.text('内容不感兴趣'), findsOneWidget);
+    expect(find.text('相邻视频'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('overlay consumes card taps and keyboard undo works', (
     tester,
@@ -266,15 +331,26 @@ void main() {
   }
 }
 
-Widget _feed(_Repository repository) => ProviderScope(
+Widget _feed(
+  _Repository repository, {
+  bool signedIn = true,
+  HomeChannel channel = HomeChannel.recommended,
+  bool retainChannels = false,
+}) => ProviderScope(
   overrides: [feedRepositoryProvider.overrideWithValue(repository)],
   child: MaterialApp(
     theme: ThemeData(
       platform: TargetPlatform.android,
       fontFamily: 'HarmonyOS Sans',
     ),
-    home: const Scaffold(
-      body: AppNoticeHost(child: FeedScreen(isSignedIn: true)),
+    home: Scaffold(
+      body: AppNoticeHost(
+        child: FeedScreen(
+          isSignedIn: signedIn,
+          channel: channel,
+          onChannelChanged: retainChannels ? (_) {} : null,
+        ),
+      ),
     ),
   ),
 );
@@ -291,6 +367,11 @@ final class _Repository extends Fake
     required String? categoryId,
     required RequestCancellation cancellation,
   }) async => const PageResult(items: [_video, _neighbor], hasMore: false);
+  @override
+  Future<PageResult<VideoSummary>> loadPopular({
+    required int page,
+    required RequestCancellation cancellation,
+  }) async => const PageResult(items: [_neighbor], hasMore: false);
   @override
   Future<void> rejectRecommendation(
     RecommendationFeedback feedback, {

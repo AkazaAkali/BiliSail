@@ -80,7 +80,6 @@ void main() {
         container.read(feedControllerProvider).pageError,
         isA<AppFailure>(),
       );
-      debugOnRebuildDirtyWidget = null;
       final retry = container.read(feedControllerProvider.notifier).loadMore();
       await tester.pump();
       repository.retry.complete(
@@ -88,6 +87,12 @@ void main() {
       );
       await retry;
       await tester.pumpAndSettle();
+      expect(
+        rebuilt,
+        0,
+        reason: 'Appending offscreen items preserves visible cards',
+      );
+      expect(tester.widget(find.byKey(first.key!)), same(first));
       expect(_items(tester).length, 501);
       expect(find.byType(VideoCard).evaluate().length, lessThan(20));
       expect(_position(tester).pixels, 24);
@@ -112,6 +117,41 @@ void main() {
     expect(find.byType(VideoCard).evaluate().length, lessThan(20));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'pagination updates a repeated video without rebuilding neighbors',
+    (tester) async {
+      _viewport(tester);
+      final repository = _Feed();
+      await tester.pumpWidget(_app(repository, HomeChannel.recommended));
+      await tester.pumpAndSettle();
+      final first = tester.widget<VideoCard>(find.byType(VideoCard).first);
+      final neighbor = tester.widget<VideoCard>(find.byType(VideoCard).at(1));
+      final rebuilt = <VideoId>[];
+      debugOnRebuildDirtyWidget = (element, builtOnce) {
+        if (element.widget case VideoCard(:final video)) rebuilt.add(video.id);
+      };
+      addTearDown(() => debugOnRebuildDirtyWidget = null);
+      final load = _container(tester)
+          .read(feedControllerProvider.notifier)
+          .loadMore();
+      await tester.pump();
+      final updated = _video(0, title: '更新后的推荐标题');
+      repository.next.complete(
+        PageResult(items: [updated, _video(500)], hasMore: false),
+      );
+      await load;
+      await tester.pumpAndSettle();
+      expect(find.text('更新后的推荐标题'), findsOneWidget);
+      expect(
+        tester.widget<VideoCard>(find.byType(VideoCard).first).video,
+        same(updated),
+      );
+      expect(tester.widget(find.byKey(neighbor.key!)), same(neighbor));
+      expect(rebuilt, [first.video.id]);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 void _viewport(WidgetTester tester) {
@@ -143,9 +183,9 @@ ScrollPosition _position(WidgetTester tester) => tester
     )
     .position;
 
-VideoSummary _video(int index) => VideoSummary(
+VideoSummary _video(int index, {String? title}) => VideoSummary(
   id: VideoId('BV1abc${index.toString().padLeft(6, '0')}'),
-  title: '视频 $index',
+  title: title ?? '视频 $index',
   coverUrl: '',
   author: 'UP $index',
   playCount: 32000,

@@ -1,25 +1,32 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../domain/app_failure.dart';
 import '../../../domain/video.dart';
 import '../../../shared/ui/app_notice.dart';
-import '../../../shared/ui/video_card.dart';
 import '../../video/domain/video_actions_repository.dart';
 import '../../../core/presentation/workspace_activity.dart';
 import '../../../shared/ui/paged_scroll_viewport.dart';
 import '../../../shared/ui/responsive_card_grid.dart';
 import '../../../shared/ui/state_view.dart';
 import '../../../shared/ui/retained_tab_view.dart';
-import '../../../shared/ui/video_grid.dart';
 import '../../../shared/ui/content_section_tabs.dart';
 import '../application/feed_controller.dart';
 import '../domain/home_channel.dart';
 import 'home_content.dart';
 import 'home_channel_swipe.dart';
 import 'popular_feed.dart';
+import 'feed_video_grid.dart';
+
+typedef _FeedContent = ({
+  HomeChannel channel,
+  bool selected,
+  AsyncValue<List<VideoSummary>> items,
+  String? categoryId,
+  bool hasMore,
+  bool loadingMore,
+  Object? pageError,
+});
 
 typedef _ChannelPageConfiguration = ({
   bool active,
@@ -184,11 +191,10 @@ final class _HomeChannelPage extends ConsumerStatefulWidget {
 final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
   final Map<HomeChannel, String> _sections = {};
   final Set<(HomeChannel, String)> _visitedSections = {};
-  (List<VideoSummary>, HomeChannel, Set<VideoId>, Set<VideoId>, Set<VideoId>)?
-  _gridVersion;
+  (List<VideoSummary>, HomeChannel)? _gridVersion;
   Widget? _grid;
 
-  Widget _videoItemsSliver(FeedState feed, HomeChannel channel) {
+  Widget _videoItemsSliver(_FeedContent feed, HomeChannel channel) {
     Widget status(Widget child) =>
         SliverToBoxAdapter(child: SizedBox(height: 300, child: child));
     if (feed.channel != channel || feed.items.asData == null) {
@@ -206,52 +212,19 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
       ),
       data: (items) {
         final controller = ref.read(feedControllerProvider.notifier);
-        final version = (
-          items,
-          channel,
-          feed.rejected,
-          feed.rejecting,
-          feed.uncertainRestorations,
-        );
+        final version = (items, channel);
         // Pagination flags belong to the footer. Keep the same grid widget
         // while its data/actions are unchanged so its visible rows stay built.
         final previous = _gridVersion;
         if (previous == null ||
             !identical(previous.$1, items) ||
-            previous.$2 != channel ||
-            !setEquals(previous.$3, feed.rejected) ||
-            !setEquals(previous.$4, feed.rejecting) ||
-            !setEquals(previous.$5, feed.uncertainRestorations)) {
+            previous.$2 != channel) {
           _gridVersion = version;
-          _grid = SliverVideoGrid(
+          _grid = FeedVideoGrid(
             items: items,
-            onOpen: (id) => context.go('/video/${id.value}'),
-            onOpenUser: (id) => context.go('/user/${id.value}'),
-            showRecommendationReason: channel == HomeChannel.recommended,
-            feedbackFor: channel == HomeChannel.recommended
-                ? (video) => feed.rejected.contains(video.id)
-                      ? VideoCardFeedback(
-                          busy: feed.rejecting.contains(video.id),
-                          onUndo: feed.uncertainRestorations.contains(video.id)
-                              ? null
-                              : () => _undoRecommendationFeedback(video.id),
-                        )
-                      : null
-                : null,
-            menuFor: channel == HomeChannel.recommended
-                ? (video) => VideoCardMenu(
-                    actions: const [
-                      VideoCardMenuAction.notInterested,
-                      VideoCardMenuAction.watchLater,
-                    ],
-                    busy: feed.rejecting.contains(video.id),
-                    onSelected: (action) {
-                      if (action == VideoCardMenuAction.notInterested) {
-                        _rejectRecommendation(video);
-                      }
-                    },
-                  )
-                : null,
+            channel: channel,
+            onReject: _rejectRecommendation,
+            onUndo: _undoRecommendationFeedback,
           );
         }
         return SliverMainAxisGroup(
@@ -403,12 +376,33 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
     final channel = widget.channel;
     final feed = channel.hasVideoFeed
         ? ref.watch(
-            feedControllerProvider.select(
-              (current) =>
-                  controller.stateForChannel(channel, current: current),
-            ),
+            feedControllerProvider.select((current) {
+              final state = controller.stateForChannel(
+                channel,
+                current: current,
+              );
+              // Feedback is observed by its mounted card. It does not change
+              // list membership, pagination or the viewport's geometry.
+              return (
+                channel: state.channel,
+                selected: current.channel == channel,
+                items: state.items,
+                categoryId: state.categoryId,
+                hasMore: state.hasMore,
+                loadingMore: state.loadingMore,
+                pageError: state.pageError,
+              );
+            }),
           )
-        : FeedState(channel: channel, items: const AsyncData([]));
+        : (
+            channel: channel,
+            selected: false,
+            items: const AsyncData<List<VideoSummary>>([]),
+            categoryId: null,
+            hasMore: false,
+            loadingMore: false,
+            pageError: null,
+          );
     final section = _sections[channel] ?? channel.sections.firstOrNull;
     final categories = switch (channel) {
       HomeChannel.categories => ref.watch(feedCategoriesProvider),
@@ -469,6 +463,7 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
                   active: widget.active && channel.hasVideoFeed,
                   canLoadMore:
                       widget.active &&
+                      feed.selected &&
                       feed.hasMore &&
                       !feed.loadingMore &&
                       feed.items.asData != null &&
