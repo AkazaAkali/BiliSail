@@ -216,3 +216,5 @@ primaryFocus，并通过目标 NSWindow 的 responder → engine → AppInputHos
 smoke 时，记录 keyWindow/view、active、responder 类型／所属关系、焦点来源和
 版本、host view/active/primaryFocus 及入口分发原因；不记录按键名称、输入文本、
 窗口标题、URL、账号或凭据。原生受控事件测试仍不是用户设备上的物理按键验收。
+
+- 原生烟测前置条件：CI 直接启动二进制会保持后台（924a63c 的脱敏轨迹为 active=0/key=0/view=null）。烟测先激活主窗口并核实原生焦点，再创建播放窗口；不会重新激活播放窗口来绕过首次焦点缺失。生产快照继续拒绝非活动应用。

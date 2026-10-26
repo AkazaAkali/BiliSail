@@ -26,6 +26,21 @@ Future<void> verifyMacOSPlaybackWindows(
       mainWindow.window.viewId == dispatcher.implicitView?.viewId) {
     throw StateError('macOS requires an explicit main window');
   }
+  // Direct binary launches on CI start in the background. Establish the
+  // user's foreground-main-window precondition before creating playback;
+  // never reactivate playback to hide its missing initial focus event.
+  stderr.writeln('BILISAIL_FOCUS_STAGE:foreground');
+  await mainWindow.service.activate();
+  final foregroundWait = Stopwatch()..start();
+  final nativeFocus = WindowInputFocus.instance;
+  do {
+    await nativeFocus.synchronizeNativeFocusIfSupported();
+    if (nativeFocus.viewId == mainWindow.window.viewId) break;
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  } while (foregroundWait.elapsed < const Duration(seconds: 2));
+  if (nativeFocus.viewId != mainWindow.window.viewId) {
+    throw StateError('Smoke requires a foreground main window');
+  }
   final baseline = dispatcher.views.length;
   final explicitViews = dispatcher.views.where(
     (view) => view.viewId != dispatcher.implicitView?.viewId,
