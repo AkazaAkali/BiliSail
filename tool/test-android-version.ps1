@@ -51,6 +51,7 @@ foreach ($invalidReport in @(
   $valid.Replace("'5502'", "'2'"),
   $valid.Replace("'0.5.5'", "'0.5.4'"),
   $valid.Replace("'dev.bilisail.bilisail'", "'another.app'"),
+  $valid.Replace("'dev.bilisail.bilisail'", "'dev.bilisail.bilisail.test'"),
   'not an APK manifest'
 )) { Assert-Rejected { ConvertFrom-AndroidApkBadging $invalidReport '0.5.5+2' } }
 Write-Output "Android version checks passed: $checks"

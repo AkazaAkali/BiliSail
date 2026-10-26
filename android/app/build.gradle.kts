@@ -6,6 +6,12 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// One persistent identity for local Debug/Profile/Release device validation.
+val isDevelopmentBuild = providers.gradleProperty("bilisailDevelopmentBuild").map {
+    require(it == "true" || it == "false") { "bilisailDevelopmentBuild must be true or false." }
+    it.toBoolean()
+}.getOrElse(false)
+
 // Keep these bounds and the formula aligned with tool/android-version.ps1.
 fun compactAndroidVersionCode(versionName: String, build: Int): Int {
     require(Regex("(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)").matches(versionName)) {
@@ -60,6 +66,9 @@ if (hasAnyReleaseSigning && !hasReleaseSigning) {
 if (usePreviewSigning && hasAnyReleaseSigning) {
     throw GradleException("Preview builds must not receive the Android release signing key.")
 }
+if (isDevelopmentBuild && hasAnyReleaseSigning) {
+    throw GradleException("Development builds must not receive the Android release signing key.")
+}
 
 android {
     namespace = "dev.bilisail.bilisail"
@@ -74,6 +83,8 @@ android {
     defaultConfig {
         // BiliSail application identity, shared with the MainActivity namespace.
         applicationId = "dev.bilisail.bilisail"
+        applicationIdSuffix = if (isDevelopmentBuild) ".test" else null
+        manifestPlaceholders["bilisailAppLabel"] = if (isDevelopmentBuild) "BiliSail 测试版" else "BiliSail"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24
@@ -96,7 +107,7 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName(if (usePreviewSigning) "debug" else "release")
+            signingConfig = signingConfigs.getByName(if (isDevelopmentBuild || usePreviewSigning) "debug" else "release")
         }
     }
 }
@@ -105,7 +116,7 @@ android {
 // switch to a new debug key when the fixed signing configuration is missing.
 tasks.matching { it.name == "preReleaseBuild" }.configureEach {
     doFirst {
-        if (!hasReleaseSigning && !usePreviewSigning) {
+        if (!isDevelopmentBuild && !hasReleaseSigning && !usePreviewSigning) {
             throw GradleException("Android release signing is required. Configure ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD.")
         }
     }

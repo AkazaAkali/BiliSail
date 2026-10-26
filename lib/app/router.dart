@@ -302,10 +302,7 @@ final class _WorkspacePage extends ConsumerWidget {
   }) => ProviderScope(
     key: ValueKey(section),
     child: Builder(
-      builder: (context) => CommandTargetScope<Object>(
-        scope: CommandScope.page,
-        active: WorkspaceActivity.isActive(context),
-        merge: const {ShortcutAction.refresh},
+      builder: (context) => _PageCommandTarget(
         commands: {
           if ((section == WorkspaceRootSection.feed &&
                   _channelFor(location).hasVideoFeed) ||
@@ -476,10 +473,7 @@ final class _WorkspacePage extends ConsumerWidget {
       ],
     ],
     child: Consumer(
-      builder: (context, ref, _) => CommandTargetScope<Object>(
-        scope: CommandScope.page,
-        active: WorkspaceActivity.isActive(context),
-        merge: const {ShortcutAction.refresh},
+      builder: (context, ref, _) => _PageCommandTarget(
         commands: {
           if ((signedIn && section == AccountContentTab.history) ||
               section == AccountContentTab.downloads)
@@ -595,10 +589,7 @@ final class _WorkspacePage extends ConsumerWidget {
           )
         : (false, null, null, 0);
     return Builder(
-      builder: (context) => CommandTargetScope<Object>(
-        scope: CommandScope.page,
-        active: WorkspaceActivity.isActive(context),
-        merge: const {ShortcutAction.refresh},
+      builder: (context) => _PageCommandTarget(
         commands: {
           if (!tab.isRoot &&
               !tab.isPgc &&
@@ -888,3 +879,19 @@ Widget _workspacePlayer(BuildContext context, Widget Function() build) =>
         key: ValueKey('workspace-preview-player'),
         color: Colors.black,
       );
+
+/// Visibility updates only the input registration, not the page factory.
+class _PageCommandTarget extends StatelessWidget {
+  const _PageCommandTarget({required this.commands, required this.child});
+  final Map<Object, InputCommand> commands;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => CommandTargetScope<Object>(
+    scope: CommandScope.page,
+    active: WorkspaceActivity.isActive(context),
+    merge: const {ShortcutAction.refresh},
+    commands: commands,
+    child: child,
+  );
+}

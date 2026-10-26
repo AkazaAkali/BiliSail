@@ -102,6 +102,53 @@ final class _ManualImageCompleter extends ImageStreamCompleter {
 
 void main() {
   final binding = _CountingImageBinding();
+  testWidgets('unchanged image configuration does not schedule viewport work', (
+    tester,
+  ) async {
+    final bytes = await tester.runAsync(_png);
+    if (bytes == null) throw StateError('Missing PNG');
+    final cache = AppImageCache(
+      ImageByteCache(
+        directory: () async => throw const FileSystemException('optional'),
+        loader: (_, _) async => bytes,
+      ),
+    );
+    late StateSetter update;
+    var label = 'first';
+    await tester.pumpWidget(
+      _app(
+        cache,
+        StatefulBuilder(
+          builder: (_, setState) {
+            update = setState;
+            return SingleChildScrollView(
+              child: AppNetworkImage(
+                url: 'https://i0.hdslb.com/unchanged.png',
+                width: 40,
+                height: 40,
+                semanticLabel: label,
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    await _until(
+      tester,
+      () => tester
+          .widgetList<RawImage>(find.byType(RawImage))
+          .any((image) => image.image != null),
+    );
+    await tester.pumpAndSettle();
+    binding.visibilityBatches = 0;
+    update(() => label = 'updated');
+    await tester.pumpAndSettle();
+    expect(binding.visibilityBatches, 0);
+    expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNotNull);
+    await tester.pumpWidget(const SizedBox());
+    await cache.close();
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('a failed visibility check reports its error without starving '
       'other images in the batch', (tester) async {
     final bytes = await tester.runAsync(_png);

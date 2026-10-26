@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/presentation/workspace_activity.dart';
 import '../../../shared/ui/retained_tab_view.dart';
+import '../../../shared/ui/retained_page_layout.dart';
 import '../domain/home_channel.dart';
 
 typedef HomeChannelPageBuilder = RetainedTabPageBuilder<HomeChannel>;
@@ -58,26 +59,31 @@ final class _HomeChannelSwipeState extends State<HomeChannelSwipe> {
                     group.first == selectedGroup.first &&
                     WorkspaceActivity.isVisible(context) &&
                     !WorkspaceActivity.isActive(context),
-                child: RetainedTabView<HomeChannel>(
-                  tabs: group,
-                  value: group.contains(previous) ? previous : group.first,
-                  progress:
+                child: RetainedPageLayout(
+                  visible:
                       group.first == selectedGroup.first &&
-                          sharedProgress != null
-                      ? sharedProgress
-                      : _progress.putIfAbsent(
-                          group.first,
-                          () => TabPagingProgress(0),
-                        ),
-                  onChanged: (channel) {
-                    if (group.first == selectedGroup.first &&
-                        WorkspaceActivity.isActive(context)) {
-                      widget.onChanged(channel);
-                    }
-                  },
-                  animateSelection: widget.animateSelection,
-                  pageBuilder: widget.pageBuilder,
-                  viewKey: const ValueKey('home-channel-swipe'),
+                      WorkspaceActivity.isVisible(context),
+                  child: RetainedTabView<HomeChannel>(
+                    tabs: group,
+                    value: group.contains(previous) ? previous : group.first,
+                    progress:
+                        group.first == selectedGroup.first &&
+                            sharedProgress != null
+                        ? sharedProgress
+                        : _progress.putIfAbsent(
+                            group.first,
+                            () => TabPagingProgress(0),
+                          ),
+                    onChanged: (channel) {
+                      if (group.first == selectedGroup.first &&
+                          WorkspaceActivity.isActive(context)) {
+                        widget.onChanged(channel);
+                      }
+                    },
+                    animateSelection: widget.animateSelection,
+                    pageBuilder: widget.pageBuilder,
+                    viewKey: const ValueKey('home-channel-swipe'),
+                  ),
                 ),
               ),
             ),

@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../core/presentation/workspace_activity.dart';
+import '../shared/ui/retained_page_layout.dart';
 
 enum WorkspaceRootSection {
   feed('/'),
@@ -84,7 +85,10 @@ class _WorkspaceRootPageState extends State<WorkspaceRootPage> {
             selected &&
             WorkspaceActivity.isVisible(context) &&
             !WorkspaceActivity.isActive(context),
-        child: PageStorage(bucket: storage, child: child),
+        child: RetainedPageLayout(
+          visible: selected && WorkspaceActivity.isVisible(context),
+          child: PageStorage(bucket: storage, child: child),
+        ),
       ),
     ),
   );

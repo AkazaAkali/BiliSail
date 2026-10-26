@@ -167,6 +167,10 @@
 | [flutter_secure_storage](https://pub.dev/packages/flutter_secure_storage) | 系统凭据存储选型与平台接入要求 |
 | [flutter_rust_bridge 平台说明](https://cjycode.com/flutter_rust_bridge/guides/cross-platform/overview) | Rust 扩展可行性，不作为提前引入的理由 |
 
+### Android 导航性能补充参考（2026-10-26）
+
+只读核对本地 PiliPlus 提交 `936072449e82e3d90c28c728c0087bf5136fa441` 的主导航、页面保留、推荐/动态/稍后再看、网格、图片及骨架实现，并对照 Android 官方 Navigation、ViewModel、Fragment 生命周期、RecyclerView 和 Compose 性能文档。仅借鉴状态/视图生命周期分开、页面头部归属和局部更新原则，独立修改本项目悬停订阅和重复裁剪；未复制 PiliPlus 的 GPLv3 源码或资源，未引入相邻运行时依赖。精确路径、依赖快照、采用边界与验证见[原生与 PiliPlus 导航对照](validation/android-navigation-reference-comparison-2026-10-26.md)。
+
 ## 6. 尚待实测或决定的事项
 
 2026-10-07 下载能力另只读查看 U 的 `Controls/Dialogs/DownloadDialog.xaml.cs`、`ViewModels/Download/DownloadDialogViewModel.cs`、`Services/DownloadService.cs`、`Services/BackgroundDownloadService.cs` 与 `Models/Download/*`，以及 K 的 `Services/Services.Media/Core/PlayerClient.cs`。仅借鉴端点、分轨、选集、队列和附属文件职责，独立编写 Dart/Flutter；不参考下载 XAML 样式、不新增源码/资源复制、不修改相邻仓库。采用范围和验证见 [下载方案](downloads.md)。

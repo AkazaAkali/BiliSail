@@ -210,73 +210,71 @@ final class _VideoCardState extends State<VideoCard> {
                       showWatchLaterButton: widget.showWatchLaterButton,
                       focused: _focused,
                       hovered: _hovered,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            if (video.coverUrl.isNotEmpty)
-                              AppCoverImage(
-                                url: video.coverUrl,
-                                fit: BoxFit.cover,
-                                excludeFromSemantics: true,
-                                errorBuilder: (_, _, _) =>
-                                    _coverFallback(context),
-                                frameBuilder: (_, child, frame, _) =>
-                                    frame != null
-                                    ? child
-                                    : _coverFallback(context),
-                              )
-                            else
-                              _coverFallback(context),
-                            Align(
-                              alignment: Alignment.bottomCenter,
-                              child: SizedBox(
-                                width: double.infinity,
-                                height: textScaler.scale(36) + 20,
-                                child: const DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                      colors: [
-                                        Colors.transparent,
-                                        Color(0xC4000000),
-                                      ],
-                                    ),
+                      // VideoCardCover clips the complete cover and overlays.
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (video.coverUrl.isNotEmpty)
+                            AppCoverImage(
+                              url: video.coverUrl,
+                              fit: BoxFit.cover,
+                              excludeFromSemantics: true,
+                              errorBuilder: (_, _, _) =>
+                                  _coverFallback(context),
+                              frameBuilder: (_, child, frame, _) =>
+                                  frame != null
+                                  ? child
+                                  : _coverFallback(context),
+                            )
+                          else
+                            _coverFallback(context),
+                          Align(
+                            alignment: Alignment.bottomCenter,
+                            child: SizedBox(
+                              width: double.infinity,
+                              height: textScaler.scale(36) + 20,
+                              child: const DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.transparent,
+                                      Color(0xC4000000),
+                                    ],
                                   ),
                                 ),
                               ),
                             ),
-                            Positioned(
-                              left: 7,
-                              right: 7,
-                              bottom: 7,
-                              child: Semantics(
-                                label:
-                                    '观看 $playLabel，'
-                                    '弹幕 $danmakuLabel，'
-                                    '时长 ${durationLabel(video.duration)}',
-                                excludeSemantics: true,
-                                child: _CoverMetadata(
-                                  video: video,
-                                  cardWidth: cardWidth,
-                                  playLabel: playLabel,
-                                  danmakuLabel: danmakuLabel,
-                                ),
+                          ),
+                          Positioned(
+                            left: 7,
+                            right: 7,
+                            bottom: 7,
+                            child: Semantics(
+                              label:
+                                  '观看 $playLabel，'
+                                  '弹幕 $danmakuLabel，'
+                                  '时长 ${durationLabel(video.duration)}',
+                              excludeSemantics: true,
+                              child: _CoverMetadata(
+                                video: video,
+                                cardWidth: cardWidth,
+                                playLabel: playLabel,
+                                danmakuLabel: danmakuLabel,
                               ),
                             ),
-                            if (progress != null)
-                              Align(
-                                alignment: Alignment.bottomLeft,
-                                child: LinearProgressIndicator(
-                                  value: progress.clamp(0.0, 1.0),
-                                  minHeight: 3,
-                                  backgroundColor: Colors.transparent,
-                                ),
+                          ),
+                          if (progress != null)
+                            Align(
+                              alignment: Alignment.bottomLeft,
+                              child: LinearProgressIndicator(
+                                value: progress.clamp(0.0, 1.0),
+                                minHeight: 3,
+                                backgroundColor: Colors.transparent,
                               ),
-                          ],
-                        ),
+                            ),
+                        ],
                       ),
                     ),
                   },

@@ -53,6 +53,8 @@
 | [单标签导航与顶部滚动](validation/single-page-navigation.md) | 单标签恢复、Android 默认值、播放与空间返回链及历史滚动验证 |
 | [首页子频道协议](validation/home-subtabs.md) | 各首页列表的端点、游标与前序接入记录 |
 | [窄屏一级导航动效](validation/primary-navigation-motion.md) | Android 底栏滑入/淡入、隐藏根分支构建复用与验证边界 |
+| [Android 窄屏底栏性能复查](validation/android-primary-switch-2026-10-26.md) | 保留列表约束、嵌套查询作用域、图片可见性与真机 Profile 对照 |
+| [Android 原生与 PiliPlus 导航对照](validation/android-navigation-reference-comparison-2026-10-26.md) | 状态保留与页面结构、悬停/裁剪优化、图片和骨架候选及后续优先级 |
 | [Android 预测式返回](validation/android-predictive-back.md) | 工作区系统手势预览、取消／确认、返回优先级和验证边界 |
 | [排行榜分区参数](validation/ranking-regions.md) | 官网配置动态目录、新分区 ID、刷新撤下处理与风控验证边界 |
 | [影视与直播内置播放](validation/content-playback.md) | 四频道内置入口、三类播放页、影视选集、直播线路与原生验证 |

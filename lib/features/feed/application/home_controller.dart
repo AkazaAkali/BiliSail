@@ -9,7 +9,13 @@ import 'home_repository_provider.dart';
 export 'home_repository_provider.dart';
 
 final homeControllerProvider = NotifierProvider.autoDispose
-    .family<HomeController, HomeState, HomeQuery>(HomeController.new);
+    .family<HomeController, HomeState, HomeQuery>(
+      HomeController.new,
+      // The workspace and each account-content list override this family.
+      // Declare scoping so nested overrides fork their family directory instead
+      // of redirecting sibling queries into the account list's container.
+      dependencies: const [],
+    );
 
 final class HomeState {
   const HomeState({

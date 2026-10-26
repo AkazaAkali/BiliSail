@@ -30,13 +30,26 @@ final class _ScrollAwareHoverRegionState extends State<ScrollAwareHoverRegion> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     Scrollable.maybeOf(context);
+    _active =
+        WorkspaceActivity.isActive(context) &&
+        TickerMode.valuesOf(context).enabled;
+    _syncScrollPositions();
+    _updateHover();
+  }
+
+  void _syncScrollPositions() {
     final positions = <ScrollPosition>{};
-    context.visitAncestorElements((element) {
-      if (element is StatefulElement && element.state is ScrollableState) {
-        positions.add((element.state as ScrollableState).position);
-      }
-      return true;
-    });
+    // Touch-only cards have no hover to suppress. Subscribe on actual pointer
+    // entry, preserving external mice/stylus hover on mobile without scanning
+    // every retained card's ancestors on primary navigation.
+    if (_active && _pointerInside) {
+      context.visitAncestorElements((element) {
+        if (element is StatefulElement && element.state is ScrollableState) {
+          positions.add((element.state as ScrollableState).position);
+        }
+        return true;
+      });
+    }
     for (final position in _positions.difference(positions)) {
       position.isScrollingNotifier.removeListener(_updateHover);
     }
@@ -46,10 +59,6 @@ final class _ScrollAwareHoverRegionState extends State<ScrollAwareHoverRegion> {
     _positions
       ..clear()
       ..addAll(positions);
-    _active =
-        WorkspaceActivity.isActive(context) &&
-        TickerMode.valuesOf(context).enabled;
-    _updateHover();
   }
 
   void _updateHover() {
@@ -78,7 +87,21 @@ final class _ScrollAwareHoverRegionState extends State<ScrollAwareHoverRegion> {
 
   void _setPointerInside(bool inside) {
     _pointerInside = inside;
+    _syncScrollPositions();
     _updateHover();
+  }
+
+  @override
+  void deactivate() {
+    _clearScrollPositions();
+    super.deactivate();
+  }
+
+  void _clearScrollPositions() {
+    for (final position in _positions) {
+      position.isScrollingNotifier.removeListener(_updateHover);
+    }
+    _positions.clear();
   }
 
   @override
@@ -90,9 +113,7 @@ final class _ScrollAwareHoverRegionState extends State<ScrollAwareHoverRegion> {
 
   @override
   void dispose() {
-    for (final position in _positions) {
-      position.isScrollingNotifier.removeListener(_updateHover);
-    }
+    _clearScrollPositions();
     super.dispose();
   }
 }

@@ -89,6 +89,26 @@ PR 不接收长期签名 Secrets，仅通过 `-AndroidPreviewSigning` 显式启�
 
 后续验证修正：远端 [CI 37578713971](https://github.com/CKopoer/BiliSail/actions/runs/37578713971/job/112654748403) 已生成 APK，但原先按人类可读摘要行解析证书的检查失败，未上传 Android 产物。改为读取标准 PEM 证书并自行计算指纹，新增格式变化、重复摘要行和非法证书覆盖；21 项签名边界检查与本机实际 APK 证书校验通过。修复后的远端 CI 结果尚待确认。
 
+## Android 本地开发测试别名（2026-10-26）
+
+连接设备的后续开发测试统一使用 `dev.bilisail.bilisail.test`，桌面名称为 **BiliSail 测试版**，可与正式包 `dev.bilisail.bilisail` 共存。账号、数据库和缓存由 Android 包身份隔离；不自动迁移正式包或历史 `.primaryswitch` 临时包的数据。执行约定同时写入 [AGENTS.md](../../AGENTS.md#android-本地开发测试包)。
+
+```powershell
+./tool/build-android-development.ps1 -Mode Release -Install -DeviceId <adb-device-id>
+```
+
+[开发构建入口](../../tool/build-android-development.ps1) 默认准备 Android arm64 mux，使用普通 `lib/main.dart`，开启 `bilisailDevelopmentBuild=true`，生成真正的 Release/AOT APK。Debug/Profile 也复用相同包名、显示名称和本机 debug keystore；开发 Release 仅供本地测试，不接收正式签名密钥。保留 `%USERPROFILE%/.android/debug.keystore`，脚本记录证书指纹，避免更换签名后丢失覆盖升级能力。
+
+该开关默认关闭，CI 和 Release 工作流继续调用原有 `tool/build-release.ps1`，不传开发别名参数；正式产物的 manifest 校验只接受 `dev.bilisail.bilisail`，拒绝 `.test` 包名。预览签名仍只改变签名，不开启开发别名。
+
+提交前补充实测：不传开发别名参数，使用 CI 的 PR 预览签名模式构建 arm64 Release，实际包名为 `dev.bilisail.bilisail`、名称为 `BiliSail`、versionCode 为 `12104`，签名校验通过且不可调试。关闭预览签名后，缺少正式密钥的 Release 仍在 `preReleaseBuild` 按原规则失败。CI/Release 工作流与正式打包脚本未修改；本次没有触发远端 CI，也没有将该正式身份验证包安装到设备。日志为 `build/validation/ci-identity-default-build.log` 和 `ci-identity-signing-guard.log`。
+
+输出固定为 `build/development/android-arm64/BiliSail-test-arm64-release.apk`，附带 SHA-256 和 JSON 元信息。打包使用 arm64 split，并检查实际包名、名称、版本、签名、ABI 和 AOT 内容；Release 不可调试。只用 `adb install -r` 安装，失败即停止，不自动卸载、清数据或强制降级。构建保留 Flutter 的默认 pub 阶段，以重新生成匹配模式的插件注册文件；不能使用 `--no-pub` 留下 dev-only 注册。
+
+[底栏性能基准](../../tool/test-android-primary-switch.ps1) 同样使用此身份。脚本先保留普通入口的开发 Release，再安装 Profile fixture；`flutter drive --keep-app-running` 防止驱动默认卸载应用，并在 `finally` 中覆盖恢复普通 Release 入口。临时 USB 常亮设置也在结束后还原。[身份检查](../../tool/test-android-development.ps1) 覆盖错误包名、名称、可调试 Release 等拒绝行为，并纳入根检查。
+
+本机本轮验证：Xiaomi 13（2211133C）安装并启动 `1.2.1+4` / versionCode `12104` 的开发 Release，包内只有 `arm64-v8a`，包含 `libapp.so`，无 debug kernel 和 `DEBUGGABLE` 标记。设备同时保留正式包和历史临时包。统一别名下的 Profile 基准完成 24 次切换，驱动保留应用，随后成功覆盖恢复普通 Release；测试版 UID、首次安装时间及私有数据目录 inode 均保持不变，USB 常亮恢复原值。结果见 `build/validation/primary-switch-development-alias.json`，流程日志见 `build/android-development-lifecycle-test.log`。根检查格式、分析与 3510 个离线测试通过；13 个 Windows symlink 用例因权限跳过，10 个 mux 原生用例因未设置 `BILI_MUX_LIBRARY` 跳过，不能算原生覆盖。最终身份检查 7 项与 PowerShell 语法检查通过。这里验证构建、共存、覆盖恢复和启动；不代替真实账号、原生播放及长期性能验收。
+
 ## macOS DMG 安装
 
 macOS 产物为 `BiliSail-<version>-macos-arm64.dmg`。脚本先使用 `ditto` 复制完整 `BiliSail.app`，调用 [macOS 发布验证](../../tool/macos-release-validation.ps1) 校验签名、最终权限，并启动这份待打包的 Release 应用验证首帧和跨进程 Keychain 读写／删除。通过后在镜像根目录加入指向 `/Applications` 的符号链接与 `THIRD_PARTY_NOTICES.md`，使用 `hdiutil create -srcfolder ... -fs HFS+ -format UDZO` 创建压缩只读镜像并执行 `hdiutil verify`；任一步失败均停止，不上传产物。CI 与 Release 共用此脚本，现有上传通配符同时覆盖 DMG、metadata 和 SHA-256 文件。

@@ -36,6 +36,7 @@ try {
   if ($runLint) {
     & (Join-Path $PSScriptRoot 'test-android-version.ps1')
     & (Join-Path $PSScriptRoot 'test-android-signing.ps1')
+    & (Join-Path $PSScriptRoot 'test-android-development.ps1')
     & (Join-Path $PSScriptRoot 'test-windows-installers.ps1')
     & (Join-Path $PSScriptRoot 'test-windows-msix-identity.ps1')
     & (Join-Path $PSScriptRoot 'test-macos-release-validation.ps1')

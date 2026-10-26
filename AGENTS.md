@@ -108,6 +108,18 @@
 - 新依赖先确认目标平台、维护接口、二进制依赖和许可；选择能满足具体需求的最小组合。
 - 生成器/schema 记录版本、命令和来源；提交项目需要的生成物，改源后重生成，不手修输出。
 
+## Android 本地开发测试包
+
+- 后续连接设备的本地开发测试统一使用独立包名 **`dev.bilisail.bilisail.test`**，桌面名称 **`BiliSail 测试版`**；Debug、Profile、Release 都使用这个身份。历史 `.primaryswitch` 临时包不再用于后续测试，不自动卸载或迁移它的数据。
+- 开发测试包可与正式包 `dev.bilisail.bilisail` 共存，私有账号、数据库和缓存按 Android 包隔离。除用户明确要求正式包安装/升级验收外，不将本地测试构建安装到正式包名，也不复制正式包凭据。
+- 构建入口为 `tool/build-android-development.ps1`，默认 **Release**，默认构建 Android arm64 mux；例如 `./tool/build-android-development.ps1 -Mode Release -Install -DeviceId <adb-device-id>`。Debug/Profile 仅在对应调试/采样需要时显式选择；普通入口固定 `lib/main.dart`。
+- 底层构建参数固定 `--android-project-arg=bilisailDevelopmentBuild=true`，统一添加 `.test` 和测试版名称。参数默认关闭；CI/正式打包不传该参数，仍沿用现有正式包名、名称和签名边界。开发 Release 是实际 Release/AOT 构建，使用本机开发签名，仅供本地测试，不作为正式发布包上传。
+- 此构建入口不能加 `--no-pub`：Flutter 3.47.6 会同时跳过原生插件注册文件重生成，Profile/Debug 与 Release 切换时可能留下 integration_test 等 dev-only 注册，导致 Release 编译失败。使用 Flutter 自身生成流程，不手改 GeneratedPluginRegistrant。
+- 三种模式沿用同一本机 Android debug keystore；本机默认位于 `%USERPROFILE%/.android/debug.keystore`。不得删除、重新生成或随意更换已有开发签名，否则无法保持覆盖升级和数据。脚本记录证书指纹；跨机器签名不同须先厘清已有签名，不能通过卸载绕过。
+- 安装前校验 APK 的实际包名、名称、版本和签名，Release 还须确认不可调试；覆盖安装使用 `adb install -r`。安装失败时保留原应用，不自动卸载、不执行 `pm clear`、不强制降级，不让 Flutter 的自动重装流程清除测试数据。
+- 集成测试也统一使用此别名，`flutter drive` 必须带 `--keep-app-running`，避免默认结束流程卸载应用。使用 fixture 入口前构建并保留当前普通入口的开发 Release APK；测试后在 `finally` 中覆盖恢复普通入口，保留已有数据。底栏基准使用 `tool/test-android-primary-switch.ps1`，不能把 fixture 包留作用户日常测试入口。
+- 测试 APK、SHA-256 和构建元信息保存在 `build/development/android-arm64/`；Release 固定文件名为 `BiliSail-test-arm64-release.apk`。临时屏幕常亮等设备设置必须记录原值并在结束后恢复。
+
 ## 检查与交付
 
 代码改动运行根检查脚本，覆盖根应用与四个包的格式、静态分析、离线测试及打包边界脚本：

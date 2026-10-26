@@ -147,6 +147,7 @@ final class AppNetworkImage extends StatefulWidget {
 
 final class _AppNetworkImageState extends State<AppNetworkImage> {
   final _positions = <ScrollPosition>{};
+  List<ScrollableState>? _scrollAncestors;
   StreamSubscription<void>? _capacitySubscription;
   AppImageCache? _waitingCache;
   bool _active = true;
@@ -160,6 +161,7 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
   int _attempt = 0;
   RenderBox? _visibilityBox;
   List<_ImageViewport>? _viewports;
+  Size? _viewportSize;
 
   @override
   void didChangeDependencies() {
@@ -170,23 +172,29 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
         WorkspaceActivity.isVisible(context);
     if (_active && !wasActive) _visibilityChecked = false;
     // Observe viewport changes without rebuilding the whole list on scroll.
-    MediaQuery.maybeSizeOf(context);
+    final viewportSize = MediaQuery.maybeSizeOf(context);
+    final resized = _viewportSize != viewportSize;
+    _viewportSize = viewportSize;
     Scrollable.maybeOf(context);
-    _invalidateVisibilityGeometry();
-    _syncScrollPositions();
+    final positionsChanged = _syncScrollPositions();
     if (!_active) {
       _visible = false;
       _stopWaiting();
       _source?.releaseDemand();
+      _imageVisibilityChecks.pending.remove(this);
+    } else if (!wasActive ||
+        resized ||
+        positionsChanged ||
+        !_visibilityChecked) {
+      _scheduleVisibilityCheck();
     }
-    _scheduleVisibilityCheck();
   }
 
   @override
   void didUpdateWidget(AppNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _invalidateVisibilityGeometry();
-    _syncScrollPositions();
+    // Configuration updates do not reparent the element. Scroll dependencies
+    // and activate/deactivate own ancestry changes; layout owns size changes.
     if (oldWidget.url != widget.url ||
         oldWidget.cacheWidth != widget.cacheWidth ||
         oldWidget.cacheHeight != widget.cacheHeight) {
@@ -195,20 +203,24 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
       _provider = null;
       _releaseSource();
       ++_attempt;
+      _scheduleVisibilityCheck();
     }
-    _scheduleVisibilityCheck();
+    if (oldWidget.width != widget.width || oldWidget.height != widget.height) {
+      _scheduleVisibilityCheck();
+    }
   }
 
-  void _syncScrollPositions() {
+  bool _syncScrollPositions() {
     final positions = <ScrollPosition>{};
     if (_active) {
-      context.visitAncestorElements((element) {
-        if (element is StatefulElement && element.state is ScrollableState) {
-          positions.add((element.state as ScrollableState).position);
-        }
-        return true;
-      });
+      final ancestors = _scrollAncestors ??= _findScrollAncestors();
+      for (final ancestor in ancestors) {
+        positions.add(ancestor.position);
+      }
     }
+    final changed =
+        positions.length != _positions.length ||
+        !_positions.containsAll(positions);
     for (final position in _positions.difference(positions)) {
       _imageScrollObservers[position]?.remove(this);
     }
@@ -220,6 +232,18 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
     _positions
       ..clear()
       ..addAll(positions);
+    return changed;
+  }
+
+  List<ScrollableState> _findScrollAncestors() {
+    final ancestors = <ScrollableState>[];
+    context.visitAncestorElements((element) {
+      if (element is StatefulElement && element.state is ScrollableState) {
+        ancestors.add(element.state as ScrollableState);
+      }
+      return true;
+    });
+    return ancestors;
   }
 
   void _onScrollChanged() {
@@ -306,7 +330,7 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
   }
 
   void _scheduleVisibilityCheck() {
-    if (mounted) _imageVisibilityChecks.schedule(this);
+    if (mounted && _active) _imageVisibilityChecks.schedule(this);
   }
 
   void _invalidateVisibilityGeometry() {
@@ -315,7 +339,8 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
   }
 
   void _onImageLayout() {
-    _invalidateVisibilityGeometry();
+    // Layout changes coordinates, not ancestry. Read fresh coordinates in the
+    // batch while retaining the viewport chain until dependencies/reparenting.
     _scheduleVisibilityCheck();
   }
 
@@ -509,6 +534,7 @@ final class _AppNetworkImageState extends State<AppNetworkImage> {
       _imageScrollObservers[position]?.remove(this);
     }
     _positions.clear();
+    _scrollAncestors = null;
     _invalidateVisibilityGeometry();
     super.deactivate();
   }
@@ -650,6 +676,7 @@ final class _CachedStreamImage extends StatefulWidget {
 
 final class _CachedStreamImageState extends State<_CachedStreamImage> {
   ImageStream? _stream;
+  ImageConfiguration? _configuration;
   ImageInfo? _info;
   int? _frame;
   bool _synchronous = false;
@@ -674,19 +701,29 @@ final class _CachedStreamImageState extends State<_CachedStreamImage> {
   @override
   void didUpdateWidget(_CachedStreamImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.provider, widget.provider)) _resolve();
+    if (!identical(oldWidget.provider, widget.provider)) {
+      _configuration = null;
+      _resolve();
+    } else if (oldWidget.image.width != widget.image.width ||
+        oldWidget.image.height != widget.image.height) {
+      _resolve();
+    }
   }
 
   void _resolve() {
     final image = widget.image;
-    final next = widget.provider.resolve(
-      createLocalImageConfiguration(
-        context,
-        size: image.width != null && image.height != null
-            ? Size(image.width!, image.height!)
-            : null,
-      ),
+    final configuration = createLocalImageConfiguration(
+      context,
+      size: image.width != null && image.height != null
+          ? Size(image.width!, image.height!)
+          : null,
     );
+    // TickerMode changes frequently on retained pages. A ready stream only
+    // needs to toggle its listener unless its actual image config changed.
+    final next = configuration == _configuration && _stream != null
+        ? _stream!
+        : widget.provider.resolve(configuration);
+    _configuration = configuration;
     if (_stream?.key != next.key) {
       _stopListening();
       _replaceInfo(null);

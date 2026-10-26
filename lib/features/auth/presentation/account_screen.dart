@@ -510,6 +510,18 @@ class _AccountTabContent extends StatefulWidget {
 class _AccountTabContentState extends State<_AccountTabContent> {
   final _scrollController = ScrollController();
   final _storage = PageStorageBucket();
+  late Widget _content = _buildContent();
+
+  Widget _buildContent() =>
+      Builder(builder: (context) => widget.builder(context, widget.tab));
+
+  @override
+  void didUpdateWidget(_AccountTabContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.builder != widget.builder || oldWidget.tab != widget.tab) {
+      _content = _buildContent();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -523,13 +535,7 @@ class _AccountTabContentState extends State<_AccountTabContent> {
           child: PrimaryScrollController(
             controller: _scrollController,
             automaticallyInheritForPlatforms: TargetPlatform.values.toSet(),
-            child: PageStorage(
-              bucket: _storage,
-              child: Builder(
-                // Rebuild configuration without caching old login/theme props.
-                builder: (context) => widget.builder(context, widget.tab),
-              ),
-            ),
+            child: PageStorage(bucket: _storage, child: _content),
           ),
         ),
       ),
