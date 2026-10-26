@@ -65,7 +65,10 @@ void main() {
       expect(first.disposed, isTrue);
       expect(harness.activations, 1);
       // The closing key's tail must not also navigate the browser.
-      expect(harness.router.routeInformationProvider.value.uri.path, '/user/42');
+      expect(
+        harness.router.routeInformationProvider.value.uri.path,
+        '/user/42',
+      );
 
       harness.router.go('/video/BV3234567890');
       await tester.pumpAndSettle();
@@ -74,7 +77,10 @@ void main() {
       await closeKey();
       expect(second.disposed, isTrue);
       expect(harness.activations, 2);
-      expect(harness.router.routeInformationProvider.value.uri.path, '/user/42');
+      expect(
+        harness.router.routeInformationProvider.value.uri.path,
+        '/user/42',
+      );
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
