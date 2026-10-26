@@ -166,10 +166,7 @@ void main() {
       await _waitFor(repository, DownloadStatus.completed);
       expect(videoRequests, requests);
       expect(repository.current.tasks.single.publicFiles.length, 2);
-      expect(publicStorage!.destinations, [
-        'downloads',
-        'downloads',
-      ]);
+      expect(publicStorage!.destinations, ['downloads', 'downloads']);
     },
   );
 

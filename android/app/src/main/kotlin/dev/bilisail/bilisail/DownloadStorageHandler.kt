@@ -120,7 +120,7 @@ internal class DownloadStorageHandler(private val activity: Activity, messenger:
         if (result != Activity.RESULT_OK || uri == null) { finishPicker(false); return true }
         try {
             val required = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            val flags = data.flags and required
+            val flags = (data?.flags ?: 0) and required
             if (flags != required || uri.scheme != "content" || !DocumentsContract.isTreeUri(uri)) {
                 throw SecurityException()
             }
@@ -259,6 +259,8 @@ internal class DownloadStorageHandler(private val activity: Activity, messenger:
             }
             record.getJSONObject("items").put(name, uri.toString())
             save(key, record)
+            // Reject stream-only providers before copying a large media file.
+            readable(uri).close()
             source.inputStream().use { input ->
                 (resolver.openOutputStream(uri, "w") ?: throw IOException("无法写入下载位置")).use { output ->
                     val buffer = ByteArray(256 * 1024)
