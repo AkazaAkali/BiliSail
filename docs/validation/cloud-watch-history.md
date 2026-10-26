@@ -34,3 +34,22 @@
 `tool/check.ps1 -SkipPub` 全量通过：根应用 895、API 包 281、播放器包 22、弹幕包 32 项，共 1230 项；四处格式检查与静态分析通过。检查日志为 `build/cloud-history-check.log`。本轮新增 API 协议测试 12 项、Repository 测试 6 项、控制器测试 8 项，并扩展原有两项历史页面测试；SQLite 续播与工作区导航既有回归通过。文档相对链接和差异检查通过。
 
 本轮没有读取真实账号历史，也没有提交历史上报。Windows/Android/macOS 实机界面与登录云端响应仍待验证；离线样本不能视作在线验收。没有修改原生播放或进行平台构建。
+
+## 删除与清空（2026-10-26）
+
+观看历史卡片沿用共享 `VideoCard` 的标题右侧三点菜单，提供“删除记录”。桌面悬停、键盘聚焦或菜单打开时显示，移动端常显；菜单点击不打开视频。历史项增加可空的 `deletionKey`，只由服务端根字段 `kid` 与 `history.business` 组成，不把 BVID、cid、episode ID 或详情 aid 当作删除标识。缺失或非法 kid 不影响读取，但删除时提示刷新；长十进制 ID 保留原字符串。
+
+顶部工具行右侧增加低强调的红色“清空历史”按钮，宽度足够时使用图标与文字，窄窗口或大字体时使用带 tooltip/语义标签的图标，触控区域至少 48×48 逻辑像素。断点按工具行可用宽度和实际 14px 字体缩放计算；独立历史页和“我的”内嵌历史均有入口。确认框可滚动，明确说明清空当前账号所有设备的全部云端历史，包括本页过滤掉的直播、专栏等记录，不可撤销。空的视频列表仍保留清空入口，因为账号可能存在其他类型历史。
+
+| 操作 | Host / method / path | Profile / 鉴权 / 签名 / 格式 | 字段与重试 |
+| --- | --- | --- | --- |
+| 删除历史 | `api.bilibili.com` POST `/x/v2/history/delete` | Web Cookie + 当前作用域 `bili_jct`/CSRF，form-urlencoded，JSON，无 WBI | `kid={history.business}_{根 kid}`、`jsonp=jsonp`、`csrf`；单次显式提交，无分页，不自动重试 |
+| 清空历史 | `api.bilibili.com` POST `/x/v2/history/clear` | 同上 | `jsonp=jsonp`、`csrf`；确认后单次提交，无分页，不自动重试 |
+
+只读重新核对[官网历史页](https://www.bilibili.com/account/history) 当前引用的[官方脚本 app_d0026f29.js](https://s1.hdslb.com/bfs/static/history-record/app_d0026f29.js)：`deleteHistory` 取 `item.history.business` 与根 `item.kid` 拼接，`cleanHistory` 发送清空表单，均携带 Cookie/CSRF。只参考协议与操作语义，Dart/Flutter 和脱敏 fixture 独立实现，未复制官网代码或资源，未增加依赖。
+
+控制器串行提交写操作，提交前取消在途分页并更新代次，写入期间阻止刷新/分页与重复写。只有确认成功才移除对应历史键的全部可见卡片或清空列表；删除后保留原分页游标，清空后重置分页。明确失败保留列表并允许用户重试；网络、超时、HTTP 或响应结构错误按结果不明处理，保留列表并提示手动刷新核对，刷新成功前禁用写操作与自动分页，不自动重放。关闭页面、账号 scope 或 session epoch 变化取消或丢弃旧写结果；确认框等待期间切账号也不能提交到新账号。提示仅在仍活动的页面显示。本地 SQLite 续播、数据库 schema 和历史上报均不变。
+
+新增/扩展离线测试覆盖官网删除键、PGC/长 ID/缺失 kid、Cookie/CSRF、单次提交、失败/取消/deadline/账号隔离，控制器成功/失败/不明结果、迟到分页、共享历史键、单飞和游标续接，以及各平台菜单、320–1280 宽度、两倍字体、嵌入页入口、清空确认/取消、失败提示和写入中禁用。预览位于 `build/validation/history-actions/`，使用纯假仓储；不代表真实账号写入或移动设备验收。
+
+本轮 `tool/check.ps1 -SkipPub` 全量通过：根应用 2945、API 478、播放器 83、弹幕 93、mux 5，共 3604 项；格式、静态分析和打包边界脚本通过。根应用 13 项符号链接测试因 Windows 权限不足跳过，mux 10 项原生测试因未设置 `BILI_MUX_LIBRARY` 跳过，不作为原生集成覆盖。日志为 `build/history-actions-check.log`。另用假仓储渲染并检查 360/1280 浅色与 800/320 深色页面及确认框（320 为两倍字体），Windows Debug 预览构建、启动、热重载成功，未检出运行时错误。首次调试构建与全量测试并行时遇到原生资产占用，结束测试后重试成功。关闭预览后，`flutter build windows --debug --no-pub` 普通 `lib/main.dart` 入口构建成功，恢复常规 Debug 产物；日志为 `build/validation/history-actions/windows-debug-build.log`。未读取或删除真实账号历史，未做 Windows Release、Android/iOS/macOS/Linux 设备构建或实机验收；预览入口仅位于忽略的 build 目录，不进入正式产品。

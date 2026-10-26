@@ -8,6 +8,7 @@ final class WatchHistoryEntry {
     required this.position,
     required this.watchedAt,
     this.episodeId,
+    this.deletionKey,
   });
 
   final VideoSummary video;
@@ -15,12 +16,26 @@ final class WatchHistoryEntry {
   final Duration position;
   final DateTime watchedAt;
   final String? episodeId;
+  // Server history identity: business + root kid, independent of BVID/cid.
+  final String? deletionKey;
   Uri get location => episodeId == null
       ? Uri(
           path: '/video/${video.id.value}',
           queryParameters: part.cid.isEmpty ? null : {'cid': part.cid},
         )
       : Uri(path: '/pgc/episode/$episodeId');
+}
+
+abstract interface class WatchHistoryMutations {
+  Future<void> deleteHistory(
+    String deletionKey, {
+    required RequestCancellation cancellation,
+  });
+  Future<void> clearHistory({required RequestCancellation cancellation});
+}
+
+final class HistoryWriteUncertain implements Exception {
+  const HistoryWriteUncertain();
 }
 
 abstract interface class LibraryRepository {

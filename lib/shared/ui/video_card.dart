@@ -39,7 +39,12 @@ String durationLabel(Duration duration) {
   return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
 }
 
-enum VideoCardMenuAction { notInterested, watchLater, removeWatchLater }
+enum VideoCardMenuAction {
+  notInterested,
+  watchLater,
+  removeWatchLater,
+  removeHistory,
+}
 
 final class VideoCardMenu {
   const VideoCardMenu({
@@ -418,7 +423,8 @@ final class _VideoCardState extends State<VideoCard> {
                           Icons.not_interested_outlined,
                         VideoCardMenuAction.watchLater =>
                           Icons.watch_later_outlined,
-                        VideoCardMenuAction.removeWatchLater =>
+                        VideoCardMenuAction.removeWatchLater ||
+                        VideoCardMenuAction.removeHistory =>
                           Icons.delete_outline,
                       }, size: 19),
                       const SizedBox(width: 10),
@@ -427,6 +433,7 @@ final class _VideoCardState extends State<VideoCard> {
                           VideoCardMenuAction.notInterested => '不感兴趣',
                           VideoCardMenuAction.watchLater => '稍后再看',
                           VideoCardMenuAction.removeWatchLater => '删除',
+                          VideoCardMenuAction.removeHistory => '删除记录',
                         }),
                       ),
                     ],

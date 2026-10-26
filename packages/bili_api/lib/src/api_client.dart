@@ -219,6 +219,8 @@ final class BiliApiClient {
       '/x/v3/fav/folder/edit',
       '/x/v2/history/toview/add',
       '/x/v2/history/toview/del',
+      '/x/v2/history/delete',
+      '/x/v2/history/clear',
       '/x/web-interface/feedback/dislike',
       '/x/web-interface/feedback/dislike/cancel',
       '/x/click-interface/web/heartbeat',

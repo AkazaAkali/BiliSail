@@ -17,10 +17,12 @@ final class ApiWatchHistoryEntry {
     this.authorMid,
     this.authorAvatarUrl,
     this.episodeId,
+    this.deletionKey,
   });
   final String bvid, title, author, cid, partTitle;
   final Uri? coverUrl, authorAvatarUrl;
   final String? authorMid, episodeId;
+  final String? deletionKey;
   final int page;
   final Duration duration, position;
   final DateTime watchedAt;
@@ -86,6 +88,7 @@ final class WatchHistoryClient {
       }
       final duration = Duration(seconds: seconds);
       final cid = _id(history['cid']) ?? '';
+      final kid = _id(item['kid']);
       items.add(
         ApiWatchHistoryEntry(
           bvid: bvid,
@@ -108,6 +111,7 @@ final class WatchHistoryClient {
             isUtc: true,
           ),
           episodeId: episodeId,
+          deletionKey: kid == null ? null : '${business}_$kid',
         ),
       );
     }
@@ -130,6 +134,22 @@ final class WatchHistoryClient {
       hasMore: hasMore,
       nextCursor: hasMore ? nextCursor : null,
     );
+  }
+
+  Future<void> delete(String deletionKey, {ApiRequestContext? context}) async {
+    if (!RegExp(r'^(archive|pgc)_[1-9][0-9]*$').hasMatch(deletionKey)) {
+      throw ArgumentError.value(deletionKey, 'deletionKey');
+    }
+    await api.submitForm('/x/v2/history/delete', 'watch_history_delete', {
+      'kid': deletionKey,
+      'jsonp': 'jsonp',
+    }, context: context);
+  }
+
+  Future<void> clear({ApiRequestContext? context}) async {
+    await api.submitForm('/x/v2/history/clear', 'watch_history_clear', {
+      'jsonp': 'jsonp',
+    }, context: context);
   }
 
   static final _decimal = RegExp(r'^(0|[1-9][0-9]*)$');

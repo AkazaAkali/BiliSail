@@ -1,15 +1,190 @@
+import 'dart:async';
+
+import 'package:bilisail/core/network/api_requests.dart';
+import 'package:bilisail/core/presentation/workspace_activity.dart';
+import 'package:bilisail/domain/app_failure.dart';
 import 'package:bilisail/domain/video.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/features/library/application/library_controller.dart';
 import 'package:bilisail/features/library/domain/library_repository.dart';
 import 'package:bilisail/features/library/presentation/history_screen.dart';
 import 'package:bilisail/shared/ui/video_card.dart';
+import 'package:bilisail/shared/ui/app_notice.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/gestures.dart';
 import 'package:go_router/go_router.dart';
 
 void main() {
+  for (final config in [
+    (width: 320.0, platform: TargetPlatform.android, scale: 2.0),
+    (width: 390.0, platform: TargetPlatform.iOS, scale: 1.0),
+    (width: 360.0, platform: TargetPlatform.windows, scale: 2.0),
+    (width: 600.0, platform: TargetPlatform.windows, scale: 1.0),
+    (width: 1280.0, platform: TargetPlatform.macOS, scale: 1.0),
+    (width: 960.0, platform: TargetPlatform.linux, scale: 1.0),
+  ]) {
+    testWidgets(
+      'history actions fit ${config.platform} at ${config.width} / ${config.scale}',
+      (tester) async {
+        tester.view.physicalSize = Size(config.width, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final repository = _HistoryRepository(_entries());
+        await _pump(
+          tester,
+          repository,
+          platform: config.platform,
+          scale: config.scale,
+          showHeading: config.width < 600,
+        );
+        final clear = find.byKey(const ValueKey('history-clear'));
+        final wide = config.width >= 600;
+        expect(
+          tester.widget(clear),
+          wide ? isA<TextButton>() : isA<IconButton>(),
+        );
+        expect(tester.getSize(clear).height, greaterThanOrEqualTo(48));
+        final menus = find.byKey(const ValueKey('video-card-title-menu'));
+        if (config.platform != TargetPlatform.android &&
+            config.platform != TargetPlatform.iOS) {
+          final mouse = await tester.createGesture(
+            kind: PointerDeviceKind.mouse,
+          );
+          addTearDown(mouse.removePointer);
+          await mouse.addPointer(location: Offset.zero);
+          await mouse.moveTo(tester.getCenter(find.byType(VideoCard).at(1)));
+          await tester.pumpAndSettle();
+        }
+        await tester.tap(menus.at(1));
+        await tester.pumpAndSettle();
+        expect(find.text('删除记录'), findsOneWidget);
+        await tester.tap(find.text('删除记录'));
+        await tester.pumpAndSettle();
+        expect(repository.deleted, ['pgc_102']);
+        expect(find.byType(VideoCard), findsOneWidget);
+        expect(
+          tester.widget<VideoCard>(find.byType(VideoCard)).publishTooltip,
+          '观看于 2026-10-05 00:00',
+        );
+        await tester.tap(clear);
+        await tester.pumpAndSettle();
+        expect(find.text('清空观看历史？'), findsOneWidget);
+        expect(repository.clears, 0);
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.text('取消'));
+        await tester.pumpAndSettle();
+        expect(repository.clears, 0);
+        await tester.tap(clear);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('确认清空'));
+        await tester.pumpAndSettle();
+        expect(repository.clears, 1);
+        expect(find.text('还没有云端观看记录'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  for (final clear in [false, true]) {
+    testWidgets(
+      '${clear ? 'clear' : 'delete'} failure retains cards and reports the error',
+      (tester) async {
+        final repository = _HistoryRepository(_entries())
+          ..failure = const AppFailure(AppFailureKind.permission, '操作被拒绝');
+        await _pump(tester, repository);
+        if (clear) {
+          await tester.tap(find.byKey(const ValueKey('history-clear')));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('确认清空'));
+        } else {
+          await tester.tap(
+            find.byKey(const ValueKey('video-card-title-menu')).first,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('删除记录'));
+        }
+        await tester.pumpAndSettle();
+        expect(find.byType(VideoCard), findsNWidgets(2));
+        expect(find.text('操作被拒绝'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  testWidgets('pending clear disables card menus and the clear button', (
+    tester,
+  ) async {
+    final repository = _HistoryRepository(_entries())
+      ..pending = Completer<void>();
+    await _pump(tester, repository);
+    await tester.tap(find.byKey(const ValueKey('history-clear')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('确认清空'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      tester
+          .widget<TextButton>(find.byKey(const ValueKey('history-clear')))
+          .onPressed,
+      isNull,
+    );
+    for (final menu in tester.widgetList<PopupMenuButton<VideoCardMenuAction>>(
+      find.byType(PopupMenuButton<VideoCardMenuAction>),
+    )) {
+      expect(menu.enabled, false);
+    }
+    repository.pending?.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('还没有云端观看记录'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  for (final change in ['scope', 'epoch', 'hidden']) {
+    testWidgets('clear confirmation cannot affect another $change', (
+      tester,
+    ) async {
+      final repository = _HistoryRepository(_entries());
+      var epoch = 0;
+      var active = true;
+      late StateSetter update;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            libraryRepositoryProvider.overrideWithValue(repository),
+            sessionEpochProvider.overrideWithValue(() => epoch),
+          ],
+          child: MaterialApp(
+            builder: AppNoticeHost.builder,
+            home: StatefulBuilder(
+              builder: (context, setState) {
+                update = setState;
+                return WorkspaceActivity(
+                  active: active,
+                  child: const Scaffold(body: HistoryScreen()),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('history-clear')));
+      await tester.pumpAndSettle();
+      if (change == 'scope') repository.accountScope = 'user:2';
+      if (change == 'epoch') epoch++;
+      if (change == 'hidden') update(() => active = false);
+      await tester.pump();
+      await tester.tap(find.text('确认清空'));
+      await tester.pumpAndSettle();
+      expect(repository.clears, 0);
+      expect(find.byType(VideoCard), findsNWidgets(2));
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
   for (final pgc in [false, true]) {
     testWidgets('history preserves each ${pgc ? 'episode' : 'part'} identity', (
       tester,
@@ -81,11 +256,85 @@ void main() {
   }
 }
 
-final class _HistoryRepository implements LibraryRepository {
+Future<void> _pump(
+  WidgetTester tester,
+  _HistoryRepository repository, {
+  TargetPlatform platform = TargetPlatform.android,
+  double scale = 1,
+  bool showHeading = true,
+}) async {
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [libraryRepositoryProvider.overrideWithValue(repository)],
+      child: MaterialApp(
+        theme: ThemeData(platform: platform),
+        builder: (context, child) => AppNoticeHost(
+          child: MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: TextScaler.linear(scale)),
+            child: child ?? const SizedBox(),
+          ),
+        ),
+        home: Scaffold(body: HistoryScreen(showHeading: showHeading)),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+List<WatchHistoryEntry> _entries() => [
+  for (var i = 1; i <= 2; i++)
+    WatchHistoryEntry(
+      video: const VideoSummary(
+        id: VideoId('BV1234567890'),
+        title: '历史记录菜单测试',
+        coverUrl: '',
+        author: '作者',
+        duration: Duration(seconds: 100),
+      ),
+      part: VideoPart(
+        cid: '$i',
+        page: i,
+        title: '第 $i 集',
+        duration: const Duration(seconds: 100),
+      ),
+      episodeId: i == 2 ? '102' : null,
+      deletionKey: i == 2 ? 'pgc_102' : 'archive_101',
+      position: const Duration(seconds: 20),
+      watchedAt: DateTime(2026, 10, 5),
+    ),
+];
+
+final class _HistoryRepository
+    implements LibraryRepository, WatchHistoryMutations {
   _HistoryRepository(this.entries);
   final List<WatchHistoryEntry> entries;
   @override
-  String get accountScope => 'user:1';
+  String accountScope = 'user:1';
+  final deleted = <String>[];
+  int clears = 0;
+  AppFailure? failure;
+  Completer<void>? pending;
+  Future<void> _result() async {
+    if (failure case final error?) throw error;
+    await pending?.future;
+  }
+
+  @override
+  Future<void> deleteHistory(
+    String deletionKey, {
+    required RequestCancellation cancellation,
+  }) async {
+    deleted.add(deletionKey);
+    await _result();
+  }
+
+  @override
+  Future<void> clearHistory({required RequestCancellation cancellation}) async {
+    clears++;
+    await _result();
+  }
+
   @override
   Future<WatchHistoryPage> loadHistory({
     String? cursor,

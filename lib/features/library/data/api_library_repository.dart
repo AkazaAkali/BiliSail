@@ -9,7 +9,8 @@ import '../../../domain/user.dart';
 import '../../../domain/video.dart';
 import '../domain/library_repository.dart';
 
-final class ApiLibraryRepository implements LibraryRepository {
+final class ApiLibraryRepository
+    implements LibraryRepository, WatchHistoryMutations {
   ApiLibraryRepository(
     this.client,
     this.requests, {
@@ -105,12 +106,62 @@ final class ApiLibraryRepository implements LibraryRepository {
               position: item.position,
               watchedAt: item.watchedAt,
               episodeId: item.episodeId,
+              deletionKey: item.deletionKey,
             );
           }),
         ),
         hasMore: page.hasMore,
         nextCursor: page.nextCursor,
       );
+    }, cancellation: cancellation);
+  }
+
+  @override
+  Future<void> deleteHistory(
+    String deletionKey, {
+    required RequestCancellation cancellation,
+  }) => _write(
+    (context) => client.delete(deletionKey, context: context),
+    cancellation,
+  );
+
+  @override
+  Future<void> clearHistory({required RequestCancellation cancellation}) =>
+      _write((context) => client.clear(context: context), cancellation);
+
+  Future<void> _write(
+    Future<void> Function(ApiRequestContext) operation,
+    RequestCancellation cancellation,
+  ) {
+    final scope = accountScope;
+    return requests.run((context) async {
+      void checkCurrent() {
+        if (cancellation.isCancelled ||
+            scope != accountScope ||
+            context.sessionEpoch != requests.sessionEpoch) {
+          throw const AppFailure(AppFailureKind.cancelled, '请求已取消');
+        }
+      }
+
+      checkCurrent();
+      if (!scope.startsWith('user:')) {
+        throw const AppFailure(AppFailureKind.authentication, '请先登录');
+      }
+      try {
+        await operation(context);
+      } on ApiFailure catch (failure) {
+        checkCurrent();
+        if ({
+          ApiFailureCategory.network,
+          ApiFailureCategory.timeout,
+          ApiFailureCategory.http,
+          ApiFailureCategory.protocol,
+        }.contains(failure.category)) {
+          throw const HistoryWriteUncertain();
+        }
+        rethrow;
+      }
+      checkCurrent();
     }, cancellation: cancellation);
   }
 }

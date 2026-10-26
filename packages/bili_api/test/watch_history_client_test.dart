@@ -8,6 +8,7 @@ Map<String, Object?> entry({
   Object progress = 30,
   Object timestamp = 1791324000,
 }) => {
+  'kid': '9007199254740997',
   'title': '云端历史',
   'cover': '//i0.hdslb.com/cover.jpg',
   'author_name': '作者',
@@ -58,6 +59,7 @@ void main() {
       });
       final item = page.items.single;
       expect(item.cid, '9007199254740995');
+      expect(item.deletionKey, 'archive_9007199254740997');
       expect(item.authorMid, '9007199254740993');
       expect(item.page, 2);
       expect(item.position, const Duration(seconds: 30));
@@ -114,8 +116,23 @@ void main() {
       'cursor': {'max': 0, 'view_at': 0, 'business': ''},
     }).load();
     expect(page.items.single.episodeId, '9007199254740993');
+    expect(page.items.single.deletionKey, 'pgc_9007199254740997');
     expect(page.items.single.cid, '');
   });
+
+  for (final kid in [null, 0, 1.5, 'bad']) {
+    test(
+      'invalid history kid $kid keeps reading without a deletion target',
+      () async {
+        final raw = entry()..['kid'] = kid;
+        final page = await client({
+          'list': [raw],
+          'cursor': {'max': 0, 'view_at': 0, 'business': ''},
+        }).load();
+        expect(page.items.single.deletionKey, isNull);
+      },
+    );
+  }
 
   test(
     'unsupported business still advances the mixed history cursor',

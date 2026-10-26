@@ -9,27 +9,32 @@ import 'package:bilisail/features/library/domain/library_repository.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-WatchHistoryEntry entry(String cid, {int day = 5, String? episodeId}) =>
-    WatchHistoryEntry(
-      video: const VideoSummary(
-        id: VideoId('BV1234567890'),
-        title: '云端视频',
-        coverUrl: '',
-        author: '作者',
-        duration: Duration(seconds: 100),
-      ),
-      part: VideoPart(
-        cid: cid,
-        page: 1,
-        title: '',
-        duration: const Duration(seconds: 100),
-      ),
-      position: const Duration(seconds: 20),
-      watchedAt: DateTime(2026, 10, day),
-      episodeId: episodeId,
-    );
+WatchHistoryEntry entry(
+  String cid, {
+  int day = 5,
+  String? episodeId,
+  String? deletionKey,
+}) => WatchHistoryEntry(
+  video: const VideoSummary(
+    id: VideoId('BV1234567890'),
+    title: '云端视频',
+    coverUrl: '',
+    author: '作者',
+    duration: Duration(seconds: 100),
+  ),
+  part: VideoPart(
+    cid: cid,
+    page: 1,
+    title: '',
+    duration: const Duration(seconds: 100),
+  ),
+  position: const Duration(seconds: 20),
+  watchedAt: DateTime(2026, 10, day),
+  episodeId: episodeId,
+  deletionKey: deletionKey ?? 'archive_$cid',
+);
 
-final class _Repository implements LibraryRepository {
+final class _Repository implements LibraryRepository, WatchHistoryMutations {
   @override
   String accountScope = 'user:1';
   final List<
@@ -40,6 +45,22 @@ final class _Repository implements LibraryRepository {
     })
   >
   calls = [];
+  final writes =
+      <({String? key, RequestCancellation token, Completer<void> result})>[];
+  @override
+  Future<void> deleteHistory(
+    String deletionKey, {
+    required RequestCancellation cancellation,
+  }) => _write(deletionKey, cancellation);
+  @override
+  Future<void> clearHistory({required RequestCancellation cancellation}) =>
+      _write(null, cancellation);
+  Future<void> _write(String? key, RequestCancellation token) {
+    final result = Completer<void>();
+    writes.add((key: key, token: token, result: result));
+    return result.future;
+  }
+
   @override
   Future<WatchHistoryPage> loadHistory({
     String? cursor,
@@ -69,6 +90,158 @@ void main() {
     container.listen(historyProvider, (_, _) {});
   });
   tearDown(() => container.dispose());
+
+  Future<void> loaded() async {
+    await settle();
+    repository.calls[0].result.complete(
+      WatchHistoryPage(
+        [entry('1'), entry('2'), entry('3', deletionKey: 'archive_2')],
+        hasMore: true,
+        nextCursor: 'first',
+      ),
+    );
+    await settle();
+  }
+
+  for (final clear in [false, true]) {
+    Future<bool> write() {
+      final controller = container.read(historyProvider.notifier);
+      return clear
+          ? controller.clear()
+          : controller.delete(
+              container.read(historyProvider).items.requireValue[1],
+            );
+    }
+
+    test(
+      '${clear ? 'clear' : 'delete'} is single flight and discards a late page',
+      () async {
+        await loaded();
+        final controller = container.read(historyProvider.notifier);
+        final more = controller.loadMore();
+        final pending = write();
+        expect(repository.calls[1].cancellation.isCancelled, true);
+        expect(container.read(historyProvider).writeBusy, true);
+        expect(await write(), false);
+        await controller.refresh();
+        await controller.loadMore();
+        expect(repository.calls, hasLength(2));
+        expect(repository.writes.single.key, clear ? null : 'archive_2');
+        repository.writes.single.result.complete();
+        expect(await pending, true);
+        repository.calls[1].result.complete(
+          WatchHistoryPage([entry('2')], hasMore: false),
+        );
+        await more;
+        expect(
+          container
+              .read(historyProvider)
+              .items
+              .requireValue
+              .map((e) => e.part.cid),
+          clear ? isEmpty : ['1'],
+        );
+        expect(container.read(historyProvider).writeBusy, false);
+        expect(container.read(historyProvider).hasMore, !clear);
+        if (!clear) {
+          final next = controller.loadMore();
+          expect(repository.calls.last.cursor, 'first');
+          repository.calls.last.result.complete(
+            WatchHistoryPage([entry('4')], hasMore: false),
+          );
+          await next;
+          expect(
+            container
+                .read(historyProvider)
+                .items
+                .requireValue
+                .map((e) => e.part.cid),
+            ['1', '4'],
+          );
+        }
+      },
+    );
+    test(
+      '${clear ? 'clear' : 'delete'} explicit failure keeps cards and allows retry',
+      () async {
+        await loaded();
+        final pending = write();
+        final assertion = expectLater(pending, throwsA(isA<AppFailure>()));
+        repository.writes.single.result.completeError(
+          const AppFailure(AppFailureKind.permission, '拒绝操作'),
+        );
+        await assertion;
+        expect(
+          container.read(historyProvider).items.requireValue,
+          hasLength(3),
+        );
+        expect(container.read(historyProvider).writeBusy, false);
+        final retry = write();
+        repository.writes.last.result.complete();
+        expect(await retry, true);
+      },
+    );
+    test(
+      '${clear ? 'clear' : 'delete'} uncertain outcome requires a successful refresh',
+      () async {
+        await loaded();
+        final pending = write();
+        final assertion = expectLater(
+          pending,
+          throwsA(isA<HistoryWriteUncertain>()),
+        );
+        repository.writes.single.result.completeError(
+          const HistoryWriteUncertain(),
+        );
+        await assertion;
+        expect(
+          container.read(historyProvider).items.requireValue,
+          hasLength(3),
+        );
+        await expectLater(write(), throwsA(isA<HistoryWriteUncertain>()));
+        expect(repository.writes, hasLength(1));
+        final controller = container.read(historyProvider.notifier);
+        final failed = controller.refresh();
+        repository.calls.last.result.completeError(
+          const AppFailure(AppFailureKind.network, '网络错误'),
+        );
+        await failed;
+        expect(container.read(historyProvider).writeUncertain, true);
+        final refreshed = controller.refresh();
+        repository.calls.last.result.complete(
+          WatchHistoryPage([entry('1'), entry('2')], hasMore: false),
+        );
+        await refreshed;
+        expect(container.read(historyProvider).writeUncertain, false);
+        final retry = write();
+        repository.writes.last.result.complete();
+        expect(await retry, true);
+      },
+    );
+    for (final change in ['scope', 'epoch', 'dispose']) {
+      test(
+        '${clear ? 'clear' : 'delete'} ignores completion after $change',
+        () async {
+          await loaded();
+          final pending = write();
+          if (change == 'scope') repository.accountScope = 'user:2';
+          if (change == 'epoch') epoch++;
+          if (change == 'dispose') {
+            container.invalidate(historyProvider);
+            expect(repository.writes.single.token.isCancelled, true);
+          }
+          repository.writes.single.result.complete();
+          expect(await pending, false);
+          if (change != 'dispose') {
+            expect(
+              container.read(historyProvider).items.requireValue,
+              hasLength(3),
+            );
+          }
+        },
+      );
+    }
+  }
 
   test('pagination preserves parts/episodes, deduplicates overlap and stops at the end', () async {
     await settle();

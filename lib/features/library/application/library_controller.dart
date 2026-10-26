@@ -22,10 +22,22 @@ final class HistoryState {
     this.loadingMore = false,
     this.pageError,
     this.limitReached = false,
+    this.writeBusy = false,
+    this.writeUncertain = false,
   });
   final AsyncValue<List<WatchHistoryEntry>> items;
   final bool hasMore, loadingMore, limitReached;
   final Object? pageError;
+  final bool writeBusy, writeUncertain;
+
+  HistoryState withWrite({required bool busy, bool? uncertain}) => HistoryState(
+    items: items,
+    hasMore: hasMore,
+    pageError: pageError,
+    limitReached: limitReached,
+    writeBusy: busy,
+    writeUncertain: uncertain ?? writeUncertain,
+  );
 }
 
 final class HistoryController extends Notifier<HistoryState> {
@@ -98,7 +110,8 @@ final class HistoryController extends Notifier<HistoryState> {
   }
 
   Future<void> refresh() async {
-    if (!ref.mounted) return;
+    if (!ref.mounted || state.writeBusy) return;
+    final uncertain = state.writeUncertain;
     final generation = ++_generation;
     _cancellation?.cancel();
     final cancellation = RequestCancellation();
@@ -108,7 +121,7 @@ final class HistoryController extends Notifier<HistoryState> {
     _emptyPages = 0;
     _scope = ref.read(libraryRepositoryProvider).accountScope;
     _epoch = ref.read(sessionEpochProvider)();
-    state = const HistoryState();
+    state = HistoryState(writeUncertain: uncertain);
     try {
       final page = await ref
           .read(libraryRepositoryProvider)
@@ -121,7 +134,10 @@ final class HistoryController extends Notifier<HistoryState> {
           error is AppFailure && error.kind == AppFailureKind.cancelled) {
         return;
       }
-      state = HistoryState(items: AsyncError(error, stack));
+      state = HistoryState(
+        items: AsyncError(error, stack),
+        writeUncertain: uncertain,
+      );
     }
   }
 
@@ -134,6 +150,7 @@ final class HistoryController extends Notifier<HistoryState> {
         state.loadingMore) {
       return;
     }
+    if (state.writeBusy || state.writeUncertain) return;
     final generation = _generation;
     if (!_current(generation, cancellation)) return;
     _emptyPages = state.pageError == null ? _emptyPages : 0;
@@ -159,6 +176,78 @@ final class HistoryController extends Notifier<HistoryState> {
         hasMore: true,
         pageError: error,
       );
+    }
+  }
+
+  Future<bool> delete(WatchHistoryEntry entry) async {
+    final key = entry.deletionKey;
+    if (key == null || !RegExp(r'^(archive|pgc)_[1-9][0-9]*$').hasMatch(key)) {
+      throw const AppFailure(AppFailureKind.protocol, '该记录缺少历史标识，请刷新后重试');
+    }
+    if (!(state.items.asData?.value.contains(entry) ?? false)) return false;
+    return _write(key);
+  }
+
+  Future<bool> clear() => _write(null);
+
+  Future<bool> _write(String? deletionKey) async {
+    if (!ref.mounted || state.writeBusy || state.items.asData == null) {
+      return false;
+    }
+    if (state.writeUncertain) throw const HistoryWriteUncertain();
+    final repository = ref.read(libraryRepositoryProvider);
+    if (repository is! WatchHistoryMutations) {
+      throw const AppFailure(AppFailureKind.protocol, '历史操作暂不可用');
+    }
+    final previous = _cancellation;
+    if (previous == null || !_current(_generation, previous)) return false;
+    // Invalidate reads before writing: a late page must not restore a deletion.
+    final generation = ++_generation;
+    previous.cancel();
+    final cancellation = RequestCancellation();
+    _cancellation = cancellation;
+    state = state.withWrite(busy: true);
+    try {
+      final mutations = repository as WatchHistoryMutations;
+      if (deletionKey == null) {
+        await mutations.clearHistory(cancellation: cancellation);
+      } else {
+        await mutations.deleteHistory(deletionKey, cancellation: cancellation);
+      }
+      if (!_current(generation, cancellation)) return false;
+      if (deletionKey == null) {
+        _cursor = null;
+        _seenCursors.clear();
+        _emptyPages = 0;
+        state = const HistoryState(items: AsyncData([]));
+      } else {
+        final items = state.items.requireValue;
+        state = HistoryState(
+          items: AsyncData(
+            List.unmodifiable(
+              items.where((entry) => entry.deletionKey != deletionKey),
+            ),
+          ),
+          hasMore: state.hasMore,
+          pageError: state.pageError,
+          limitReached: state.limitReached,
+        );
+      }
+      return true;
+    } on HistoryWriteUncertain {
+      if (!_current(generation, cancellation)) return false;
+      state = state.withWrite(busy: false, uncertain: true);
+      rethrow;
+    } on AppFailure catch (failure) {
+      if (!_current(generation, cancellation) ||
+          failure.kind == AppFailureKind.cancelled) {
+        return false;
+      }
+      rethrow;
+    } finally {
+      if (_current(generation, cancellation) && state.writeBusy) {
+        state = state.withWrite(busy: false);
+      }
     }
   }
 }

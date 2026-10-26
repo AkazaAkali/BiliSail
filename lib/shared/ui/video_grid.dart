@@ -21,6 +21,7 @@ final class VideoGrid extends StatelessWidget {
   }) : assert(onOpen != null),
        _onOpenIndex = null,
        progressAt = null,
+       menuAt = null,
        publishTextAt = null,
        publishTooltipAt = null;
 
@@ -38,6 +39,7 @@ final class VideoGrid extends StatelessWidget {
     this.highlightQuery = '',
     this.menuFor,
     this.feedbackFor,
+    this.menuAt,
   }) : onOpen = null,
        progressFor = null,
        _onOpenIndex = onOpen;
@@ -54,6 +56,7 @@ final class VideoGrid extends StatelessWidget {
   final bool showRecommendationReason;
   final String highlightQuery;
   final VideoCardMenu? Function(VideoSummary)? menuFor;
+  final VideoCardMenu? Function(int index)? menuAt;
   final VideoCardFeedback? Function(VideoSummary)? feedbackFor;
 
   @override
@@ -76,7 +79,7 @@ final class VideoGrid extends StatelessWidget {
     highlightQuery: highlightQuery,
     publishText: publishTextAt?.call(index) ?? '',
     publishTooltip: publishTooltipAt?.call(index),
-    menu: menuFor?.call(items[index]),
+    menu: menuAt?.call(index) ?? menuFor?.call(items[index]),
     feedback: feedbackFor?.call(items[index]),
     progress: progressAt?.call(index) ?? progressFor?.call(items[index].id),
   );
@@ -104,6 +107,7 @@ final class SliverVideoGrid extends VideoGrid {
     super.progressAt,
     super.publishTextAt,
     super.publishTooltipAt,
+    super.menuAt,
     super.onOpenUser,
     super.showUpBadge,
     super.showRecommendationReason,

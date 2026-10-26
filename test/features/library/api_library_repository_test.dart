@@ -7,10 +7,12 @@ import 'package:bilisail/core/network/api_requests.dart';
 import 'package:bilisail/domain/app_failure.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/features/library/data/api_library_repository.dart';
+import 'package:bilisail/features/library/domain/library_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Map<String, Object?> history(String bvid, {int page = 1, int progress = 20}) =>
     {
+      'kid': '9007199254740997',
       'title': '云端 $bvid',
       'cover': '',
       'author_name': '云端作者',
@@ -47,10 +49,28 @@ Map<String, Object?> historyData(List<Object?> list) => {
   'cursor': {'max': 0, 'view_at': 0, 'business': ''},
 };
 
-final class _Transport implements ApiTransport {
+final class _Transport implements ApiTransport, ApiFormTransport {
   _Transport(this.handler);
   final FutureOr<Map<String, Object?>> Function(Uri) handler;
   final List<Uri> requests = [];
+  final List<Uri> posts = [];
+  @override
+  Future<ApiHttpResponse> postForm(
+    Uri uri, {
+    required Map<String, String> fields,
+    required Map<String, String> headers,
+    required Duration timeout,
+    ApiCancellation? cancellation,
+  }) async {
+    posts.add(uri);
+    final data = await handler(uri);
+    return ApiHttpResponse(
+      200,
+      Uint8List.fromList(utf8.encode(jsonEncode(data))),
+      {},
+    );
+  }
+
   @override
   Future<ApiHttpResponse> get(
     Uri uri, {
@@ -69,6 +89,76 @@ final class _Transport implements ApiTransport {
 }
 
 void main() {
+  for (final clear in [false, true]) {
+    for (final change in [
+      'none',
+      'scope',
+      'epoch',
+      'cancel',
+      'guest',
+      'uncertain',
+      'denied',
+    ]) {
+      test('${clear ? 'clear' : 'delete'} write handles $change', () async {
+        final gate = Completer<Map<String, Object?>>();
+        final requests = ApiRequests();
+        var scope = change == 'guest' ? 'guest' : 'user:1';
+        final token = RequestCancellation();
+        final transport = _Transport((_) => gate.future);
+        final api = BiliApiClient(
+          transport: transport,
+          sessionProvider: requests,
+          cookieJar: ApiCookieJar()
+            ..receive(Uri.https('api.bilibili.com', '/'), [
+              'SESSDATA=fixture; Path=/; Secure',
+              'bili_jct=fixture-csrf; Path=/; Secure',
+            ]),
+        );
+        addTearDown(api.close);
+        final repository = ApiLibraryRepository(
+          WatchHistoryClient(api),
+          requests,
+          accountScope: () => scope,
+        );
+        final pending = clear
+            ? repository.clearHistory(cancellation: token)
+            : repository.deleteHistory(
+                'archive_9007199254740997',
+                cancellation: token,
+              );
+        final assertion = change == 'none'
+            ? expectLater(pending, completes)
+            : expectLater(
+                pending,
+                throwsA(
+                  change == 'uncertain'
+                      ? isA<HistoryWriteUncertain>()
+                      : isA<AppFailure>().having(
+                          (e) => e.kind,
+                          'kind',
+                          switch (change) {
+                            'guest' => AppFailureKind.authentication,
+                            'denied' => AppFailureKind.permission,
+                            _ => AppFailureKind.cancelled,
+                          },
+                        ),
+                ),
+              );
+        if (change == 'scope') scope = 'user:2';
+        if (change == 'epoch') requests.advanceSession();
+        if (change == 'cancel') token.cancel();
+        if (change == 'uncertain') {
+          gate.completeError(
+            const ApiFailure(ApiFailureCategory.network, 'fixture'),
+          );
+        } else {
+          gate.complete({'code': change == 'denied' ? -403 : 0, 'data': null});
+        }
+        await assertion;
+        expect(transport.posts, hasLength(change == 'guest' ? 0 : 1));
+      });
+    }
+  }
   test('reads cloud data, enriches real counts once per BVID, retains watch snapshot', () async {
     final transport = _Transport(
       (uri) => {
@@ -98,6 +188,7 @@ void main() {
     );
     final entry = page.items.first;
     expect(entry.video.title, '云端 BV1234567890');
+    expect(entry.deletionKey, 'archive_9007199254740997');
     expect(entry.video.playCount, 12345);
     expect(entry.video.danmakuCount, 0);
     expect(entry.video.authorId?.value, '123');
