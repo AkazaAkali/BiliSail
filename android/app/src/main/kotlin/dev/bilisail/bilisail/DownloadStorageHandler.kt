@@ -162,7 +162,15 @@ internal class DownloadStorageHandler(private val activity: Activity, messenger:
         if (resolver.persistedUriPermissions.none { it.uri == tree && it.isReadPermission && (!write || it.isWritePermission) }) {
             throw SecurityException()
         }
-        return DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        val document = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        try {
+            resolver.query(document, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID), null, null, null)?.use {
+                if (!it.moveToFirst()) throw IOException("保存目录或存储设备不可用，请连接后重试")
+            } ?: throw IOException("保存目录或存储设备不可用，请连接后重试")
+        } catch (_: java.io.FileNotFoundException) {
+            throw IOException("保存目录或存储设备不可用，请连接后重试")
+        }
+        return document
     }
 
     private fun checkBoundary(record: JSONObject, uri: Uri) {
@@ -298,7 +306,15 @@ internal class DownloadStorageHandler(private val activity: Activity, messenger:
                     if (resolver.delete(uri, null, null) != 1) throw IOException("删除下载文件失败")
                 }
                 else if (!DocumentsContract.deleteDocument(resolver, uri)) throw IOException("删除下载文件失败")
-            } catch (_: java.io.FileNotFoundException) { /* Already removed by the user. */ }
+            } catch (_: java.io.FileNotFoundException) {
+                // An unavailable volume is not evidence that the user deleted a
+                // child. Retain the journal and task until the tree is readable.
+                if (record.getString("destination") != "downloads") {
+                    root(record.getString("destination"))
+                } else if (Environment.getExternalStorageState() != Environment.MEDIA_MOUNTED) {
+                    throw IOException("下载存储设备不可用，请连接后重试")
+                }
+            }
             record.getJSONObject("items").remove(name)
             save(key, record)
         }
