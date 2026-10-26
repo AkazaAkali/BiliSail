@@ -61,6 +61,7 @@ final class AppSettings {
     this.showCollapsedProgress = true,
     this.highEnergyProgressEnabled = false,
     this.playerControlsMode = PlayerControlsMode.click,
+    this.fullscreenSwipeControls = true,
     this.preferredQuality = 80,
     this.preferredLiveQuality = 10000,
     this.preferredVideoCodec = VideoCodecPreference.h264,
@@ -105,6 +106,7 @@ final class AppSettings {
     this.danmakuArea = 0.75,
     this.danmakuFontScale = 1.0,
     this.playerControlsMode = PlayerControlsMode.click,
+    this.fullscreenSwipeControls = true,
   }) : shortcuts = const ShortcutSettings.defaults(),
        theme = AppThemePreference.system,
        font = AppFontPreference.harmonyOsSans,
@@ -173,6 +175,7 @@ final class AppSettings {
   final bool showCollapsedProgress;
   final bool highEnergyProgressEnabled;
   final PlayerControlsMode playerControlsMode;
+  final bool fullscreenSwipeControls;
   final int preferredQuality;
   final int preferredLiveQuality;
   final VideoCodecPreference preferredVideoCodec;
@@ -239,6 +242,7 @@ final class AppSettings {
     bool? showCollapsedProgress,
     bool? highEnergyProgressEnabled,
     PlayerControlsMode? playerControlsMode,
+    bool? fullscreenSwipeControls,
     int? preferredQuality,
     int? preferredLiveQuality,
     VideoCodecPreference? preferredVideoCodec,
@@ -293,6 +297,8 @@ final class AppSettings {
     highEnergyProgressEnabled:
         highEnergyProgressEnabled ?? this.highEnergyProgressEnabled,
     playerControlsMode: playerControlsMode ?? this.playerControlsMode,
+    fullscreenSwipeControls:
+        fullscreenSwipeControls ?? this.fullscreenSwipeControls,
     preferredQuality: preferredQuality ?? this.preferredQuality,
     preferredLiveQuality: preferredLiveQuality ?? this.preferredLiveQuality,
     preferredVideoCodec: preferredVideoCodec ?? this.preferredVideoCodec,

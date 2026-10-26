@@ -82,6 +82,8 @@ final class SettingsController extends AsyncNotifier<AppSettings> {
       update((current) => current.copyWith(highEnergyProgressEnabled: value));
   Future<void> setPlayerControlsMode(PlayerControlsMode value) =>
       update((current) => current.copyWith(playerControlsMode: value));
+  Future<void> setFullscreenSwipeControls(bool value) =>
+      update((current) => current.copyWith(fullscreenSwipeControls: value));
   Future<void> setDanmakuOpacity(double value) =>
       update((current) => current.copyWith(danmakuOpacity: value));
   Future<void> setDanmakuFontScale(double value) =>

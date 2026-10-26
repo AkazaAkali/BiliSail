@@ -130,6 +130,7 @@ class SqliteSettingsRepository implements SettingsRepository {
               .firstOrNull ??
           VideoDecodingPreference.automatic,
       defaultPlaybackRate: number('defaultPlaybackRate', 1.0),
+      fullscreenSwipeControls: boolean('fullscreenSwipeControls', true),
       defaultVolume: number('defaultVolume', 100.0),
       audioNormalization:
           AudioNormalizationMode.values
@@ -193,7 +194,8 @@ class SqliteSettingsRepository implements SettingsRepository {
     return database.writeSetting(
       'preferences.v1',
       jsonEncode({
-        'schemaVersion': 23,
+        'schemaVersion': 24,
+        'fullscreenSwipeControls': value.fullscreenSwipeControls,
         'navigationMode': value.navigationMode.name,
         'allowConcurrentPlayback': value.allowConcurrentPlayback,
         'cacheImages': value.cacheImages,

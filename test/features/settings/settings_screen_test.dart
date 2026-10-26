@@ -13,6 +13,52 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final player in [false, true]) {
+    for (final failSave in [false, true]) {
+      testWidgets(
+        'fullscreen swipe toggle saves or rolls back (player: $player, failure: $failSave)',
+        (tester) async {
+          final repository = _SettingsRepository()..failSave = failSave;
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                settingsRepositoryProvider.overrideWithValue(repository),
+              ],
+              child: MaterialApp(
+                builder: AppNoticeHost.builder,
+                home: player
+                    ? Builder(
+                        builder: (context) => Scaffold(
+                          body: TextButton(
+                            onPressed: () => showPlayerSettings(context),
+                            child: const Text('open'),
+                          ),
+                        ),
+                      )
+                    : const Scaffold(
+                        body: SettingsScreen(
+                          category: SettingsCategory.playback,
+                        ),
+                      ),
+              ),
+            ),
+          );
+          if (player) await tester.tap(find.text('open'));
+          await tester.pumpAndSettle();
+          final toggle = find.widgetWithText(
+            SwitchListTile,
+            player ? '全屏滑动调节亮度和音量（左侧亮度，右侧音量）' : '全屏滑动调节亮度和音量',
+          );
+          await tester.ensureVisible(toggle);
+          await tester.tap(toggle);
+          await tester.pumpAndSettle();
+          expect(repository.settings.fullscreenSwipeControls, failSave);
+          expect(tester.widget<SwitchListTile>(toggle).value, failSave);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
   testWidgets(
     'reset requires confirmation, applies defaults and reloads them',
     (tester) async {
@@ -22,6 +68,7 @@ void main() {
       );
       final repository = _SettingsRepository()
         ..settings = defaults.copyWith(
+          fullscreenSwipeControls: false,
           theme: AppThemePreference.dark,
           danmakuArea: 1,
           shortcuts: const ShortcutSettings.defaults().withEnabled(false),
@@ -56,6 +103,7 @@ void main() {
       expect(repository.settings.danmakuArea, .5);
       expect(repository.settings.danmakuFontScale, .6);
       expect(repository.settings.shortcuts.enabled, isTrue);
+      expect(repository.settings.fullscreenSwipeControls, isTrue);
       expect(
         tester
             .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '跟随系统'))

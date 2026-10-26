@@ -23,6 +23,7 @@ import '../application/playback_viewers_controller.dart';
 import '../domain/playback_repository.dart';
 import '../domain/content_playback.dart';
 import 'player_settings_dialog.dart';
+import 'fullscreen_swipe_controls.dart';
 import 'playback_timeline_bar.dart';
 import 'playback_snapshot_builder.dart';
 import 'live_stream_menu.dart';
@@ -906,52 +907,62 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                 },
                               ),
                             Positioned.fill(
-                              child: RawGestureDetector(
-                                // The recognizer's deadline is fixed at creation.
-                                key: ValueKey(settings.shortcuts.holdDelayMs),
-                                behavior: HitTestBehavior.translucent,
-                                excludeFromSemantics: true,
-                                gestures: {
-                                  if (!session.isLive)
-                                    LongPressGestureRecognizer:
-                                        GestureRecognizerFactoryWithHandlers<
-                                          LongPressGestureRecognizer
-                                        >(
-                                          () => LongPressGestureRecognizer(
-                                            duration: Duration(
-                                              milliseconds: settings
-                                                  .shortcuts
-                                                  .holdDelayMs,
+                              child: FullscreenSwipeControls(
+                                enabled:
+                                    widget.fullScreen &&
+                                    settings.fullscreenSwipeControls &&
+                                    widget.active,
+                                sourceGeneration: session.sourceGeneration,
+                                volume: snapshot.volume,
+                                setVolume: session.setVolume,
+                                child: RawGestureDetector(
+                                  // The recognizer's deadline is fixed at creation.
+                                  key: ValueKey(settings.shortcuts.holdDelayMs),
+                                  behavior: HitTestBehavior.translucent,
+                                  excludeFromSemantics: true,
+                                  gestures: {
+                                    if (!session.isLive)
+                                      LongPressGestureRecognizer:
+                                          GestureRecognizerFactoryWithHandlers<
+                                            LongPressGestureRecognizer
+                                          >(
+                                            () => LongPressGestureRecognizer(
+                                              duration: Duration(
+                                                milliseconds: settings
+                                                    .shortcuts
+                                                    .holdDelayMs,
+                                              ),
+                                              supportedDevices: {
+                                                PointerDeviceKind.touch,
+                                              },
                                             ),
-                                            supportedDevices: {
-                                              PointerDeviceKind.touch,
+                                            (recognizer) {
+                                              recognizer.onLongPressDown =
+                                                  (_) => widget.shortcuts
+                                                      .prepareTouchHold();
+                                              recognizer.onLongPressStart =
+                                                  (_) => widget.shortcuts
+                                                      .beginTouchHold();
+                                              recognizer.onLongPressEnd = (_) =>
+                                                  widget.shortcuts
+                                                      .endTouchHold();
+                                              recognizer.onLongPressCancel =
+                                                  widget.shortcuts.endTouchHold;
                                             },
                                           ),
-                                          (recognizer) {
-                                            recognizer.onLongPressDown = (_) =>
-                                                widget.shortcuts
-                                                    .prepareTouchHold();
-                                            recognizer.onLongPressStart = (_) =>
-                                                widget.shortcuts
-                                                    .beginTouchHold();
-                                            recognizer.onLongPressEnd = (_) =>
-                                                widget.shortcuts.endTouchHold();
-                                            recognizer.onLongPressCancel =
-                                                widget.shortcuts.endTouchHold;
-                                          },
-                                        ),
-                                },
-                                child: GestureDetector(
-                                  key: const ValueKey(
-                                    'player-surface-tap-target',
-                                  ),
-                                  behavior: HitTestBehavior.translucent,
-                                  onTap: _onSurfaceTap,
-                                  onDoubleTap: () {
-                                    if (!widget.active) return;
-                                    _focusNode.requestFocus();
-                                    _toggleFullScreen();
                                   },
+                                  child: GestureDetector(
+                                    key: const ValueKey(
+                                      'player-surface-tap-target',
+                                    ),
+                                    behavior: HitTestBehavior.translucent,
+                                    onTap: _onSurfaceTap,
+                                    onDoubleTap: () {
+                                      if (!widget.active) return;
+                                      _focusNode.requestFocus();
+                                      _toggleFullScreen();
+                                    },
+                                  ),
                                 ),
                               ),
                             ),

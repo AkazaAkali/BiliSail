@@ -17,6 +17,29 @@ void main() {
     repository = SqliteSettingsRepository(database);
   });
   tearDown(() => database.close());
+  test(
+    'fullscreen swipe controls default, migrate and persist both choices',
+    () async {
+      expect((await repository.load()).fullscreenSwipeControls, isTrue);
+      for (final value in [null, 'invalid', 0, false, true]) {
+        await database.writeSetting(
+          'preferences.v1',
+          jsonEncode({
+            'schemaVersion': 23,
+            'theme': 'dark',
+            'fullscreenSwipeControls': value,
+          }),
+        );
+        final loaded = await repository.load();
+        expect(loaded.fullscreenSwipeControls, value is bool ? value : true);
+        expect(loaded.theme, AppThemePreference.dark);
+        await repository.save(loaded.copyWith(fullscreenSwipeControls: false));
+        expect((await repository.load()).fullscreenSwipeControls, isFalse);
+        await repository.save(loaded.copyWith(fullscreenSwipeControls: true));
+        expect((await repository.load()).fullscreenSwipeControls, isTrue);
+      }
+    },
+  );
   for (final platform in TargetPlatform.values) {
     test('hover playback migrates and persists choices on $platform', () async {
       final platformDefault = videoCardHoverPlaybackForPlatform(platform);
@@ -120,7 +143,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 23);
+      expect(snapshot['schemaVersion'], 24);
       expect(snapshot['wheelDampingRatio'], ratio);
     }
     expect(database.schemaVersion, 3);
@@ -239,7 +262,7 @@ void main() {
         final snapshot = jsonDecode(
           (await database.readSetting('preferences.v1')) ?? '{}',
         ) as Map<String, Object?>;
-        expect(snapshot['schemaVersion'], 23);
+        expect(snapshot['schemaVersion'], 24);
         expect(snapshot['preferredLiveQuality'], quality);
       }
       expect(database.schemaVersion, 3);
@@ -343,7 +366,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 23);
+          expect(snapshot['schemaVersion'], 24);
           expect(snapshot['playerControlsMode'], mode.name);
         }
         expect(database.schemaVersion, 3);
@@ -419,7 +442,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 23);
+      expect(snapshot['schemaVersion'], 24);
       expect(snapshot['navigationMode'], 'singlePage');
       expect(
         (await platformRepository.load()).navigationMode,
@@ -452,7 +475,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 23);
+          expect(snapshot['schemaVersion'], 24);
           expect(snapshot['navigationMode'], mode.name);
         }
         for (final selected in WorkspaceNavigationMode.values) {
@@ -503,7 +526,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 23);
+      expect(snapshot['schemaVersion'], 24);
       expect(snapshot['theme'], 'dark');
       expect(database.schemaVersion, 3);
     },
@@ -546,7 +569,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 23);
+      expect(snapshot['schemaVersion'], 24);
       expect(snapshot['allowConcurrentPlayback'], allowed);
       expect(snapshot['navigationMode'], 'singlePage');
       final reloaded = await repository.load();

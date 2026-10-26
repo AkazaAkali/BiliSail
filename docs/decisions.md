@@ -437,3 +437,7 @@ FRB 支持跨平台是可行性依据，但平台构建、取消、错误和流�
 **决定（2026-10-26）**：按用户要求增加 iOS arm64 与 Linux x64，复用检查、播放契约及独立 mux；本地不打包。iOS 使用 CocoaPods 和 iPhoneOS arm64，输出须自行 Apple 签名的未签名 IPA；GitHub token 继续只承担 artifact／Release 上传。Linux 从完整 GTK bundle 同时生成 AppImage 与 Flatpak，保留媒体依赖、运行库版本及许可，Flatpak 限定沙盒权限。
 
 Linux 暂用扫码登录，以显式的 Dart 平台适配禁用实验 WPE WebKit 原生实现；其他平台的网页登录和四个业务包职责保持。新目标的首次远端构建、安装与设备播放须独立验收，不能以 Windows 离线检查或旧三端记录代替。细节与未测项见[iOS／Linux 记录](validation/ios-linux.md)。
+
+## D57：全屏触摸调节使用窗口亮度与既有播放音量
+
+**决定（2026-10-26）**：全屏左／右侧纵向滑动分别调整亮度与播放器音量，共用持久化开关。Android 使用不需要系统设置权限的 Activity 窗口亮度覆盖，退出全屏／后台／关闭后恢复原值；其他平台用画面遮罩调暗。音量继续通过 `PlaybackSession` 归属当前源并继承应用运行期间的手动选择，不增加第二份播放器状态。实现与验证边界见[专项记录](validation/fullscreen-swipe-controls.md)。

@@ -7,11 +7,13 @@ import io.flutter.embedding.engine.FlutterEngine
 class MainActivity : FlutterActivity() {
     private var downloadStorage: DownloadStorageHandler? = null
     private var imageExport: ImageExportHandler? = null
+    private var windowBrightness: WindowBrightnessHandler? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         downloadStorage = DownloadStorageHandler(this, flutterEngine.dartExecutor.binaryMessenger)
         imageExport = ImageExportHandler(this, flutterEngine.dartExecutor.binaryMessenger)
+        windowBrightness = WindowBrightnessHandler(this, flutterEngine.dartExecutor.binaryMessenger)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -26,6 +28,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        windowBrightness?.close()
+        windowBrightness = null
         downloadStorage?.close()
         downloadStorage = null
         imageExport?.close()

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:bili_player/bili_player.dart';
 import 'package:bilisail/core/platform/window_service.dart';
+import 'package:bilisail/core/platform/window_brightness_service.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/domain/video.dart';
 import 'package:bilisail/features/playback/application/playback_session.dart';
@@ -23,7 +24,7 @@ void main() {
       LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
 
   testWidgets(
-    'Android video and live fullscreen rotate with display dimensions',
+    'Android video and live fullscreen rotate and adjust brightness and volume',
     (tester) async {
       if (!Platform.isAndroid) return;
       final engine = _Engine();
@@ -76,6 +77,35 @@ void main() {
         await tester.tap(find.byTooltip('全屏（F）'));
         await _until(tester, () => window.isFullScreen && _isLandscape(tester));
         expect(find.byTooltip('退出全屏（Esc）'), findsOneWidget);
+        final brightness = WindowBrightnessService();
+        final originalBrightness = await brightness.read();
+        final surface = tester.getRect(
+          find.byKey(const ValueKey('player-surface-tap-target')),
+        );
+        await tester.dragFrom(
+          Offset(surface.left + surface.width * .25, surface.center.dy),
+          Offset(0, surface.height * .2),
+        );
+        final expectedBrightness = (originalBrightness - .2).clamp(.01, 1.0);
+        await _until(
+          tester,
+          () => find
+              .byKey(const ValueKey('player-swipe-feedback'))
+              .evaluate()
+              .isNotEmpty,
+        );
+        expect(await brightness.read(), closeTo(expectedBrightness, .02));
+        await session.setVolume(50);
+        await tester.pump();
+        await tester.dragFrom(
+          Offset(surface.left + surface.width * .75, surface.center.dy),
+          Offset(0, -surface.height * .2),
+        );
+        await _until(
+          tester,
+          () => (engine.currentSnapshot.volume - 70).abs() < 1,
+        );
+        expect(engine.currentSnapshot.rate, 1);
         engine.publish(
           engine.currentSnapshot.copyWith(
             videoDimensions: const VideoDimensions(1080, 1920),
@@ -84,6 +114,7 @@ void main() {
         await _until(tester, () => !_isLandscape(tester));
         await tester.tap(find.byTooltip('退出全屏（Esc）'));
         await _until(tester, () => !window.isFullScreen);
+        expect(await brightness.read(), closeTo(originalBrightness, .01));
         // A portrait source also enters fullscreen without changing to landscape.
         await tester.tap(find.byTooltip('全屏（F）'));
         await _until(tester, () => window.isFullScreen);
