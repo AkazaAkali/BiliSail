@@ -889,8 +889,13 @@ void main() {
             width < 600 ? findsOneWidget : findsNothing,
           );
           final tabs = find.byKey(const ValueKey('workspace-tab-strip'));
+          final sidebarToolbar = find.byKey(
+            const ValueKey('workspace-sidebar-toolbar'),
+          );
           final headerBottom = tabs.evaluate().isNotEmpty
               ? tester.getBottomLeft(tabs).dy
+              : sidebarToolbar.evaluate().isNotEmpty
+              ? tester.getBottomLeft(sidebarToolbar).dy
               : 0;
           final pageBack = find.byKey(
             const ValueKey('workspace-page-back-header'),

@@ -60,6 +60,10 @@ final class SettingsController extends AsyncNotifier<AppSettings> {
       update((current) => current.copyWith(theme: value));
   Future<void> setNavigationMode(WorkspaceNavigationMode value) =>
       update((current) => current.copyWith(navigationMode: value));
+  Future<void> setSidebarStyle(SidebarStyle value) =>
+      update((current) => current.copyWith(sidebarStyle: value));
+  Future<void> setSidebarCollapsed(bool value) =>
+      update((current) => current.copyWith(sidebarCollapsed: value));
   Future<void> setAllowConcurrentPlayback(bool value) =>
       update((current) => current.copyWith(allowConcurrentPlayback: value));
   Future<void> setFont(AppFontPreference value) =>

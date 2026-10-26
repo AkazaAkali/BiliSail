@@ -69,6 +69,8 @@ void main() {
       final repository = _SettingsRepository()
         ..settings = defaults.copyWith(
           fullscreenSwipeControls: false,
+          sidebarStyle: SidebarStyle.compact,
+          sidebarCollapsed: true,
           theme: AppThemePreference.dark,
           danmakuArea: 1,
           shortcuts: const ShortcutSettings.defaults().withEnabled(false),
@@ -104,6 +106,8 @@ void main() {
       expect(repository.settings.danmakuFontScale, .6);
       expect(repository.settings.shortcuts.enabled, isTrue);
       expect(repository.settings.fullscreenSwipeControls, isTrue);
+      expect(repository.settings.sidebarStyle, SidebarStyle.automatic);
+      expect(repository.settings.sidebarCollapsed, isFalse);
       expect(
         tester
             .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '跟随系统'))
@@ -1006,6 +1010,8 @@ void main() {
         isTrue,
       );
       expect(find.text('自动播放'), findsNothing);
+      await tester.ensureVisible(find.widgetWithText(ChoiceChip, '系统默认'));
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ChoiceChip, '系统默认'));
       await tester.pumpAndSettle();
       expect(repository.settings.font, AppFontPreference.system);

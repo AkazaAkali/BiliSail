@@ -18,6 +18,38 @@ void main() {
   });
   tearDown(() => database.close());
   test(
+    'sidebar preferences migrate independently and persist all choices',
+    () async {
+      expect((await repository.load()).sidebarStyle, SidebarStyle.automatic);
+      expect((await repository.load()).sidebarCollapsed, isFalse);
+      for (final invalid in [null, 42, 'invalid', true]) {
+        await database.writeSetting(
+          'preferences.v1',
+          jsonEncode({
+            'schemaVersion': 24,
+            'sidebarStyle': invalid,
+            'sidebarCollapsed': invalid,
+            'theme': 'dark',
+          }),
+        );
+        final loaded = await repository.load();
+        expect(loaded.sidebarStyle, SidebarStyle.automatic);
+        expect(loaded.sidebarCollapsed, invalid is bool ? invalid : false);
+        expect(loaded.theme, AppThemePreference.dark);
+      }
+      for (final style in SidebarStyle.values) {
+        for (final collapsed in [false, true]) {
+          await repository.save(
+            AppSettings(sidebarStyle: style, sidebarCollapsed: collapsed),
+          );
+          final loaded = await repository.load();
+          expect(loaded.sidebarStyle, style);
+          expect(loaded.sidebarCollapsed, collapsed);
+        }
+      }
+    },
+  );
+  test(
     'fullscreen swipe controls default, migrate and persist both choices',
     () async {
       expect((await repository.load()).fullscreenSwipeControls, isTrue);
@@ -143,7 +175,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 24);
+      expect(snapshot['schemaVersion'], 25);
       expect(snapshot['wheelDampingRatio'], ratio);
     }
     expect(database.schemaVersion, 3);
@@ -262,7 +294,7 @@ void main() {
         final snapshot = jsonDecode(
           (await database.readSetting('preferences.v1')) ?? '{}',
         ) as Map<String, Object?>;
-        expect(snapshot['schemaVersion'], 24);
+        expect(snapshot['schemaVersion'], 25);
         expect(snapshot['preferredLiveQuality'], quality);
       }
       expect(database.schemaVersion, 3);
@@ -366,7 +398,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 24);
+          expect(snapshot['schemaVersion'], 25);
           expect(snapshot['playerControlsMode'], mode.name);
         }
         expect(database.schemaVersion, 3);
@@ -442,7 +474,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 24);
+      expect(snapshot['schemaVersion'], 25);
       expect(snapshot['navigationMode'], 'singlePage');
       expect(
         (await platformRepository.load()).navigationMode,
@@ -475,7 +507,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 24);
+          expect(snapshot['schemaVersion'], 25);
           expect(snapshot['navigationMode'], mode.name);
         }
         for (final selected in WorkspaceNavigationMode.values) {
@@ -526,7 +558,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 24);
+      expect(snapshot['schemaVersion'], 25);
       expect(snapshot['theme'], 'dark');
       expect(database.schemaVersion, 3);
     },
@@ -569,7 +601,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 24);
+      expect(snapshot['schemaVersion'], 25);
       expect(snapshot['allowConcurrentPlayback'], allowed);
       expect(snapshot['navigationMode'], 'singlePage');
       final reloaded = await repository.load();

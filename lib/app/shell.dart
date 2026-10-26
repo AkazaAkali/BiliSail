@@ -128,6 +128,9 @@ final class BiliAppShell extends StatefulWidget {
     this.dragRegionBuilder,
     this.shortcuts = const ShortcutSettings.defaults(),
     this.navigationMode,
+    this.sidebarStyle = SidebarStyle.automatic,
+    this.sidebarCollapsed,
+    this.onSidebarCollapsedChanged,
     this.accountIdentity,
     this.playbackWindowBuilder,
     this.onActivateBrowser,
@@ -135,6 +138,9 @@ final class BiliAppShell extends StatefulWidget {
   });
   final ShortcutSettings shortcuts;
   final WorkspaceNavigationMode? navigationMode;
+  final SidebarStyle sidebarStyle;
+  final bool? sidebarCollapsed;
+  final ValueChanged<bool>? onSidebarCollapsedChanged;
   final Object? accountIdentity;
   final WorkspaceWindowBuilder? playbackWindowBuilder;
   final VoidCallback? onActivateBrowser;
@@ -173,6 +179,9 @@ final class _BiliAppShellState extends State<BiliAppShell>
   bool _windowFailed = false;
   int _windowActivation = 0;
   bool _exitConfirmationOpen = false;
+  bool _localSidebarCollapsed = false;
+  bool get _sidebarCollapsed =>
+      widget.sidebarCollapsed ?? _localSidebarCollapsed;
   WorkspaceTab? _gestureSource, _gestureDestination;
 
   WorkspaceTab _frameTab(BuildContext context) =>
@@ -688,32 +697,53 @@ final class _BiliAppShellState extends State<BiliAppShell>
           child: LayoutBuilder(
             builder: (context, constraints) {
               final compact = constraints.maxWidth < _compactNavigationWidth;
-              final wide = constraints.maxWidth >= 1600;
+              final extended = switch (widget.sidebarStyle) {
+                SidebarStyle.automatic => constraints.maxWidth >= 1600,
+                SidebarStyle.expanded => true,
+                SidebarStyle.compact => false,
+              };
+              final sidebarToggle = compact ? null : _sidebarToggle(context);
               final colors = Theme.of(context).colorScheme;
               return Column(
                 children: [
                   if (_dualTabs || _singlePage) ...[
                     if (!_android && widget.windowControlsBuilder != null)
-                      _dualWindowCaption(context)
+                      _dualWindowCaption(context, sidebarToggle: sidebarToggle)
                     else if (!_android && !_desktopDual && tab.isPlayback)
-                      _playbackHeader(context),
+                      _playbackHeader(context, sidebarToggle: sidebarToggle)
+                    else if (sidebarToggle != null)
+                      SizedBox(
+                        key: const ValueKey('workspace-sidebar-toolbar'),
+                        height: 40,
+                        child: Row(children: [sidebarToggle]),
+                      ),
                   ] else
-                    _tabStrip(context),
+                    _tabStrip(context, sidebarToggle: sidebarToggle),
                   Expanded(
+                    key: const ValueKey('workspace-body'),
                     child: Row(
                       children: [
-                        SizedBox(
-                          width: compact ? 0 : (wide ? 164 : 76),
-                          child: Offstage(
-                            offstage: compact,
-                            child: _sideNavigation(context, extended: wide),
-                          ),
+                        _sidebarRegion(
+                          context,
+                          compact: compact,
+                          extended: extended,
                         ),
                         Expanded(
-                          child: Padding(
+                          child: AnimatedPadding(
+                            duration:
+                                compact ||
+                                    MediaQuery.disableAnimationsOf(context)
+                                ? Duration.zero
+                                : const Duration(milliseconds: 240),
+                            curve: Curves.easeInOutCubic,
                             padding: compact
                                 ? EdgeInsets.zero
-                                : const EdgeInsets.fromLTRB(0, 12, 16, 16),
+                                : EdgeInsets.fromLTRB(
+                                    _sidebarCollapsed ? 16 : 0,
+                                    12,
+                                    16,
+                                    16,
+                                  ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(
                                 compact ? 0 : 18,
@@ -784,62 +814,66 @@ final class _BiliAppShellState extends State<BiliAppShell>
     ),
   );
 
-  Widget _dualWindowCaption(BuildContext context) => SizedBox(
-    key: const ValueKey('dual-window-caption'),
-    height: 32,
-    child: Row(
-      children: [
-        if (_frameShowsBack(context)) _backButton(),
-        if (!_android && _frameTab(context).isPlayback) _homeButton(),
-        Expanded(
-          child:
-              widget.dragRegionBuilder?.call(
-                context,
-                const Padding(
-                  padding: EdgeInsets.only(left: 14),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('哔帆', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-              ) ??
-              const SizedBox.expand(),
+  Widget _dualWindowCaption(BuildContext context, {Widget? sidebarToggle}) =>
+      SizedBox(
+        key: const ValueKey('dual-window-caption'),
+        height: 32,
+        child: Row(
+          children: [
+            ?sidebarToggle,
+            if (_frameShowsBack(context)) _backButton(),
+            if (!_android && _frameTab(context).isPlayback) _homeButton(),
+            Expanded(
+              child:
+                  widget.dragRegionBuilder?.call(
+                    context,
+                    const Padding(
+                      padding: EdgeInsets.only(left: 14),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('哔帆', style: TextStyle(fontSize: 12)),
+                      ),
+                    ),
+                  ) ??
+                  const SizedBox.expand(),
+            ),
+            widget.windowControlsBuilder!(context),
+          ],
         ),
-        widget.windowControlsBuilder!(context),
-      ],
-    ),
-  );
+      );
 
-  Widget _playbackHeader(BuildContext context) => SizedBox(
-    key: const ValueKey('workspace-playback-header'),
-    height: 44,
-    child: Row(
-      children: [
-        if (_singlePage)
-          _backButton()
-        else
-          IconButton(
-            tooltip: '返回上一视频',
-            onPressed: _playbackWindowBack,
-            icon: const Icon(Icons.arrow_back),
-          ),
-        _homeButton(),
-        Expanded(
-          child: Text(
-            _workspace.active.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
+  Widget _playbackHeader(BuildContext context, {Widget? sidebarToggle}) =>
+      SizedBox(
+        key: const ValueKey('workspace-playback-header'),
+        height: 44,
+        child: Row(
+          children: [
+            ?sidebarToggle,
+            if (_singlePage)
+              _backButton()
+            else
+              IconButton(
+                tooltip: '返回上一视频',
+                onPressed: _playbackWindowBack,
+                icon: const Icon(Icons.arrow_back),
+              ),
+            _homeButton(),
+            Expanded(
+              child: Text(
+                _workspace.active.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (!_singlePage)
+              IconButton(
+                tooltip: '关闭播放',
+                onPressed: _closePlaybackWindow,
+                icon: const Icon(Icons.close),
+              ),
+          ],
         ),
-        if (!_singlePage)
-          IconButton(
-            tooltip: '关闭播放',
-            onPressed: _closePlaybackWindow,
-            icon: const Icon(Icons.close),
-          ),
-      ],
-    ),
-  );
+      );
 
   Object _backIdentity(WorkspaceTab tab) =>
       (widget.accountIdentity, widget.navigationMode, tab.id, tab.location);
@@ -1102,6 +1136,91 @@ final class _BiliAppShellState extends State<BiliAppShell>
         WorkspaceSection.downloads => Icons.file_download_outlined,
         WorkspaceSection.settings => Icons.tune_rounded,
       };
+
+  Widget _sidebarToggle(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: IconButton(
+        key: const ValueKey('workspace-sidebar-toggle'),
+        tooltip: _sidebarCollapsed ? '展开侧栏' : '收起侧栏',
+        style: IconButton.styleFrom(
+          minimumSize: const Size(36, 28),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          foregroundColor: colors.onSurfaceVariant,
+          backgroundColor: colors.surfaceContainerLow,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(color: colors.outlineVariant),
+          ),
+        ),
+        onPressed: () {
+          final collapsed = !_sidebarCollapsed;
+          if (widget.sidebarCollapsed == null) {
+            setState(() => _localSidebarCollapsed = collapsed);
+          }
+          widget.onSidebarCollapsedChanged?.call(collapsed);
+        },
+        icon: AnimatedRotation(
+          turns: _sidebarCollapsed ? .5 : 0,
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 240),
+          curve: Curves.easeInOutCubic,
+          child: const Icon(Icons.menu_open_rounded, size: 20),
+        ),
+      ),
+    );
+  }
+
+  Widget _sidebarRegion(
+    BuildContext context, {
+    required bool compact,
+    required bool extended,
+  }) {
+    final visible = !compact && !_sidebarCollapsed;
+    final width = extended ? 164.0 : 76.0;
+    final target = visible ? width : 0.0;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: target, end: target),
+      duration: compact || reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 240),
+      curve: Curves.easeInOutCubic,
+      child: ExcludeFocus(
+        excluding: !visible,
+        child: ExcludeSemantics(
+          excluding: !visible,
+          child: IgnorePointer(
+            ignoring: !visible,
+            child: _sideNavigation(context, extended: extended),
+          ),
+        ),
+      ),
+      builder: (context, animatedWidth, child) {
+        final currentWidth = compact || reduceMotion ? target : animatedWidth;
+        return SizedBox(
+          key: const ValueKey('workspace-sidebar-region'),
+          width: currentWidth,
+          child: ClipRect(
+            child: OverflowBox(
+              alignment: Alignment.centerLeft,
+              minWidth: width,
+              maxWidth: width,
+              child: Offstage(
+                offstage: currentWidth == 0,
+                child: Opacity(
+                  opacity: (currentWidth / width).clamp(0, 1),
+                  child: child,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   Widget _sideNavigation(BuildContext context, {required bool extended}) {
     final colors = Theme.of(context).colorScheme;
@@ -1478,7 +1597,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
     );
   }
 
-  Widget _tabStrip(BuildContext context) {
+  Widget _tabStrip(BuildContext context, {Widget? sidebarToggle}) {
     final colors = Theme.of(context).colorScheme;
     return ColoredBox(
       color: colors.surfaceContainerLow,
@@ -1486,6 +1605,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
         height: 42,
         child: Row(
           children: [
+            ?sidebarToggle,
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) => Row(

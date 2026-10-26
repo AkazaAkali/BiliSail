@@ -13,6 +13,8 @@ enum AppThemePreference { system, light, dark }
 
 enum WorkspaceNavigationMode { singlePage, multipleTabs, dualTabs }
 
+enum SidebarStyle { automatic, expanded, compact }
+
 enum PlayerControlsMode { click, dynamic }
 
 enum AppFontPreference { harmonyOsSans, system, installed }
@@ -46,6 +48,8 @@ final class AppSettings {
     this.shortcuts = const ShortcutSettings.defaults(),
     this.theme = AppThemePreference.system,
     this.navigationMode = WorkspaceNavigationMode.dualTabs,
+    this.sidebarStyle = SidebarStyle.automatic,
+    this.sidebarCollapsed = false,
     this.allowConcurrentPlayback = false,
     this.font = AppFontPreference.harmonyOsSans,
     this.systemFontFamily = '',
@@ -100,6 +104,8 @@ final class AppSettings {
   /// Constant defaults have no caller-owned collection inputs.
   const AppSettings.defaults({
     this.navigationMode = WorkspaceNavigationMode.dualTabs,
+    this.sidebarStyle = SidebarStyle.automatic,
+    this.sidebarCollapsed = false,
     this.allowConcurrentPlayback = false,
     this.videoCardHoverPlayback = true,
     this.highEnergyProgressEnabled = false,
@@ -154,6 +160,8 @@ final class AppSettings {
   final ShortcutSettings shortcuts;
   final AppThemePreference theme;
   final WorkspaceNavigationMode navigationMode;
+  final SidebarStyle sidebarStyle;
+  final bool sidebarCollapsed;
   final bool allowConcurrentPlayback;
   bool get concurrentPlaybackEnabled =>
       navigationMode == WorkspaceNavigationMode.multipleTabs &&
@@ -227,6 +235,8 @@ final class AppSettings {
     ShortcutSettings? shortcuts,
     AppThemePreference? theme,
     WorkspaceNavigationMode? navigationMode,
+    SidebarStyle? sidebarStyle,
+    bool? sidebarCollapsed,
     bool? allowConcurrentPlayback,
     AppFontPreference? font,
     String? systemFontFamily,
@@ -279,6 +289,8 @@ final class AppSettings {
     shortcuts: shortcuts ?? this.shortcuts,
     theme: theme ?? this.theme,
     navigationMode: navigationMode ?? this.navigationMode,
+    sidebarStyle: sidebarStyle ?? this.sidebarStyle,
+    sidebarCollapsed: sidebarCollapsed ?? this.sidebarCollapsed,
     allowConcurrentPlayback:
         allowConcurrentPlayback ?? this.allowConcurrentPlayback,
     font: font ?? this.font,

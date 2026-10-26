@@ -66,6 +66,12 @@ class SqliteSettingsRepository implements SettingsRepository {
               .firstOrNull ??
           defaultNavigationMode,
       shortcuts: ShortcutSettings.fromJson(decoded['shortcuts']),
+      sidebarStyle:
+          SidebarStyle.values
+              .where((item) => item.name == decoded['sidebarStyle'])
+              .firstOrNull ??
+          SidebarStyle.automatic,
+      sidebarCollapsed: boolean('sidebarCollapsed', false),
       allowConcurrentPlayback: boolean('allowConcurrentPlayback', false),
       cacheImages: boolean('cacheImages', true),
       wheelDampingRatio: number('wheelDampingRatio', 1.3),
@@ -194,7 +200,9 @@ class SqliteSettingsRepository implements SettingsRepository {
     return database.writeSetting(
       'preferences.v1',
       jsonEncode({
-        'schemaVersion': 24,
+        'schemaVersion': 25,
+        'sidebarStyle': value.sidebarStyle.name,
+        'sidebarCollapsed': value.sidebarCollapsed,
         'fullscreenSwipeControls': value.fullscreenSwipeControls,
         'navigationMode': value.navigationMode.name,
         'allowConcurrentPlayback': value.allowConcurrentPlayback,

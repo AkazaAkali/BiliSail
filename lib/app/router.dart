@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../shared/ui/app_dialog.dart';
+import '../shared/ui/app_notice.dart';
 import '../domain/video.dart';
 import '../features/downloads/domain/download_models.dart';
 import '../features/downloads/application/download_controller.dart';
@@ -121,6 +122,19 @@ GoRouter createBiliRouter({
                     ),
                   ),
             navigationMode: settings.navigationMode,
+            sidebarStyle: settings.sidebarStyle,
+            sidebarCollapsed: settings.sidebarCollapsed,
+            onSidebarCollapsedChanged: (collapsed) async {
+              try {
+                await ref
+                    .read(settingsControllerProvider.notifier)
+                    .setSidebarCollapsed(collapsed);
+              } catch (_) {
+                if (context.mounted) {
+                  showAppNotice(context, '侧栏设置保存失败，请重试');
+                }
+              }
+            },
             shortcuts: settings.shortcuts,
             location: state.uri.toString(),
             accountBuilder: accountBuilder,

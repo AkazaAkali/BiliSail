@@ -351,6 +351,12 @@ void main() {
             );
             if (location.startsWith('/video/') ||
                 location.startsWith('/user/')) {
+              final sidebarToolbar = find.byKey(
+                const ValueKey('workspace-sidebar-toolbar'),
+              );
+              final sidebarToolbarHeight = sidebarToolbar.evaluate().isEmpty
+                  ? 0
+                  : tester.getSize(sidebarToolbar).height;
               expect(
                 tester.getTopLeft(find.byKey(ValueKey('body-$location'))).dy,
                 ((dual || single)
@@ -367,6 +373,7 @@ void main() {
                               mode == WorkspaceNavigationMode.multipleTabs
                         ? 42
                         : 0) +
+                    sidebarToolbarHeight +
                     (width >= 600 ? 12 : 0),
               );
             }
