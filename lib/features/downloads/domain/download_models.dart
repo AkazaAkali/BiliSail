@@ -105,15 +105,15 @@ final class DownloadSelection {
   final DownloadOutput output;
 }
 
-/// Verified local output; source track identities remain in the task index.
+/// Committed local output; source track identities remain in the task index.
 final class DownloadMergedMedia {
   const DownloadMergedMedia({
     required this.bytes,
-    required this.sha256,
+    this.sha256,
     this.output = DownloadOutput.mp4,
   });
   final int bytes;
-  final String sha256;
+  final String? sha256;
   final DownloadOutput output;
   String get fileName => output.fileName;
 }
@@ -189,22 +189,23 @@ final class DownloadTrackProgress {
     this.totalBytes,
     this.etag,
     this.sha256,
+    this.committed = false,
   });
   final DownloadTrackKind kind;
   final String identity, fileName, codec;
   final int bandwidth, bytes;
   final int? totalBytes;
   final String? etag, sha256;
-  bool get complete =>
-      totalBytes != null &&
-      totalBytes! > 0 &&
-      bytes == totalBytes &&
-      sha256 != null;
+
+  /// Old records used a digest as the commit marker, never as a playback gate.
+  final bool committed;
+  bool get complete => committed || sha256 != null;
   DownloadTrackProgress copyWith({
     int? bytes,
     int? totalBytes,
     String? etag,
     String? sha256,
+    bool? committed,
   }) => DownloadTrackProgress(
     kind: kind,
     identity: identity,
@@ -215,6 +216,7 @@ final class DownloadTrackProgress {
     totalBytes: totalBytes ?? this.totalBytes,
     etag: etag ?? this.etag,
     sha256: sha256 ?? this.sha256,
+    committed: committed ?? this.committed,
   );
 }
 

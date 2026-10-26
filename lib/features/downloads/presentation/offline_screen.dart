@@ -69,7 +69,7 @@ final class _OfflineScreenState extends ConsumerState<OfflineScreen> {
       future: _verified,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const StateView.loading(message: '正在核验本地文件…');
+          return const StateView.loading(message: '正在打开本地文件…');
         }
         if (snapshot.hasError) {
           final error = snapshot.error;
@@ -112,18 +112,18 @@ final class _OfflineScreenState extends ConsumerState<OfflineScreen> {
                     height: narrow ? 68 : 108,
                     child: cover == null
                         ? ColoredBox(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHigh,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHigh,
                             child: const Icon(Icons.download_done_rounded),
                           )
                         : Image(
                             image: cover,
                             fit: BoxFit.cover,
                             errorBuilder: (_, _, _) => ColoredBox(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .surfaceContainerHigh,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerHigh,
                               child: const Icon(Icons.download_done_rounded),
                             ),
                           ),

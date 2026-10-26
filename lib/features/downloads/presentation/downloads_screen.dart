@@ -362,7 +362,7 @@ final class _DownloadTaskCard extends StatelessWidget {
       DownloadStatus.queued => '等待下载',
       DownloadStatus.resolving => '解析中',
       DownloadStatus.downloading => '下载中',
-      DownloadStatus.verifying => '校验中',
+      DownloadStatus.verifying => '正在保存',
       DownloadStatus.muxing => '合并中',
       DownloadStatus.paused => '已暂停',
       DownloadStatus.failed => '下载失败',

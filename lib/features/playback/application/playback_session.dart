@@ -90,7 +90,9 @@ class PlaybackSession extends ChangeNotifier {
             _audioRecovery?.preparing == true) {
           return;
         }
-        error = failure.message;
+        error = contentTarget is OfflinePlaybackTarget
+            ? '本地视频播放失败，文件可能无法解码或已不可访问'
+            : failure.message;
         _notify();
       }),
     );
@@ -991,13 +993,17 @@ class PlaybackSession extends ChangeNotifier {
       }
     } on PlayerFailure catch (failure) {
       if (isCurrent()) {
-        error = failure.message;
+        error = contentTarget is OfflinePlaybackTarget
+            ? '无法播放本地视频，文件可能无法解码或已不可访问'
+            : failure.message;
         _resolving = false;
         _notify();
       }
     } catch (_) {
       if (isCurrent()) {
-        error = '播放准备失败，请检查网络后重试';
+        error = contentTarget is OfflinePlaybackTarget
+            ? '无法打开本地视频，请确认文件存在且格式受支持'
+            : '播放准备失败，请检查网络后重试';
         _resolving = false;
         _notify();
       }

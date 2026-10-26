@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
@@ -105,17 +104,15 @@ final class DownloadFileStore {
         await part.length() != track.totalBytes) {
       throw const AppFailure(AppFailureKind.storage, '媒体文件长度不完整');
     }
-    final digest = await _sha256File(part.path);
     if (await finalFile.exists()) await finalFile.delete();
     await part.rename(finalFile.path);
-    return track.copyWith(sha256: digest);
+    return track.copyWith(committed: true);
   }
 
   Future<bool> verifyTrack(
     DownloadTask task,
-    DownloadTrackProgress track, {
-    bool verifyHash = true,
-  }) async {
+    DownloadTrackProgress track,
+  ) async {
     if (!track.complete ||
         track.fileName !=
             (track.kind == DownloadTrackKind.video
@@ -124,10 +121,7 @@ final class DownloadFileStore {
       return false;
     }
     final file = await taskFile(task, track.fileName);
-    if (!await file.exists() || await file.length() != track.totalBytes) {
-      return false;
-    }
-    return !verifyHash || await _sha256File(file.path) == track.sha256;
+    return _canOpen(file);
   }
 
   Future<void> writeExtras(DownloadTask task, DownloadExtras extras) async {
@@ -219,57 +213,34 @@ final class DownloadFileStore {
     );
   }
 
-  Future<bool> verifyCompleted(
-    DownloadTask task, {
-    bool verifyHashes = true,
-  }) async {
-    if (task.tracks.length != 2) return false;
-    final manifest = await taskFile(task, 'manifest.json');
-    if (!await manifest.exists()) return false;
-    try {
-      final Object? decoded = jsonDecode(await manifest.readAsString());
-      if (decoded is! Map ||
-          decoded['version'] != (task.selection.output.isMerged ? 2 : 1) ||
-          decoded['id'] != task.id ||
-          decoded['scope'] != task.scope ||
-          decoded['itemKey'] != task.item.key ||
-          decoded['quality'] != task.selection.quality ||
-          decoded['codec'] != task.selection.codec.name) {
-        return false;
-      }
-      final listed = decoded['tracks'];
-      if (listed is! List || listed.length != 2) return false;
-      for (final track in task.tracks) {
-        if (!listed.any(
-          (entry) =>
-              entry is Map &&
-              entry['fileName'] == track.fileName &&
-              entry['sha256'] == track.sha256 &&
-              entry['bytes'] == track.bytes,
-        )) {
-          return false;
-        }
-        if (task.selection.output == DownloadOutput.separate &&
-            !await verifyTrack(task, track, verifyHash: verifyHashes)) {
-          return false;
-        }
-      }
-      if (task.selection.output.isMerged) {
-        final output = task.mergedMedia;
-        final merged = decoded['merged'];
-        if (output == null ||
-            merged is! Map ||
-            merged['fileName'] != output.fileName ||
-            merged['bytes'] != output.bytes ||
-            merged['sha256'] != output.sha256 ||
-            !await verifyMerged(task, verifyHash: verifyHashes)) {
-          return false;
-        }
+  Future<bool> verifyCompleted(DownloadTask task) async {
+    await ownedDirectory(task);
+    if (task.selection.output.isMerged) {
+      if (!await verifyMerged(task)) {
+        throw const AppFailure(AppFailureKind.storage, '离线视频文件不存在或无法读取');
       }
       return true;
-    } on FormatException {
-      return false;
     }
+    for (final kind in DownloadTrackKind.values) {
+      final track = task.tracks
+          .where((track) => track.kind == kind)
+          .firstOrNull;
+      if (track == null || !await verifyTrack(task, track)) {
+        throw AppFailure(
+          AppFailureKind.storage,
+          kind == DownloadTrackKind.audio ? '离线音频文件不存在或无法读取' : '离线视频文件不存在或无法读取',
+        );
+      }
+    }
+    return true;
+  }
+
+  // Check accessibility without reading media bytes or comparing old metadata.
+  static Future<bool> _canOpen(File file) async {
+    if (!await file.exists()) return false;
+    final handle = await file.open();
+    await handle.close();
+    return true;
   }
 
   Future<DownloadMergedMedia> completeMerged(DownloadTask task) async {
@@ -284,45 +255,31 @@ final class DownloadFileStore {
     } finally {
       await handle.close();
     }
-    final digest = await _sha256File(part.path);
     final output = await taskFile(task, task.selection.output.fileName);
     if (await output.exists()) await output.delete();
     await part.rename(output.path);
-    return DownloadMergedMedia(
-      bytes: length,
-      sha256: digest,
-      output: task.selection.output,
-    );
+    return DownloadMergedMedia(bytes: length, output: task.selection.output);
   }
 
-  Future<bool> verifyMerged(DownloadTask task, {bool verifyHash = true}) async {
+  Future<bool> verifyMerged(DownloadTask task) async {
     final media = task.mergedMedia;
     if (media == null ||
         !task.selection.output.isMerged ||
-        media.output != task.selection.output ||
-        media.bytes <= 0 ||
-        !RegExp(r'^[0-9a-f]{64}$').hasMatch(media.sha256)) {
+        media.output != task.selection.output) {
       return false;
     }
-    final file = await taskFile(task, media.fileName);
-    if (!await file.exists() || await file.length() != media.bytes) {
-      return false;
-    }
-    return !verifyHash || await _sha256File(file.path) == media.sha256;
+    return _canOpen(await taskFile(task, media.fileName));
   }
 
   /// Call only after the merged file, manifest and SQLite commit succeeded.
-  Future<void> removeSourceTracks(
-    DownloadTask task, {
-    bool verifyHashes = true,
-  }) async {
+  Future<void> removeSourceTracks(DownloadTask task) async {
     if (!task.selection.output.isMerged) return;
     final sources = [
       await taskFile(task, 'video.m4s'),
       await taskFile(task, 'audio.m4s'),
     ];
     if (!await sources[0].exists() && !await sources[1].exists()) return;
-    if (!await verifyCompleted(task, verifyHashes: verifyHashes)) {
+    if (!await verifyCompleted(task)) {
       return;
     }
     for (final file in sources) {
@@ -381,10 +338,6 @@ final class DownloadFileStore {
     await temp.rename(file.path);
   }
 
-  static Future<String> _sha256File(String path) => Isolate.run(
-    () async => (await sha256.bind(File(path).openRead()).first).toString(),
-  );
-
   Future<Directory> _rootDirectory(String path, {bool create = false}) async {
     if (!p.isAbsolute(path) || p.split(path).contains('..')) {
       throw const AppFailure(AppFailureKind.storage, '下载目录无效');
@@ -406,8 +359,9 @@ final class DownloadFileStore {
       if (!p.equals(recordedAnchor, boundary)) {
         try {
           final expected = await Directory(boundary).resolveSymbolicLinks();
-          final recorded = await Directory(recordedAnchor)
-              .resolveSymbolicLinks();
+          final recorded = await Directory(
+            recordedAnchor,
+          ).resolveSymbolicLinks();
           if (!p.equals(recorded, expected)) {
             throw const AppFailure(AppFailureKind.storage, '下载目录不在应用离线目录内');
           }
