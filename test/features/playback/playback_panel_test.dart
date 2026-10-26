@@ -1004,6 +1004,172 @@ void main() {
     await _pumpFrames(tester);
   });
 
+  for (final target in <ContentPlaybackTarget?>[
+    null,
+    const PgcPlaybackTarget('1', cid: '123'),
+    const LivePlaybackTarget('12'),
+  ]) {
+    for (final narrowWindow in [false, true]) {
+      testWidgets(
+        'tablet fullscreen preserves orientation and viewport target=$target narrow=$narrowWindow',
+        (tester) async {
+          tester.view.devicePixelRatio = 2;
+          tester.view.display.size = const Size(2560, 1600);
+          tester.view.physicalSize = narrowWindow
+              ? const Size(800, 1600)
+              : const Size(2560, 1600);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(tester.view.display.resetSize);
+          addTearDown(tester.view.resetPhysicalSize);
+          final initialSize = tester.view.physicalSize;
+          final platformCalls = <MethodCall>[];
+          tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            SystemChannels.platform,
+            (call) async {
+              platformCalls.add(call);
+              return null;
+            },
+          );
+          addTearDown(
+            () => tester.binding.defaultBinaryMessenger
+                .setMockMethodCallHandler(SystemChannels.platform, null),
+          );
+          final engine = _FakeEngine();
+          final session = _session(engine);
+          final window = _MobileWindowService();
+          addTearDown(session.close);
+          await tester.pumpWidget(
+            _app(session, window, const AppSettings.defaults(), target: target),
+          );
+          await _pumpFrames(tester);
+          await session.pause();
+          final opens = engine.opens;
+          final generation = session.sourceGeneration;
+          for (final systemBack in [false, true]) {
+            // Unknown dimensions on entry and late landscape/portrait/square
+            // dimensions must all leave the tablet's orientation policy alone.
+            await tester.tap(find.byTooltip('全屏（F）'));
+            await _pumpFrames(tester);
+            expect(window.isFullScreen, isTrue);
+            expect(
+              tester.getSize(find.byType(Dialog)),
+              initialSize / tester.view.devicePixelRatio,
+            );
+            for (final dimensions in [
+              const VideoDimensions(1920, 1080),
+              const VideoDimensions(1080, 1920),
+              const VideoDimensions(1080, 1080),
+            ]) {
+              engine._emit(
+                engine.currentSnapshot.copyWith(videoDimensions: dimensions),
+              );
+              await _pumpFrames(tester);
+            }
+            if (systemBack) {
+              await tester.binding.handlePopRoute();
+            } else {
+              await tester.tap(find.byTooltip('退出全屏（Esc）'));
+            }
+            await _pumpFrames(tester);
+            expect(window.isFullScreen, isFalse);
+            expect(tester.view.physicalSize, initialSize);
+            expect(find.byTooltip('全屏（F）'), findsOneWidget);
+          }
+          expect(
+            platformCalls.where(
+              (call) => call.method == 'SystemChrome.setPreferredOrientations',
+            ),
+            isEmpty,
+          );
+          expect(
+            platformCalls
+                .where(
+                  (call) =>
+                      call.method == 'SystemChrome.setEnabledSystemUIMode',
+                )
+                .map((call) => call.arguments),
+            [
+              'SystemUiMode.immersiveSticky',
+              'SystemUiMode.edgeToEdge',
+              'SystemUiMode.immersiveSticky',
+              'SystemUiMode.edgeToEdge',
+            ],
+          );
+          expect(engine.opens, opens);
+          expect(session.sourceGeneration, generation);
+          expect(engine.currentSnapshot.desiredPlaying, isFalse);
+          expect(engine.maxSurfaces, 1);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox());
+          await _pumpFrames(tester);
+        },
+      );
+    }
+  }
+
+  testWidgets('fullscreen releases the phone lock when its display unfolds', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 3;
+    tester.view.display.size = const Size(2400, 1080);
+    tester.view.physicalSize = const Size(2400, 1080);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.display.resetSize);
+    addTearDown(tester.view.resetPhysicalSize);
+    final orientations = <Object?>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'SystemChrome.setPreferredOrientations') {
+          orientations.add(call.arguments);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    final engine = _FakeEngine();
+    final session = _session(engine);
+    final window = _MobileWindowService();
+    addTearDown(session.close);
+    await tester.pumpWidget(
+      _app(session, window, const AppSettings.defaults()),
+    );
+    await _pumpFrames(tester);
+    engine._emit(
+      engine.currentSnapshot.copyWith(
+        videoDimensions: const VideoDimensions(1920, 1080),
+      ),
+    );
+    await tester.tap(find.byTooltip('全屏（F）'));
+    await _pumpFrames(tester);
+    expect(orientations, [
+      ['DeviceOrientation.landscapeLeft', 'DeviceOrientation.landscapeRight'],
+    ]);
+    // Exactly 600 dp on the short side is a large display even while the
+    // current app viewport remains phone-sized. A metrics event must unlock it.
+    tester.view.display.size = const Size(2400, 1800);
+    await _pumpFrames(tester);
+    expect(window.isFullScreen, isTrue);
+    expect(orientations, [
+      ['DeviceOrientation.landscapeLeft', 'DeviceOrientation.landscapeRight'],
+      <String>[],
+    ]);
+    await tester.tap(find.byTooltip('退出全屏（Esc）'));
+    await _pumpFrames(tester);
+    expect(window.isFullScreen, isFalse);
+    expect(orientations, hasLength(2));
+    expect(engine.opens, 1);
+    expect(engine.maxSurfaces, 1);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await _pumpFrames(tester);
+  });
+
   for (final live in [false, true]) {
     for (final dimensions in [
       const VideoDimensions(1920, 1080),
@@ -1013,6 +1179,7 @@ void main() {
       testWidgets(
         'mobile ${live ? 'live' : 'video'} fullscreen follows ${dimensions.width}x${dimensions.height}',
         (tester) async {
+          _usePhoneDisplay(tester);
           final engine = _FakeEngine();
           final session = _session(engine);
           final window = _FakeWindowService(desktop: false);
@@ -1067,6 +1234,7 @@ void main() {
     (tester) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(400, 800);
+      _usePhoneDisplay(tester);
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final engine = _FakeEngine();
@@ -1121,6 +1289,7 @@ void main() {
     testWidgets(
       'mobile fullscreen releases orientation when ${dispose ? 'disposed' : 'hidden'}',
       (tester) async {
+        _usePhoneDisplay(tester);
         final engine = _FakeEngine();
         final session = _session(engine);
         final window = _FakeWindowService(desktop: false);
@@ -1159,6 +1328,7 @@ void main() {
   testWidgets('cancelled mobile fullscreen drops queued orientation updates', (
     tester,
   ) async {
+    _usePhoneDisplay(tester);
     final engine = _FakeEngine();
     final session = _session(engine);
     final window = _DelayedWindow(desktop: false);
@@ -5416,6 +5586,12 @@ Widget _pageScope(
       : child;
 }
 
+void _usePhoneDisplay(WidgetTester tester) {
+  tester.view.display.size =
+      const Size(400, 800) * tester.view.devicePixelRatio;
+  addTearDown(tester.view.display.resetSize);
+}
+
 Offset _surfacePoint(WidgetTester tester) =>
     tester.getTopLeft(find.byKey(const ValueKey('player-surface-tap-target'))) +
     const Offset(130, 70);
@@ -5481,6 +5657,11 @@ final class _FakeWindowService extends WindowService {
     fullScreen = value;
     orientations.add(value ? orientation : null);
   }
+}
+
+final class _MobileWindowService extends WindowService {
+  @override
+  bool get hasDesktopWindow => false;
 }
 
 final class _FocusAtPopObserver extends NavigatorObserver {

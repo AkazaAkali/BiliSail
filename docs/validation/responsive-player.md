@@ -27,6 +27,16 @@
 - `tool/check.ps1 -SkipPub` 完整通过：根应用 989、`bili_api` 283、`bili_player` 22、`bili_danmaku` 32 项，共 1326 项测试；四部分格式与静态分析均通过。日志：`artifacts/video-info-default-check.log`。
 - 本轮未修改原生播放后端；尚未进行 Windows 发布窗口、Android/macOS 实机界面验收。
 
+## 平板全屏退出后的居中与旋转（2026-10-27）
+
+- 原因：共享播放面板对所有移动设备按视频比例强制申请方向，退出又无条件发送空方向列表。平板同样经历这组方向切换，可能触发 Android 的方向兼容居中窗口和系统旋转过渡；这与播放页自身的信息区宽度限制无关。Flutter 官方说明方向锁定可能在大屏触发 letterbox，且 `MediaQuery.size` 此时只报告缩小后的窗口，见[方向接口](https://api.flutter.dev/flutter/services/SystemChrome/setPreferredOrientations.html)；Android 同样建议自适应应用避免方向限制，见[大屏方向约定](https://developer.android.com/develop/ui/compose/layouts/adaptive/adaptive-dos-and-donts#orientation)。具体设备上的兼容模式触发仍需实机确认。
+- 修复：视频、影视、直播与离线播放共用的 `PlaybackPanel` 改为使用当前 `FlutterView.display` 的物理尺寸除以显示屏像素密度。最短边至少 600 逻辑像素时，全屏不申请视频方向，只切换系统栏和播放器布局；即使应用窗口较窄或已被兼容模式居中，也不误判成手机。手机使用最短边判断，横屏后仍保留按视频比例选择方向的行为。
+- `WindowService` 只释放自己实际安装过的方向限制，因此大屏进出全屏均不发送方向请求。显示屏配置变化会重新判断，折叠设备全屏中展开至大屏时释放先前的手机方向限制；页面关闭和旧 owner 取消继续沿用既有串行队列，不重建播放源。
+- 新增 9 项自动回归：6 项覆盖视频／影视／直播、完整平板窗口／窄窗口、延迟横向／纵向／正方形尺寸、退出按钮与系统返回、连续进出、单一 surface 和暂停意图；1 项覆盖手机横屏显示屏展开至恰好 600 dp 的边界；2 项覆盖未加锁不重置策略与全屏内释放已有锁。6 项平板用例在修复前均因实际发出方向请求而失败。手机既有方向测试改为明确模拟手机完整 display，避免将默认测试显示屏当作手机。
+- 播放面板与窗口服务共 250 项定向测试通过，日志 `build/validation/tablet-fullscreen-targeted.log`。`tool/check.ps1 -SkipPub` 的格式、静态分析与打包边界检查通过；全量根测试的重跑记录到 2886 项通过、23 项失败、13 项跳过后停滞，已终止，不能算全量通过。失败分布在侧栏、工作区导航、平板推荐流和设置页（`sidebar_test.dart`、`shell_layout_test.dart`、`workspace_shell_test.dart`、`workspace_router_test.dart`、`tablet_feed_layout_test.dart`、`settings_screen_test.dart`）；相关路径有同期修改，本任务未改动这些实现和测试。日志 `build/validation/tablet-fullscreen-check-retry.log` 保留具体失败。单独执行 `tool/check.ps1 -SkipPub -Stage PackageTests` 通过四个包的 659 项测试（API 478、播放器 83、弹幕 93、封装 5），10 项 mux 原生测试因未配置 `BILI_MUX_LIBRARY` 跳过，日志 `build/validation/tablet-fullscreen-packages.log`。
+- `tool/build-android-development.ps1 -Mode Release` 成功，重新准备 Android arm64 mux 并构建普通 `lib/main.dart` 入口。产物 `build/development/android-arm64/BiliSail-test-arm64-release.apk` 为 `dev.bilisail.bilisail.test`／「BiliSail 测试版」，版本 `1.2.1+4`，已校验签名、版本、arm64 AOT 和不可调试标记；未安装到设备，未替换正式包。日志 `build/validation/tablet-fullscreen-android-release.log`。
+- 没有可连接的 DTD 调试进程，热重载尝试返回无活动应用连接。当前连接设备为手机，没有平板实机验收；以上 Widget 回归验证方向请求和布局约束，不等同于实际 Android 系统旋转动画、厂商兼容窗口或真实媒体解码验收。桌面与其他移动平台未进行设备验证，未作性能结论。
+
 ## 移动端全屏方向（2026-10-07）
 
 - 原因：移动全屏原先只隐藏系统栏，没有申请屏幕方向；通用播放快照也没有向应用暴露画面尺寸。

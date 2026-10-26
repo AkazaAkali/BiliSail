@@ -326,6 +326,25 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
         : FullScreenOrientation.portrait;
   }
 
+  FullScreenOrientation? get _preferredFullScreenOrientation {
+    if (widget.window.hasDesktopWindow) return null;
+    final display = View.of(context).display;
+    // Orientation locks can letterbox tablets. Use the physical display rather
+    // than the app viewport, which can already be narrowed by compatibility mode
+    // or multi-window. The shortest side keeps phone rotation below the cutoff.
+    if (display.size.shortestSide / display.devicePixelRatio >= 600) {
+      return null;
+    }
+    return _videoOrientation ??
+        _fullScreenOrientation ??
+        (MediaQuery.orientationOf(context) == Orientation.landscape
+            ? FullScreenOrientation.landscape
+            : FullScreenOrientation.portrait);
+  }
+
+  @override
+  void didChangeMetrics() => _updateFullScreenOrientation();
+
   void _updateFullScreenOrientation() {
     final request = _fullScreenRequest;
     if (request == null ||
@@ -334,8 +353,8 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
         widget.window.hasDesktopWindow) {
       return;
     }
-    final orientation = _videoOrientation;
-    if (orientation == null || orientation == _fullScreenOrientation) return;
+    final orientation = _preferredFullScreenOrientation;
+    if (orientation == _fullScreenOrientation) return;
     _fullScreenOrientation = orientation;
     // The same owner/command queue also orders delayed dimensions against exit.
     unawaited(_setWindowFullScreen(request, true));
@@ -346,12 +365,7 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
     _shortcuts.cancel();
     final request = Object();
     final providerContainer = ProviderScope.containerOf(context);
-    _fullScreenOrientation = widget.window.hasDesktopWindow
-        ? null
-        : _videoOrientation ??
-              (MediaQuery.orientationOf(context) == Orientation.landscape
-                  ? FullScreenOrientation.landscape
-                  : FullScreenOrientation.portrait);
+    _fullScreenOrientation = _preferredFullScreenOrientation;
     _fullScreenRequest = request;
     setState(() => _fullScreen = true);
     try {

@@ -263,6 +263,7 @@ class WindowService {
   /// Other desktop platforms retain their native caption until validated.
   bool get hasCustomTitleBar => Platform.isWindows && viewId == null;
   bool _fullScreen = false;
+  bool _mobileOrientationLocked = false;
   bool get isFullScreen => _fullScreen;
 
   Future<void> initialize() async {
@@ -336,18 +337,23 @@ class WindowService {
     } else if (hasDesktopWindow) {
       await windowManager.setFullScreen(value);
     } else {
-      if (!value || orientation != null) {
+      final requestedOrientation = value ? orientation : null;
+      if (requestedOrientation != null || _mobileOrientationLocked) {
         await SystemChrome.setPreferredOrientations(
-          !value
-              ? const []
-              : switch (orientation) {
-                  FullScreenOrientation.landscape => const [
-                    DeviceOrientation.landscapeLeft,
-                    DeviceOrientation.landscapeRight,
-                  ],
-                  _ => const [DeviceOrientation.portraitUp],
-                },
+          switch (requestedOrientation) {
+            FullScreenOrientation.landscape => const [
+              DeviceOrientation.landscapeLeft,
+              DeviceOrientation.landscapeRight,
+            ],
+            FullScreenOrientation.portrait => const [
+              DeviceOrientation.portraitUp,
+            ],
+            null => const [],
+          },
         );
+        // Only release a restriction this service actually installed. A tablet
+        // fullscreen cycle must not replace its existing system rotation policy.
+        _mobileOrientationLocked = requestedOrientation != null;
       }
       await SystemChrome.setEnabledSystemUIMode(
         value ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
