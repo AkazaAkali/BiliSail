@@ -14,6 +14,7 @@ import 'package:bili_player/bili_player.dart';
 
 import '../../support/video_card_fake_engine.dart';
 import '../../support/text_selection.dart';
+import '../../support/input_test_app.dart';
 
 import 'dart:async';
 
@@ -799,6 +800,78 @@ void main() {
     },
     variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
+
+  for (final replying in [false, true]) {
+    testWidgets(
+      'desktop ${replying ? 'reply' : 'comment'} Enter keeps the composer open',
+      (tester) async {
+        if (replying) await controller.openReplies(root);
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const InputTestApp(
+              home: Scaffold(
+                body: SizedBox(
+                  width: 340,
+                  child: VideoCommentsPanel(detail: _detail),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final input = find.byType(TextField);
+        final collapsedHeight = tester.getSize(input).height;
+
+        for (var attempt = 0; attempt < 2; attempt++) {
+          tester.testTextInput.log.clear();
+          await tester.tap(input);
+          await tester.pumpAndSettle();
+          // The native client must support newline from its first attachment,
+          // before the focus animation rebuilds the field with more lines.
+          final attachment = tester.testTextInput.log.firstWhere(
+            (call) => call.method == 'TextInput.setClient',
+          );
+          final configuration =
+              (attachment.arguments as List<Object?>)[1]
+                  as Map<Object?, Object?>;
+          expect(configuration['inputAction'], 'TextInputAction.newline');
+          expect(
+            configuration['inputType'],
+            containsPair('name', 'TextInputType.multiline'),
+          );
+
+          await tester.enterText(input, '第一行');
+          // Native text input inserts the newline and then reports the action.
+          tester.testTextInput.updateEditingValue(
+            const TextEditingValue(
+              text: '第一行\n',
+              selection: TextSelection.collapsed(offset: 4),
+            ),
+          );
+          await tester.testTextInput.receiveAction(TextInputAction.newline);
+          await tester.pumpAndSettle();
+          final field = tester.widget<TextField>(input);
+          expect(field.focusNode!.hasFocus, isTrue);
+          expect(field.controller!.text, '第一行\n');
+          expect(tester.getSize(input).height, greaterThan(collapsedHeight));
+          expect(find.text('发布').hitTestable(), findsOneWidget);
+          expect(repo.writes, 0);
+
+          await tester.tap(find.text(replying ? '评论详情' : '4 条'));
+          await tester.pumpAndSettle();
+          expect(find.text('发布'), findsNothing);
+          expect(field.controller!.text, '第一行\n');
+        }
+        expect(tester.takeException(), isNull);
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.windows,
+        TargetPlatform.macOS,
+        TargetPlatform.linux,
+      }),
+    );
+  }
 
   testWidgets('successful send preserves a newer edited draft', (tester) async {
     await tester.pumpWidget(

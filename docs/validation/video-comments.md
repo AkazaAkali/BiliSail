@@ -1,5 +1,15 @@
 # 播放页与评论交互
 
+## 桌面评论回车换行（2026-10-27）
+
+共用评论输入框收起时使用 `maxLines=1`，未显式设置输入类型和动作，导致首次原生输入连接被配置为单行文本与 `TextInputAction.done`；回车因此可能结束编辑，失焦后评论框随之收起。现在 [CommentsPanel](../../lib/shared/ui/comments_panel.dart) 始终显式使用 `TextInputType.multiline` 和 `TextInputAction.newline`，显示行数仍按焦点展开／收起。视频、影视和动态共用该修复，评论和楼中楼回复均保留换行与焦点；发布继续由按钮显式触发。
+
+[评论回归测试](../../test/features/video/video_comments_controller_test.dart) 新增 Windows／macOS／Linux 平台配置下的主评论和楼中楼回复共 6 项用例，检查首次连接的多行／换行配置、平台换行动作后的焦点和展开状态、不自动发送，以及收起再进入后的配置与草稿保留。修复前 6 项均因首次动作实际为 `done` 而失败，修复后评论定向测试共 40 项通过，日志为 `build/comment-enter-targeted.log`。
+
+`tool/check.ps1 -SkipPub` 通过根应用与四个包的格式、静态分析和打包边界检查，首次启动根测试因其他 `flutter_tester` 进程占用 `build/native_assets/windows/sqlite3.dll` 而中止。保留该进程，待占用解除后分别通过 `-Stage RootTests` 和 `-Stage PackageTests`：根应用 2,998 项、API 478 项、player 83 项、danmaku 93 项、mux 5 项，共 3,657 项测试通过。根应用 13 项符号链接测试因 Windows 权限不足跳过，mux 10 项原生测试因未配置 `BILI_MUX_LIBRARY` 跳过。日志为 `build/comment-enter-check.log`、`build/comment-enter-root-check.log` 和 `build/comment-enter-package-check.log`；本次文档链接和 `git diff --check` 通过。检查基于包含同期修改的共同工作区。
+
+当前无可连接的 Flutter 调试实例，热重载无法执行；本次未构建或完成 Windows／macOS／Linux 物理键盘及真实输入法验收，平台配置 Widget 测试不等于这些实机验证。
+
 ## 评论发送反馈与刷新可见性（2026-10-24）
 
 用户反馈评论发布后本地可见，刷新后消失。经用户授权，使用现有 Release 的系统安全存储会话进行只读核验：在用户指定视频中，新版 `/x/v2/reply/wbi/main` 返回一条当前账号的评论，`state=17`、`invisible=false`；旧 `/x/v2/reply` 的最新列表前五页均未返回该条。游客读取该评论的楼中楼入口返回业务码 `12006`，同一视频正常公开评论的游客对照读取成功。这说明该评论已被服务端接收、当前未向游客公开；不把状态 17 进一步断言为永久删除、封禁或某种确定的审核结论。

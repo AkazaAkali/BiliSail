@@ -421,6 +421,9 @@ class _CommentsPanelState extends ConsumerState<CommentsPanel> {
                     child: TextField(
                       controller: _text,
                       focusNode: _focus,
+                      // Keep native Enter behavior stable while collapsed.
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
                       style: inputStyle,
                       readOnly: !state.signedIn,
                       onTap: state.signedIn ? null : _login,
