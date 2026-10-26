@@ -557,7 +557,7 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
         context?.findAncestorStateOfType<_PlayerViewState>() == this;
     if (_controlEditorFocused == editing) return;
     _controlEditorFocused = editing;
-    if (!_dynamicControls) _scheduleControlsHide();
+    _scheduleControlsHide();
   }
 
   void _onControlsMenuChanged(bool open) {
@@ -632,7 +632,8 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
         _hoveredControlRegions.isNotEmpty ||
         // PopupMenuButton must stay mounted until its route returns a selection.
         _openControlsMenus > 0 ||
-        (!_dynamicControls && (_controlEditorFocused || _hasError))) {
+        _controlEditorFocused ||
+        (!_dynamicControls && _hasError)) {
       return;
     }
     _controlsHideTimer = Timer(
@@ -667,7 +668,14 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
 
   void _onMouseExit(PointerExitEvent event) {
     _mouseInside = false;
-    if (!_dynamicControls || !widget.active || _openControlsMenus > 0) return;
+    // IME candidate UI can take the pointer outside the player while the
+    // composer is still editing. Hiding controls would revoke its focus.
+    if (!_dynamicControls ||
+        !widget.active ||
+        _openControlsMenus > 0 ||
+        _controlEditorFocused) {
+      return;
+    }
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
     widget.controlsVisible.value = false;

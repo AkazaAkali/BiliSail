@@ -4008,6 +4008,121 @@ void main() {
     },
   );
 
+  for (final content in ['video', 'pgc', 'live']) {
+    for (final fullScreen in [false, true]) {
+      for (final compact in [false, true]) {
+        testWidgets(
+          'dynamic controls preserve IME composition through idle and exit '
+          'content=$content fullscreen=$fullScreen compact=$compact',
+          (tester) async {
+            tester.view.devicePixelRatio = 1;
+            tester.view.physicalSize = Size(compact ? 500 : 1400, 900);
+            addTearDown(tester.view.resetPhysicalSize);
+            addTearDown(tester.view.resetDevicePixelRatio);
+            final engine = _FakeEngine();
+            final session = _session(engine);
+            addTearDown(session.close);
+            final editorFocus = FocusNode();
+            final text = TextEditingController();
+            addTearDown(editorFocus.dispose);
+            addTearDown(text.dispose);
+            await tester.pumpWidget(
+              _app(
+                session,
+                _FakeWindowService(),
+                AppSettings(playerControlsMode: PlayerControlsMode.dynamic),
+                width: compact ? 400 : 1200,
+                target: switch (content) {
+                  'pgc' => const PgcPlaybackTarget('1', cid: '123'),
+                  'live' => const LivePlaybackTarget('12'),
+                  _ => null,
+                },
+                composer: (_) => TextField(
+                  key: const Key('dynamic-editor'),
+                  focusNode: editorFocus,
+                  controller: text,
+                ),
+              ),
+            );
+            await _pumpFrames(tester);
+            if (fullScreen) {
+              await tester.tap(find.byTooltip('全屏（F）'));
+              await _pumpFrames(tester);
+            }
+            if (compact) {
+              await tester.tap(find.byTooltip('发送弹幕'));
+              await _pumpFrames(tester);
+            }
+            final controls = find.byKey(const ValueKey('player-controls'));
+            final editor = find.byKey(const Key('dynamic-editor'));
+            final generation = session.sourceGeneration;
+            final opens = engine.opens;
+            final playing = engine.currentSnapshot.desiredPlaying;
+            final mouse = await tester.createGesture(
+              kind: PointerDeviceKind.mouse,
+            );
+            await mouse.addPointer(location: _surfacePoint(tester));
+            await tester.tap(editor);
+            await tester.showKeyboard(editor);
+            const composing = TextEditingValue(
+              text: 'ni',
+              selection: TextSelection.collapsed(offset: 2),
+              composing: TextRange(start: 0, end: 2),
+            );
+            tester.testTextInput.updateEditingValue(composing);
+            await tester.pump();
+            await tester.pump(const Duration(seconds: 10));
+            expect(editorFocus.hasPrimaryFocus, isTrue);
+            expect(text.value, composing);
+            expect(controls.hitTestable(), findsOneWidget);
+
+            // Candidate UI may take the pointer outside the Flutter surface.
+            await mouse.moveTo(const Offset(-10, -10));
+            await _pumpFrames(tester);
+            expect(editorFocus.hasPrimaryFocus, isTrue);
+            expect(controls.hitTestable(), findsOneWidget);
+            tester.binding.handleAppLifecycleStateChanged(
+              AppLifecycleState.inactive,
+            );
+            await tester.pump(const Duration(seconds: 10));
+            expect(editorFocus.hasPrimaryFocus, isTrue);
+            expect(text.value, composing);
+            expect(controls.hitTestable(), findsOneWidget);
+            _resumeApp(tester);
+            await tester.pump();
+            tester.testTextInput.updateEditingValue(
+              const TextEditingValue(
+                text: '你',
+                selection: TextSelection.collapsed(offset: 1),
+              ),
+            );
+            await tester.pump(const Duration(seconds: 10));
+            expect(text.text, '你');
+            expect(text.value.composing, TextRange.empty);
+            expect(editorFocus.hasPrimaryFocus, isTrue);
+            expect(controls.hitTestable(), findsOneWidget);
+
+            editorFocus.unfocus();
+            await tester.pump();
+            await tester.pump(const Duration(milliseconds: 2499));
+            expect(controls.hitTestable(), findsOneWidget);
+            await tester.pump(const Duration(milliseconds: 1));
+            await tester.pump(const Duration(milliseconds: 216));
+            await tester.pump();
+            expect(controls, findsNothing);
+            expect(engine.currentSnapshot.desiredPlaying, playing);
+            expect(session.sourceGeneration, generation);
+            expect(engine.opens, opens);
+            expect(engine.maxSurfaces, 1);
+            await mouse.removePointer();
+            await tester.pumpWidget(const SizedBox());
+            await _pumpFrames(tester);
+          },
+        );
+      }
+    }
+  }
+
   testWidgets(
     'click controls retain the focused editor and release it when hidden',
     (tester) async {
