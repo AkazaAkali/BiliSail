@@ -94,6 +94,20 @@ abstract class DetachedPlaybackWindow extends ChangeNotifier {
   Future<void> saveGeometry() async {}
 }
 
+/// Drains secondary views before the shared engine is allowed to terminate.
+final class DesktopPlaybackWindowController {
+  final _hosts = <_DesktopPlaybackWindowState>{};
+  bool _closed = false;
+  Future<void>? _closing;
+
+  Future<void> close() => _closing ??= _close();
+
+  Future<void> _close() async {
+    _closed = true;
+    await Future.wait([for (final host in _hosts.toList()) host._shutdown()]);
+  }
+}
+
 class DesktopPlaybackWindow extends StatefulWidget {
   const DesktopPlaybackWindow({
     super.key,
@@ -104,6 +118,7 @@ class DesktopPlaybackWindow extends StatefulWidget {
     this.activationToken,
     this.title = 'BiliSail 播放',
     this.windowFactory,
+    this.controller,
   });
 
   final Widget child;
@@ -113,6 +128,7 @@ class DesktopPlaybackWindow extends StatefulWidget {
   final Object? activationToken;
   final String title;
   final DetachedPlaybackWindowFactory? windowFactory;
+  final DesktopPlaybackWindowController? controller;
 
   @override
   State<DesktopPlaybackWindow> createState() => _DesktopPlaybackWindowState();
@@ -128,11 +144,18 @@ class _DesktopPlaybackWindowState extends State<DesktopPlaybackWindow> {
   bool _activateRequested = false;
   bool _titleRequested = false;
   Object? _opening;
+  final _openingTasks = <Future<void>>{};
+  Future<void> _retiring = Future.value();
+  bool _shuttingDown = false;
 
   @override
   void initState() {
     super.initState();
-    if (widget.playback != null) _scheduleWindowUpdate(create: true);
+    widget.controller?._hosts.add(this);
+    _shuttingDown = widget.controller?._closed ?? false;
+    if (!_shuttingDown && widget.playback != null) {
+      _scheduleWindowUpdate(create: true);
+    }
   }
 
   void _scheduleWindowUpdate({
@@ -140,6 +163,7 @@ class _DesktopPlaybackWindowState extends State<DesktopPlaybackWindow> {
     bool activate = false,
     bool title = false,
   }) {
+    if (_shuttingDown) return;
     _createRequested |= create;
     _activateRequested |= activate;
     _titleRequested |= title;
@@ -160,7 +184,9 @@ class _DesktopPlaybackWindowState extends State<DesktopPlaybackWindow> {
       _titleRequested = false;
       if (widget.playback == null || _closeRequested) return;
       if (_window == null && create) {
-        unawaited(_open());
+        final opening = _open();
+        _openingTasks.add(opening);
+        unawaited(opening.whenComplete(() => _openingTasks.remove(opening)));
         return;
       }
       final window = _window;
@@ -272,6 +298,7 @@ class _DesktopPlaybackWindowState extends State<DesktopPlaybackWindow> {
   }
 
   void _disposeAfterFrame(DetachedPlaybackWindow window) {
+    final disposed = Completer<void>();
     // Start the capture now, before a rapid new open queues its restore. Native
     // geometry is owner checked, so late capture/retire cannot change that view.
     final saved = window
@@ -291,8 +318,46 @@ class _DesktopPlaybackWindowState extends State<DesktopPlaybackWindow> {
           );
         });
     _afterFrame(() {
-      unawaited(saved.whenComplete(() => Timer.run(window.dispose)));
+      unawaited(
+        saved.whenComplete(
+          () => Timer.run(() {
+            try {
+              window.dispose();
+              disposed.complete();
+            } catch (error, stack) {
+              disposed.completeError(error, stack);
+            }
+          }),
+        ),
+      );
     });
+    _retiring = Future.wait([_retiring, disposed.future]).then((_) {});
+    unawaited(
+      _retiring.catchError((Object error, StackTrace stack) {
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stack,
+            library: 'BiliSail playback window retirement',
+          ),
+        );
+      }),
+    );
+  }
+
+  Future<void> _drain() async {
+    // An in-flight prepare can retire its cancelled view after it completes.
+    await Future.wait(_openingTasks.toList());
+    await _retiring;
+  }
+
+  Future<void> _shutdown() {
+    if (!_shuttingDown) {
+      _shuttingDown = true;
+      _cancelWindowUpdate();
+      if (mounted) setState(_retireWindow);
+    }
+    return _drain();
   }
 
   void _requestClose() {
@@ -323,6 +388,12 @@ class _DesktopPlaybackWindowState extends State<DesktopPlaybackWindow> {
   @override
   void didUpdateWidget(DesktopPlaybackWindow oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?._hosts.remove(this);
+      widget.controller?._hosts.add(this);
+      if (widget.controller?._closed == true) unawaited(_shutdown());
+    }
+    if (_shuttingDown) return;
     if (widget.playback == null) {
       _closeRequested = false;
       _cancelWindowUpdate();
@@ -350,15 +421,18 @@ class _DesktopPlaybackWindowState extends State<DesktopPlaybackWindow> {
 
   @override
   void dispose() {
+    _shuttingDown = true;
     _cancelWindowUpdate();
     _retireWindow();
+    final controller = widget.controller;
+    unawaited(_drain().then((_) => controller?._hosts.remove(this)));
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final window = _window;
-    final playback = widget.playback;
+    final playback = _shuttingDown ? null : widget.playback;
     final content = playback == null
         ? null
         : KeyedSubtree(key: _playbackKey, child: playback);

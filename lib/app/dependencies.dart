@@ -14,6 +14,7 @@ import '../core/network/api_requests.dart';
 import '../domain/media_cdn.dart';
 import '../core/logging/playback_diagnostic_log.dart';
 import '../core/platform/window_service.dart';
+import '../core/platform/detached_playback_window.dart';
 import '../core/platform/file_access_service.dart';
 import '../features/downloads/application/download_controller.dart';
 import '../features/downloads/data/api_download_source_repository.dart';
@@ -124,6 +125,7 @@ class AppDependencies {
   final SqliteLibraryRepository library;
   final PlaybackManager playback;
   final WindowService window;
+  final playbackWindow = DesktopPlaybackWindowController();
   final DioApiTransport sponsorTransport;
   final PlaybackDiagnosticLog? playbackLog;
   final AppImageCache images;
@@ -504,22 +506,28 @@ class AppDependencies {
       // Flush the final history observation while its account epoch is valid.
       await playback.close();
     } finally {
-      requests.advanceSession();
       try {
-        await session.dispose();
+        // SDK-managed HWNDs must retire while the shared engine and its message
+        // loop are still alive, after their Flutter views have unmounted.
+        await playbackWindow.close();
       } finally {
+        requests.advanceSession();
         try {
-          sponsorTransport.close();
-          api.close();
+          await session.dispose();
         } finally {
           try {
-            await database.close();
+            sponsorTransport.close();
+            api.close();
           } finally {
             try {
-              await playbackLog?.close();
-              await images.close();
+              await database.close();
             } finally {
-              await window.dispose();
+              try {
+                await playbackLog?.close();
+                await images.close();
+              } finally {
+                await window.dispose();
+              }
             }
           }
         }

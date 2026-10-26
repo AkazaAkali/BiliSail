@@ -10,6 +10,157 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets(
+    'application exit waits for unmount, geometry and native destroy',
+    (tester) async {
+      final controller = DesktopPlaybackWindowController();
+      final saved = Completer<void>();
+      late _FakeWindow window;
+      var unmounted = false;
+      var creations = 0;
+      var completed = false;
+      Widget build(Object token) => DesktopPlaybackWindow(
+        controller: controller,
+        activationToken: token,
+        playback: _DisposeProbe(onDispose: () => unmounted = true),
+        onCloseRequested: () => fail('Shutdown must not navigate'),
+        onError: (error) => fail('$error'),
+        windowFactory: ({required title, required onCloseRequested}) {
+          creations++;
+          return window = _FakeWindow(
+            tester.view,
+            onCloseRequested,
+            onSave: () => saved.future,
+            onDispose: () {
+              expect(unmounted, isTrue);
+              expect(find.byType(View), findsOneWidget);
+            },
+          );
+        },
+        child: const SizedBox(key: ValueKey('browser')),
+      );
+      await tester.pumpWidget(build('first'));
+      await tester.pumpAndSettle();
+      final closing = controller.close();
+      expect(controller.close(), same(closing));
+      unawaited(closing.then((_) => completed = true));
+      await tester.pumpAndSettle();
+      expect(unmounted, isTrue);
+      expect(window.disposed, isFalse);
+      expect(completed, isFalse);
+      saved.complete();
+      await tester.pumpAndSettle();
+      await closing;
+      expect(window.disposed, isTrue);
+      expect(completed, isTrue);
+      expect(find.byKey(const ValueKey('browser')), findsOneWidget);
+      await tester.pumpWidget(build('later'));
+      await tester.pumpAndSettle();
+      expect(creations, 1);
+      expect(find.byType(_DisposeProbe), findsNothing);
+    },
+  );
+
+  testWidgets('application exit cancels queued creation before native entry', (
+    tester,
+  ) async {
+    final controller = DesktopPlaybackWindowController();
+    await tester.pumpWidget(
+      DesktopPlaybackWindow(
+        controller: controller,
+        playback: const SizedBox(),
+        onCloseRequested: () {},
+        onError: (error) => fail('$error'),
+        windowFactory: ({required title, required onCloseRequested}) =>
+            throw StateError('Creation must be cancelled'),
+        child: const SizedBox(),
+      ),
+    );
+    final closing = controller.close();
+    await tester.pumpAndSettle();
+    await closing;
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('application exit drains every cancelled and current prepare', (
+    tester,
+  ) async {
+    final controller = DesktopPlaybackWindowController();
+    final ready = [Completer<void>(), Completer<void>()];
+    final windows = <_FakeWindow>[];
+    var completed = false;
+    Widget build(bool open) => DesktopPlaybackWindow(
+      controller: controller,
+      playback: open ? const SizedBox() : null,
+      onCloseRequested: () {},
+      onError: (error) => fail('$error'),
+      windowFactory: ({required title, required onCloseRequested}) {
+        final index = windows.length;
+        final window = _FakeWindow(
+          tester.view,
+          onCloseRequested,
+          viewId: 100 + index,
+          onPrepare: () => ready[index].future,
+        );
+        windows.add(window);
+        return window;
+      },
+      child: const SizedBox(),
+    );
+    await tester.pumpWidget(build(true));
+    await tester.pump(Duration.zero);
+    await tester.pumpWidget(build(false));
+    await tester.pumpWidget(build(true));
+    await tester.pump(Duration.zero);
+    expect(windows, hasLength(2));
+    final closing = controller.close();
+    unawaited(closing.then((_) => completed = true));
+    ready.last.complete();
+    await tester.pumpAndSettle();
+    expect(windows.last.disposed, isTrue);
+    expect(completed, isFalse);
+    ready.first.complete();
+    await tester.pumpAndSettle();
+    await closing;
+    expect(windows.every((window) => window.disposed), isTrue);
+    expect(find.byType(View), findsOneWidget);
+  });
+
+  testWidgets(
+    'application exit includes a previously unmounted host retiring',
+    (tester) async {
+      final controller = DesktopPlaybackWindowController();
+      final saved = Completer<void>();
+      late _FakeWindow window;
+      var completed = false;
+      await tester.pumpWidget(
+        DesktopPlaybackWindow(
+          controller: controller,
+          playback: const SizedBox(),
+          onCloseRequested: () {},
+          onError: (error) => fail('$error'),
+          windowFactory: ({required title, required onCloseRequested}) =>
+              window = _FakeWindow(
+                tester.view,
+                onCloseRequested,
+                onSave: () => saved.future,
+              ),
+          child: const SizedBox(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox());
+      final closing = controller.close();
+      unawaited(closing.then((_) => completed = true));
+      await tester.pumpAndSettle();
+      expect(completed, isFalse);
+      saved.complete();
+      await tester.pumpAndSettle();
+      await closing;
+      expect(window.disposed, isTrue);
+    },
+  );
+
+  testWidgets(
     'macOS native preflight grants support and revokes it on rejection',
     (tester) async {
       const channel = MethodChannel('bilisail/application_window');

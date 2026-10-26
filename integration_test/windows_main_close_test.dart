@@ -68,6 +68,7 @@ void main() {
           ValueListenableBuilder<bool>(
             valueListenable: showPlayback,
             builder: (_, visible, _) => DesktopPlaybackWindow(
+              controller: dependencies.playbackWindow,
               windowFactory: ({required title, required onCloseRequested}) =>
                   playback = DetachedPlaybackWindow.create(
                     title: title,
@@ -139,7 +140,8 @@ void main() {
         await _until(tester, () => database.closing);
         expect(requests, greaterThanOrEqualTo(1));
         expect(engineClosed, isTrue);
-        if (withPlayback) expect(playback!.isOpen, isTrue);
+        if (withPlayback) expect(playback!.isOpen, isFalse);
+        expect(tester.binding.renderViews.length, 1);
         expect(await windowManager.isPreventClose(), isFalse);
         expect(completedRequests, 0);
         expect(dependencies.close(), same(closing));
@@ -148,7 +150,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 200));
         expect(completedRequests, 0);
         expect(database.closeCalls, 1);
-        if (withPlayback) expect(playback!.isOpen, isTrue);
+        if (withPlayback) expect(playback!.isOpen, isFalse);
         expect(reusedCleanup, isTrue);
 
         database.allowClose.complete();

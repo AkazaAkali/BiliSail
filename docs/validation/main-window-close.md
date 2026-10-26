@@ -26,7 +26,26 @@
 
 本轮 `tool/check.ps1 -SkipPub` 通过：根应用 2599、bili_api 456、bili_player 81、bili_danmaku 93、bili_mux 2，共 3231 项测试通过；10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。日志 `build/exit-latency-check.log`。原生主窗关闭回归两项通过（`build/exit-latency-main-close.log`），视频资源释放回归 9 项通过（`build/exit-latency-native-dispose.log`）。
 
-## 回归与验证边界
+## 双标签播放中关闭主窗的退出延迟（2026-10-27）
+
+使用空凭据、内存数据库和本地 DASH 音视频，在独立 Windows Release 进程中复现：主窗收到 `WM_CLOSE` 后，Dart 依赖清理仅用 3–5 毫秒，进程却在 3658／3457／3389 毫秒后以 `0xc0000409` 退出；Windows 事件记录指向 `ucrtbase.dll`。此前只启动再退出的回归没有创建第二个 view，集成测试也会取消最终进程退出，因此没有覆盖这个阶段。
+
+退出清理遗漏了仍然挂载的 SDK 播放 view 和原生播放窗口。通过保持其他清理不变、在 engine 退出前显式卸载并销毁播放窗，三次退出恢复为 247／248／201 毫秒且退出码均为 0，确认问题位于这一生命周期边界；本轮未采集原生调用栈，不推断 `ucrtbase.dll` 内部的具体终止原因。
+
+- [播放窗口适配器](../../lib/core/platform/detached_playback_window.dart)新增进程级关闭控制器，由 [AppDependencies](../../lib/app/dependencies.dart)持有，[BiliApp](../../lib/app/bili_app.dart)注入。共享依赖清理先完成原有播放释放，再等待播放 view 从 Widget 树卸载、几何保存及原生窗口销毁，最后返回退出许可。账号 epoch 失效与数据库关闭仍发生在播放进度收尾之后。
+- 同一个关闭 Future 合并重复请求；关闭开始后不再创建播放窗。清理同时等待已卸载但仍在退休的窗口，以及快速关闭／重开遗留的所有创建任务，防止迟到的 prepare 在退出握手结束后留下新 view。原生窗口销毁继续离开 Flutter 帧栈和 FFI 回调栈。
+- [窗口组件回归](../../test/core/platform/detached_playback_window_test.dart)覆盖卸载先于原生销毁、几何等待、重复退出、取消排队创建、多个迟到 prepare、已经卸载的宿主，以及清理后不再挂载媒体。 [主窗集成回归](../../integration_test/windows_main_close_test.dart)改为在延迟数据库关闭时确认播放窗已销毁且只剩主 view，保留清理期间重复关闭和独立播放窗关闭的检查。
+- [退出耗时脚本](../../tool/test-windows-exit-latency.ps1)新增 `-WithPlayback`，构建 [AOT 本地探针](../../tool/validation/windows_exit_probe.dart)，分别验证普通、最小化、全屏播放窗。按 PID 向真实主 HWND 发 `WM_CLOSE`，等待进程退出，检查退出码为 0、view 清理完成及总耗时不超过 2 秒；该阈值是测试门槛。探针使用空凭据和内存数据库，脚本结束时恢复普通 `lib/main.dart` Release 产物，并恢复环境变量。
+
+最终执行 `tool/test-windows-exit-latency.ps1 -WithPlayback -StartupSeconds 0 -Samples 3 -Output build/validation/exit-latency/playback-final.json`，在确认两个 view 和播放进度推进后立即关闭主窗：普通播放窗 270／252／169 毫秒，最小化播放窗 73／73／91 毫秒，全屏播放窗 82／88／79 毫秒，九次退出码均为 0。日志为 `build/playback-exit-release-latency.log`；这些数值只代表本机受控本地分轨场景。
+
+`tool/check.ps1 -SkipPub` 通过：根应用 3008、bili_api 478、bili_player 83、bili_danmaku 93、bili_mux 5，共 3667 项测试通过，格式、静态分析和打包边界检查通过（`build/playback-exit-check.log`）。根应用有 13 项既有条件用例跳过，mux 另有 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。真实主窗关闭集成回归两项通过（`build/playback-exit-main-close.log`），原生视频生命周期／渲染队列／尺寸回归九项通过（`build/playback-exit-native-dispose.log`）。Windows x64 mux 组件构建通过（`build/exit-playback-mux.log`）。
+
+脚本最终恢复普通 `lib/main.dart` 的 Windows Release 构建成功，产物为 `build/windows/x64/runner/Release/bilisail.exe`，分发须保留整个 Release 目录。随后普通应用启动 3 秒再关闭，三次为 61／57／59 毫秒，退出码均为 0（`build/validation/exit-latency/idle-final.json`），用于检查没有独立播放窗时的退出。构建仍保留第三方 CMake 的 CMP0175 提示。
+
+Android／macOS、本机 Windows 以外的设备、真实账号最后一次云进度和运行中的下载任务尚未实测。DTD 未发现可连接的调试应用，热重载请求返回无活动连接；本轮原生回归使用重新构建的测试宿主，耗时测量使用 Release/AOT。
+
+## 初次主窗修复的验证边界
 
 以下为 `99f63c0` 初次修复时的验证快照；退出延迟修正后的验证见上节。
 

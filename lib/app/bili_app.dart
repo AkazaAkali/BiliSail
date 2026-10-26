@@ -105,6 +105,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
               required onHome,
               required onError,
             }) => DesktopPlaybackWindow(
+              controller: widget.dependencies.playbackWindow,
               activationToken: activationToken,
               onCloseRequested: onClose,
               onError: onError,
