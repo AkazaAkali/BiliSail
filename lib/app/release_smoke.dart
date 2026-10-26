@@ -95,12 +95,12 @@ Future<void> verifyMacOSPlaybackWindows(
           .timeout(const Duration(seconds: 2));
       final inputWait = Stopwatch()..start();
       final keyboard = HardwareKeyboard.instance;
-      bool spaceHeld() => keyboard.isLogicalKeyPressed(LogicalKeyboardKey.space);
-      while ((presses == 0 || spaceHeld()) &&
+      bool held() => keyboard.isLogicalKeyPressed(LogicalKeyboardKey.space);
+      while ((presses == 0 || held()) &&
           inputWait.elapsed < const Duration(seconds: 2)) {
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }
-      if (presses != 1 || spaceHeld()) {
+      if (presses != 1 || held()) {
         throw StateError('Playback Space sequence was not handled');
       }
       await playback.windowService.bindTitleBarBack(
