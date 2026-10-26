@@ -637,7 +637,10 @@ void main() {
           );
           await db.close();
           await openRepository();
-          expect(repository.current.tasks.single.status, DownloadStatus.completed);
+          expect(
+            repository.current.tasks.single.status,
+            DownloadStatus.completed,
+          );
           final resolves = sources.resolveCalls;
           await repository.resume(task.id);
           await _waitFor(repository, DownloadStatus.completed);
