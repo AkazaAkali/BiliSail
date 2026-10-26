@@ -253,12 +253,20 @@ class _SeekPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final width = math.min(160.0, math.max(0.0, constraints.maxWidth - 16));
-      final textHeight = MediaQuery.textScalerOf(context).scale(13) * 1.5;
-      final imageHeight = math.min(
-        width / (storyboard?.aspectRatio ?? 16 / 9),
-        math.max(0.0, constraints.maxHeight - textHeight - 24),
+      final availableWidth = math.min(
+        100.0,
+        math.max(0.0, constraints.maxWidth - 16),
       );
+      final textHeight = MediaQuery.textScalerOf(context).scale(13) * 1.5;
+      final aspectRatio = storyboard?.aspectRatio ?? 16 / 9;
+      final imageHeight = math.min(
+        availableWidth / aspectRatio,
+        math.max(0.0, constraints.maxHeight - textHeight - 16),
+      );
+      // Keep the sprite's aspect ratio when height is the limiting constraint.
+      final width = imageHeight >= 24
+          ? imageHeight * aspectRatio
+          : availableWidth;
       final frame = storyboard?.frameAt(position);
       final placeholder = ColoredBox(
         color: const Color(0xff303030),
@@ -270,37 +278,40 @@ class _SeekPreview extends StatelessWidget {
           ),
         ),
       );
-      return Container(
+      return SizedBox(
         key: const ValueKey('player-swipe-seek-preview'),
         width: width,
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          color: const Color(0xe6262626),
-          borderRadius: BorderRadius.circular(6),
-        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (imageHeight >= 24)
-              if (storyboard case final storyboard? when frame != null)
-                StoryboardThumbnail(
-                  storyboard: storyboard,
-                  frame: frame,
-                  width: width,
-                  height: imageHeight,
-                  fallback: placeholder,
-                )
-              else
-                SizedBox(height: imageHeight, child: placeholder),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: switch (storyboard) {
+                  final storyboard? when frame != null => StoryboardThumbnail(
+                    storyboard: storyboard,
+                    frame: frame,
+                    width: width,
+                    height: imageHeight,
+                    fallback: placeholder,
+                  ),
+                  _ => SizedBox(height: imageHeight, child: placeholder),
+                },
+              ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              padding: const EdgeInsets.only(top: 4),
               child: FittedBox(
-                fit: BoxFit.scaleDown,
+                fit: BoxFit.fitWidth,
                 child: Text(
                   '${formatPlaybackTime(position)} / ${formatPlaybackTime(duration)}',
                   key: const ValueKey('player-swipe-seek-time'),
                   maxLines: 1,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    shadows: [Shadow(color: Colors.black, blurRadius: 3)],
+                  ),
                 ),
               ),
             ),

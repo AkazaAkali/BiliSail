@@ -260,6 +260,13 @@ void main() {
       );
       expect(thumbnail.frame.column, 1);
       expect(thumbnail.frame.row, 0);
+      expect(thumbnail.width, 100);
+      final time = tester.getRect(
+        find.byKey(const ValueKey('player-swipe-seek-time')),
+      );
+      final image = tester.getRect(find.byType(StoryboardThumbnail));
+      expect(time.left, closeTo(image.left, .01));
+      expect(time.right, closeTo(image.right, .01));
       expect(find.text('01:30 / 10:00'), findsOneWidget);
       expect(state.requests, 1);
       await drag.up();
@@ -267,6 +274,51 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  for (final size in [const Size(90, 200), const Size(180, 70)]) {
+    testWidgets('preview fits $size while preserving image proportions', (
+      tester,
+    ) async {
+      final state = _State();
+      final storyboard = VideoStoryboard(
+        columns: 1,
+        rows: 1,
+        tileWidth: 160,
+        tileHeight: 90,
+        images: [Uri.parse('https://i0.hdslb.com/test.jpg')],
+        times: const [Duration.zero],
+      );
+      await tester.pumpWidget(
+        _app(
+          state,
+          width: size.width,
+          height: size.height,
+          storyboard: storyboard,
+        ),
+      );
+      final drag = await tester.startGesture(Offset(20, size.height / 2));
+      await drag.moveBy(const Offset(30, 0));
+      await tester.pump();
+      final image = tester.getRect(find.byType(StoryboardThumbnail));
+      final time = tester.getRect(
+        find.byKey(const ValueKey('player-swipe-seek-time')),
+      );
+      final preview = tester.getRect(
+        find.byKey(const ValueKey('player-swipe-seek-preview')),
+      );
+      expect(image.width, lessThanOrEqualTo(100));
+      expect(image.width / image.height, closeTo(16 / 9, .001));
+      expect(time.left, closeTo(image.left, .01));
+      expect(time.right, closeTo(image.right, .01));
+      expect(preview.left, greaterThanOrEqualTo(0));
+      expect(preview.right, lessThanOrEqualTo(size.width));
+      expect(preview.top, greaterThanOrEqualTo(0));
+      expect(preview.bottom, lessThanOrEqualTo(size.height));
+      expect(tester.takeException(), isNull);
+      await drag.up();
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
 
   testWidgets('small picture and enlarged text keep the time within bounds', (
     tester,
