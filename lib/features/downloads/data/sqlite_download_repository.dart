@@ -390,8 +390,9 @@ final class SqliteDownloadRepository implements DownloadRepository {
       if (task.publicFiles.isNotEmpty) {
         final restored = await _reconcile(task);
         if (!_valid(id, run)) return;
-        if (restored.status != DownloadStatus.completed)
+        if (restored.status != DownloadStatus.completed) {
           throw restored.failure!;
+        }
         await _save(restored);
         _tasks[id] = restored;
         _emit();

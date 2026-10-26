@@ -160,11 +160,16 @@ void main() {
       expect(await File('${task.directory}/video.m4s').exists(), isTrue);
       expect(task.publicFiles, isEmpty);
       publicStorage!.failPublish = false;
+      publicStorage!.selected = 'content://other/tree/new';
       final requests = videoRequests;
       await repository.resume(task.id);
       await _waitFor(repository, DownloadStatus.completed);
       expect(videoRequests, requests);
       expect(repository.current.tasks.single.publicFiles.length, 2);
+      expect(publicStorage!.destinations, [
+        'downloads',
+        'downloads',
+      ]);
     },
   );
 
@@ -542,6 +547,37 @@ void main() {
     group(output.name, () {
       final mergedSelection = DownloadSelection(output: output);
 
+      test('public merge retries without remux', () async {
+        final native = await useMuxer();
+        await repository.close();
+        await db.close();
+        publicStorage = _PublicStorage()..failPublish = true;
+        await openRepository();
+        await repository.enqueue([item], mergedSelection);
+        await _waitFor(repository, DownloadStatus.failed);
+        final task = repository.current.tasks.single;
+        expect(task.publicFiles, isEmpty);
+        final mergedFile = File('${task.directory}/${output.fileName}');
+        expect(await mergedFile.exists(), isTrue);
+        publicStorage!.failPublish = false;
+        await repository.resume(task.id);
+        await _waitFor(repository, DownloadStatus.completed);
+        await repository.close();
+        expect(native.calls, 1);
+        expect(repository.current.tasks.single.publicFiles.keys, [
+          output.fileName,
+        ]);
+        for (final name in ['video.m4s', 'audio.m4s', output.fileName]) {
+          expect(await File('${task.directory}/$name').exists(), isFalse);
+        }
+        await db.close();
+        await openRepository();
+        expect(
+          (await repository.offlineTask(task.id)).status,
+          DownloadStatus.completed,
+        );
+      });
+
       test(
         'merged completion commits output and reopens after removing sources',
         () async {
@@ -912,17 +948,20 @@ final class _Sources implements DownloadSourceRepository {
 
 final class _PublicStorage implements PublicDownloadStorage {
   bool available = true, deleted = false, failPublish = false;
+  String selected = 'downloads';
+  final destinations = <String?>[];
   final Map<String, Map<String, String>> published = {};
   @override
   Future<bool> chooseDestination({bool force = false}) async => true;
   @override
-  Future<String> destination() async => 'downloads';
+  Future<String> destination() async => selected;
   @override
   Future<Map<String, String>> publish(
     DownloadTask task,
     Map<String, String> files,
     RequestCancellation cancellation,
   ) async {
+    destinations.add(task.publicDestination);
     if (failPublish) throw const AppFailure(AppFailureKind.storage, '空间不足');
     for (final source in files.values) {
       expect(await File(source).exists(), isTrue);

@@ -213,8 +213,9 @@ final class _DownloadDialogState extends ConsumerState<DownloadDialog> {
     try {
       if (!await ref
           .read(downloadControllerProvider.notifier)
-          .chooseDestination())
+          .chooseDestination()) {
         return;
+      }
       if (!mounted || _accountChanged) return;
       await ref
           .read(downloadControllerProvider.notifier)

@@ -52,8 +52,9 @@ final class AndroidPublicDownloadStorage implements PublicDownloadStorage {
   ) async {
     var finished = false;
     cancellation.onCancel(() {
-      if (!finished)
+      if (!finished) {
         unawaited(_call<void>('cancel', _task(task)).catchError((Object _) {}));
+      }
     });
     try {
       if (cancellation.isCancelled) {
