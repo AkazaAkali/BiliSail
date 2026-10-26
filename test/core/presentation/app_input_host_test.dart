@@ -9,7 +9,77 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../support/detached_window_fake.dart';
+
 void main() {
+  testWidgets('reparent resets held keys and restores only the native view', (
+    tester,
+  ) async {
+    final mainCalls = <String>[];
+    final playbackCalls = <String>[];
+    final mainInput = _dispatcher(mainCalls);
+    final playbackInput = _dispatcher(playbackCalls);
+    addTearDown(mainInput.dispose);
+    addTearDown(playbackInput.dispose);
+    final secondary = FakeSecondaryFlutterView(
+      tester.view,
+      viewId: 100,
+      size: const Size(800, 600),
+    );
+    final key = GlobalKey();
+    final routes = InputRouteObserver();
+    Widget tree(bool detached) {
+      final playback = AppInputHost<String>(
+        key: key,
+        dispatcher: playbackInput,
+        routes: routes,
+        child: const SizedBox.expand(),
+      );
+      return MaterialApp(
+        home: AppInputHost<String>(
+          dispatcher: mainInput,
+          routes: InputRouteObserver(),
+          child: ViewAnchor(
+            view: detached ? View(view: secondary, child: playback) : null,
+            child: detached ? const SizedBox.expand() : playback,
+          ),
+        ),
+      );
+    }
+
+    await tester.pumpWidget(tree(false));
+    await tester.pumpAndSettle();
+    final retained = tester.state(find.byKey(key));
+    // A held key in the old view is cancelled on native handoff/reparent.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyW);
+    mainCalls.clear();
+    playbackCalls.clear();
+    tester.binding.handleViewFocusChanged(
+      const ViewFocusEvent(
+        viewId: 100,
+        state: ViewFocusState.focused,
+        direction: ViewFocusDirection.undefined,
+      ),
+    );
+    await tester.pumpWidget(tree(true));
+    await tester.pumpAndSettle();
+    expect(tester.state(find.byKey(key)), same(retained));
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyW);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyW);
+    expect(mainCalls, isEmpty);
+    expect(playbackCalls, isEmpty);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+    expect(mainCalls, isEmpty);
+    expect(playbackCalls, ['W']);
+    _active(tester, true, viewFocus: true);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+    expect(mainCalls, ['W']);
+    expect(playbackCalls, ['W']);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('another view cannot dispatch into this window input host', (
     tester,
   ) async {

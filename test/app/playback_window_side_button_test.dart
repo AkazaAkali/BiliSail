@@ -15,6 +15,109 @@ import '../support/detached_window_fake.dart';
 import '../support/input_test_app.dart';
 
 void main() {
+  testWidgets(
+    'early native focus enables Meta+W through history, blur and reopening',
+    (tester) async {
+      final harness = _Harness(tester, 'Meta+W', earlyFocus: true);
+      addTearDown(harness.router.dispose);
+      await harness.mount();
+      final first = harness.windows.lastWindow!;
+      harness.router.go('/video/BV2234567890');
+      await tester.pumpAndSettle();
+
+      Future<void> closeKey() async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.keyW);
+        await tester.pumpAndSettle();
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.keyW);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.pumpAndSettle();
+      }
+
+      // No post-mount focus event: creation emitted it before View existed.
+      await closeKey();
+      expect(first.disposed, isFalse);
+      expect(find.text('/video/BV1234567890'), findsOneWidget);
+      expect(harness.activations, 0);
+
+      tester.binding.handleViewFocusChanged(
+        ViewFocusEvent(
+          viewId: first.viewId,
+          state: ViewFocusState.unfocused,
+          direction: ViewFocusDirection.undefined,
+        ),
+      );
+      await closeKey();
+      expect(first.disposed, isFalse);
+      harness.focus(tester.view.viewId);
+      await tester.pumpAndSettle();
+      harness.focus(first.viewId);
+      // Late main-window blur cannot erase playback focus.
+      tester.binding.handleViewFocusChanged(
+        ViewFocusEvent(
+          viewId: tester.view.viewId,
+          state: ViewFocusState.unfocused,
+          direction: ViewFocusDirection.undefined,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await closeKey();
+      expect(first.disposed, isTrue);
+      expect(harness.activations, 1);
+      // The closing key's tail must not also navigate the browser.
+      expect(harness.router.routeInformationProvider.value.uri.path, '/user/42');
+
+      harness.router.go('/video/BV3234567890');
+      await tester.pumpAndSettle();
+      final second = harness.windows.lastWindow!;
+      expect(second, isNot(same(first)));
+      await closeKey();
+      expect(second.disposed, isTrue);
+      expect(harness.activations, 2);
+      expect(harness.router.routeInformationProvider.value.uri.path, '/user/42');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
+  testWidgets(
+    'switching back during creation keeps the new playback host inactive',
+    (tester) async {
+      final harness = _Harness(
+        tester,
+        'Meta+W',
+        earlyFocus: true,
+        returnFocusDuringCreation: true,
+      );
+      addTearDown(harness.router.dispose);
+      await harness.mount();
+      final window = harness.windows.lastWindow!;
+      harness.pointer(
+        PointerDownEvent(
+          viewId: window.viewId,
+          kind: PointerDeviceKind.mouse,
+          buttons: kBackMouseButton,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(window.disposed, isFalse);
+      expect(harness.activations, 0);
+      harness.focus(window.viewId);
+      await tester.pumpAndSettle();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      expect(window.disposed, isTrue);
+      expect(harness.activations, 1);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+  );
+
   for (final (key, button) in [
     ('MouseBack', kBackMouseButton),
     ('MouseForward', kForwardMouseButton),
@@ -160,7 +263,12 @@ void main() {
 }
 
 class _Harness {
-  _Harness(this.tester, String key)
+  _Harness(
+    this.tester,
+    String key, {
+    this.earlyFocus = false,
+    this.returnFocusDuringCreation = false,
+  })
     : windows = FakeDetachedWindowFactory(tester.view),
       shortcuts = const ShortcutSettings.defaults().withKeys(
         ShortcutAction.closeTab,
@@ -170,7 +278,25 @@ class _Harness {
   final WidgetTester tester;
   final FakeDetachedWindowFactory windows;
   final ShortcutSettings shortcuts;
+  final bool earlyFocus;
+  final bool returnFocusDuringCreation;
   int buttons = 0;
+
+  DetachedPlaybackWindow createWindow({
+    required String title,
+    required VoidCallback onCloseRequested,
+  }) {
+    final window = windows.call(
+      title: title,
+      onCloseRequested: onCloseRequested,
+    );
+    if (earlyFocus) {
+      focus(window.viewId);
+      if (returnFocusDuringCreation) focus(tester.view.viewId);
+    }
+    return window;
+  }
+
   int activations = 0;
 
   void pointer(PointerEvent event) => tester.binding.handlePointerEvent(event);
@@ -246,7 +372,7 @@ class _Harness {
                 required onHome,
                 required onError,
               }) => DesktopPlaybackWindow(
-                windowFactory: windows.call,
+                windowFactory: createWindow,
                 activationToken: activationToken,
                 onCloseRequested: onClose,
                 onError: onError,
@@ -282,7 +408,7 @@ class _Harness {
     await tester.pumpAndSettle();
     router.go('/video/BV1234567890');
     await tester.pumpAndSettle();
-    focus(windows.lastWindow!.viewId);
+    if (!earlyFocus) focus(windows.lastWindow!.viewId);
     await tester.pumpAndSettle();
   }
 }
