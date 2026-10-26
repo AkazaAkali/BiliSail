@@ -133,6 +133,9 @@ bool read_packet(AVFormatContext& context, int index, AVPacket& packet,
     if (status == AVERROR_EOF) return false;
     if (status < 0) throw mux_error{result::input};
     if (packet.stream_index == index) {
+      if (packet.size <= 0 || packet.size > max_packet_bytes) {
+        throw mux_error{result::input};
+      }
       if (packet.pts == AV_NOPTS_VALUE || packet.dts == AV_NOPTS_VALUE) {
         throw mux_error{result::input};
       }
