@@ -1,0 +1,259 @@
+import 'dart:async';
+
+import 'package:bilisail/domain/page_result.dart';
+import 'package:bilisail/domain/recommendation_settings.dart';
+import 'package:bilisail/domain/request_cancellation.dart';
+import 'package:bilisail/domain/video.dart';
+import 'package:bilisail/features/feed/application/app_recommendation_identity.dart';
+import 'package:bilisail/features/feed/application/app_recommendation_authorization.dart';
+import 'package:bilisail/features/feed/application/feed_controller.dart';
+import 'package:bilisail/features/feed/domain/app_recommendation_identity_repository.dart';
+import 'package:bilisail/features/feed/domain/feed_repository.dart';
+import 'package:bilisail/features/feed/domain/home_channel.dart';
+import 'package:bilisail/features/settings/application/settings_controller.dart';
+import 'package:bilisail/features/settings/domain/app_settings.dart';
+import 'package:bilisail/features/settings/domain/settings_repository.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  late ProviderContainer container;
+  late _Feed feed;
+  late _Identity identity;
+  late FeedController controller;
+  setUp(() async {
+    feed = _Feed();
+    identity = _Identity();
+    container = ProviderContainer(
+      overrides: [
+        feedRepositoryProvider.overrideWithValue(feed),
+        appRecommendationIdentityRepositoryProvider.overrideWithValue(identity),
+        settingsRepositoryProvider.overrideWithValue(_Settings()),
+      ],
+    );
+    await container.read(settingsControllerProvider.future);
+    container.listen(feedControllerProvider, (_, _) {});
+    controller = container.read(feedControllerProvider.notifier);
+  });
+  tearDown(() async {
+    container.dispose();
+    await identity.events.close();
+  });
+  Future<void> source(RecommendationSource value) async {
+    await container
+        .read(settingsControllerProvider.notifier)
+        .setRecommendations(
+          RecommendationSettings(source: value, keepPrevious: true),
+        );
+    await container.pump();
+  }
+
+  void complete(String id) => feed.calls.last.result.complete(
+    PageResult(
+      items: [
+        VideoSummary(
+          id: VideoId(id),
+          title: id,
+          coverUrl: '',
+          author: '',
+          duration: Duration.zero,
+        ),
+      ],
+      hasMore: true,
+    ),
+  );
+  List<String>? ids() => container
+      .read(feedControllerProvider)
+      .items
+      .asData
+      ?.value
+      .map((item) => item.id.value)
+      .toList();
+
+  test('default Web has no App calls; switching source cancels late data and never merges old entries', () async {
+    final old = controller.refresh();
+    final stale = feed.calls.last;
+    expect(stale.source, 'web');
+    await source(RecommendationSource.app);
+    expect(stale.cancellation.isCancelled, isTrue);
+    expect(feed.calls.last.source, 'app');
+    expect(feed.calls.last.page, 1);
+    complete('app');
+    await container.pump();
+    stale.result.complete(const PageResult(items: [], hasMore: false));
+    await old;
+    expect(ids(), ['app']);
+    await source(RecommendationSource.web);
+    expect(ids(), isNull);
+    complete('new-web');
+    await container.pump();
+    expect(ids(), ['new-web']);
+  });
+  test('hidden recommendation invalidation preserves popular content and starts no hidden request', () async {
+    final first = controller.refresh();
+    complete('old-web');
+    await first;
+    final popular = controller.selectPopular();
+    complete('popular');
+    await popular;
+    final count = feed.calls.length;
+    await source(RecommendationSource.app);
+    expect(feed.calls.length, count);
+    expect(ids(), ['popular']);
+    expect(
+      controller.stateForChannel(HomeChannel.recommended).items.isLoading,
+      isTrue,
+    );
+    final back = controller.selectRecommended();
+    expect(feed.calls.last.source, 'app');
+    complete('app');
+    await back;
+    expect(ids(), ['app']);
+    await controller.selectPopular();
+    expect(ids(), ['popular']);
+    expect(feed.calls.length, count + 1);
+  });
+  test(
+    'device revisions refresh only App recommendations and reset pagination',
+    () async {
+      final first = controller.refresh();
+      complete('web');
+      await first;
+      identity.change();
+      await container.pump();
+      expect(feed.calls.length, 1);
+      await source(RecommendationSource.app);
+      complete('app');
+      await container.pump();
+      final count = feed.calls.length;
+      identity.change();
+      await container.pump();
+      expect(feed.calls.length, count + 1);
+      expect(feed.calls.last.source, 'app');
+      expect(feed.calls.last.page, 1);
+      expect(ids(), isNull);
+      complete('new-device');
+      await container.pump();
+      expect(ids(), ['new-device']);
+    },
+  );
+  test('disposing QR authorization cancels its pending request and prevents later polling', () async {
+    final provider = appRecommendationAuthorizationProvider(Object());
+    final subscription = container.listen(provider, (_, _) {});
+    final operation = container.read(provider.notifier).start();
+    await container.pump();
+    expect(identity.authorizationCancellation?.isCancelled, isFalse);
+    subscription.close();
+    await container.pump();
+    expect(identity.authorizationCancellation?.isCancelled, isTrue);
+    identity.authorization.complete(
+      AppRecommendationAuthorization(
+        url: Uri.https('passport.bilibili.com', '/fixture'),
+        expiresAt: DateTime.now().add(const Duration(minutes: 2)),
+      ),
+    );
+    await operation;
+    expect(identity.polls, 0);
+  });
+}
+
+final class _Settings implements SettingsRepository {
+  AppSettings value = const AppSettings.defaults();
+  @override
+  Future<AppSettings> load() async => value;
+  @override
+  Future<void> save(AppSettings settings) async {
+    value = settings;
+  }
+}
+
+final class _Feed implements FeedRepository, AppRecommendationFeedRepository {
+  final calls =
+      <
+        ({
+          String source,
+          int page,
+          RequestCancellation cancellation,
+          Completer<PageResult<VideoSummary>> result,
+        })
+      >[];
+  Future<PageResult<VideoSummary>> read(
+    String source,
+    int page,
+    RequestCancellation cancellation,
+  ) {
+    final result = Completer<PageResult<VideoSummary>>();
+    calls.add((
+      source: source,
+      page: page,
+      cancellation: cancellation,
+      result: result,
+    ));
+    return result.future;
+  }
+
+  @override
+  Future<List<VideoCategory>> loadCategories({
+    required RequestCancellation cancellation,
+  }) async => [];
+  @override
+  Future<PageResult<VideoSummary>> loadFeed({
+    required int page,
+    required String? categoryId,
+    required RequestCancellation cancellation,
+  }) => read('web', page, cancellation);
+  @override
+  Future<PageResult<VideoSummary>> loadPopular({
+    required int page,
+    required RequestCancellation cancellation,
+  }) => read('popular', page, cancellation);
+  @override
+  Future<PageResult<VideoSummary>> loadAppRecommendations({
+    required int page,
+    required RequestCancellation cancellation,
+  }) => read('app', page, cancellation);
+}
+
+final class _Identity implements AppRecommendationIdentityRepository {
+  final events = StreamController<int>.broadcast(sync: true);
+  final authorization = Completer<AppRecommendationAuthorization>();
+  RequestCancellation? authorizationCancellation;
+  int polls = 0;
+  @override
+  int revision = 0;
+  void change() {
+    revision++;
+    events.add(revision);
+  }
+
+  @override
+  Stream<int> get changes => events.stream;
+  @override
+  Future<AppRecommendationIdentity> load() async =>
+      const AppRecommendationIdentity(
+        buvid: 'fixture_device_0123456789',
+        canAuthorize: true,
+      );
+  @override
+  Future<void> setBuvid(String value) async => change();
+  @override
+  Future<void> randomizeBuvid() async => change();
+  @override
+  Future<void> clearAuthorization() async => change();
+  @override
+  Future<AppRecommendationAuthorization> beginAuthorization({
+    required RequestCancellation cancellation,
+  }) {
+    authorizationCancellation = cancellation;
+    return authorization.future;
+  }
+
+  @override
+  Future<AppRecommendationAuthorizationStatus> pollAuthorization(
+    AppRecommendationAuthorization attempt, {
+    required RequestCancellation cancellation,
+  }) async {
+    polls++;
+    return AppRecommendationAuthorizationStatus.waitingScan;
+  }
+}

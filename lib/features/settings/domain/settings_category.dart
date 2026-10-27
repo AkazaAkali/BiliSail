@@ -1,6 +1,7 @@
 enum SettingsCategory {
   appearance('外观'),
   cache('缓存'),
+  recommendation('推荐流'),
   shortcuts('快捷键'),
   playback('播放'),
   danmaku('弹幕'),

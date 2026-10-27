@@ -83,6 +83,9 @@ final class ApiVideoSummary {
     required this.ownerName,
     required this.duration,
     this.playCount,
+    this.likeCount,
+    this.categoryName,
+    this.isFollowed,
     this.danmakuCount,
     this.publishedAt,
     this.ownerAvatarUrl,
@@ -98,6 +101,9 @@ final class ApiVideoSummary {
   final String ownerName;
   final Duration duration;
   final int? playCount;
+  final int? likeCount;
+  final String? categoryName;
+  final bool? isFollowed;
   final int? danmakuCount;
   final DateTime? publishedAt;
   final Uri? ownerAvatarUrl;

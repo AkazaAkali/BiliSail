@@ -67,3 +67,10 @@ abstract interface class RecommendationFeedbackRepository {
     required RequestCancellation cancellation,
   });
 }
+
+abstract interface class AppRecommendationFeedRepository {
+  Future<PageResult<VideoSummary>> loadAppRecommendations({
+    required int page,
+    required RequestCancellation cancellation,
+  });
+}

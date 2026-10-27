@@ -1,5 +1,7 @@
 # API、鉴权与数据边界
 
+2026-10-27 推荐流过滤解析 Web 推荐、热门/排行/分区、相关视频响应中的可选 `stat.like`、`tname`、`is_followed`，在应用层按偏好筛选。新增可选 App 推荐 profile、独立 buvid 与扫码授权，游客可直接读取，有效 token 只用于对应 Web 账号的 App 推荐/反馈；默认仍为 Web。aid 本地转换为 bvid，不增加逐视频请求。App 关注豁免只额外识别精确“已关注/新关注”，不从含糊推荐理由猜测点赞数。端点及离线/在线验证边界见[App 推荐设计](app-recommendation-design.md)。
+
 2026-10-25 热门收敛为综合热门、每周必看、入站必刷、排行榜四子标签。新增 Web 期数目录、单期与入站单份列表；排行榜沿用动态官网 UGC 分区及 WBI，综合热门保留原分页。官方脚本、三个参考仓库精确提交、端点/容量/取消规则和游客单期 `-352` 未验证边界见[热门四子标签](validation/popular-tabs.md)。
 
 2026-10-11 普通视频与影视播放请求加入 `voice_balance=1`，解析可选 `volume` 响度元数据；鉴权、选流与权益边界不变。请求 profile、字段校验及在线抽样限制见 [播放器音量均衡](validation/audio-normalization.md)。
@@ -33,7 +35,7 @@ lib/src/
 
 MVP 优先 **Web REST + Web Cookie + 按端点配置 WBI/CSRF**，视频弹幕使用 HTTP 返回的 Protobuf，直播消息使用 WebSocket。收到 Protobuf 字节并不意味着必须使用 gRPC。
 
-App/TV token 与 gRPC 是后续能力选项，按功能接入。参考项目中的 App/TV 请求参数不能直接与 Web Cookie 登录拼接；一个会话只具有实际取得的凭据，缺少 app token 时明确返回能力不可用。
+App/TV token 按功能独立接入，gRPC 仍延后。App 推荐可使用游客身份；个性化推荐和反馈只使用明确扫码取得的 App token。参考项目的 App/TV 参数不能直接与 Web Cookie 登录拼接，缺少 token 不允许提交 App 反馈。
 
 | 通道 | MVP 策略 | 原因 |
 | --- | --- | --- |
@@ -41,7 +43,7 @@ App/TV token 与 gRPC 是后续能力选项，按功能接入。参考项目中�
 | HTTP / Protobuf | 点播弹幕必需 | 元信息和分段解码，生成最小 schema |
 | WebSocket / 二进制包 | M3 直播必需，M0 提前验证 | 分离聊天室连接与媒体播放 |
 | gRPC | 延后，缺少 Web 能力时评估 | 多一套 metadata、token、压缩与 schema 维护 |
-| App/TV REST | 延后，独立 ApiProfile | 必须验证登录态、签名、设备上下文与服务端可用性 |
+| App/TV REST | App 推荐及其扫码授权已接入，独立 profile | 游客只读烟测与登录/反馈实测分别记录；其他 App 能力继续按需评估 |
 
 ## 3. 请求契约与流水线
 
@@ -81,9 +83,10 @@ ApiPage<T> { items, nextCursor, hasMore }
 | --- | --- | --- | --- |
 | 扫码登录 M0/M2 | `/x/passport-login/web/qrcode/generate`、`/poll` | U `Models/Requests/Api/AccountApi.cs` | AuthClient；Web 二维码与 Set-Cookie，取消/过期/确认 |
 | 密码/短信登录（提前实现） | 内嵌 `https://passport.bilibili.com/login`；应用调用 `/x/web-interface/nav` 验证 | U AccountApi、LoginVM、LoginDialog；dart_simple_live Web 登录页 | Platform WebView → 会话控制器；保留 Cookie 作用域、账号校验和安全存储；不在 API 包维护官网表单 POST；见 [登录验证](validation/password-sms-login.md) |
-| TV 登录（后续） | `/x/passport-tv-login/qrcode/auth_code`、`/poll` | K `Authorizers/Authorizers.Tv/Core/TvAuthorizeClient.cs` | 独立 TV profile，不作为 Web 登录的隐式副作用 |
+| App 推荐扫码授权 | `passport.bilibili.com` POST `/x/passport-tv-login/qrcode/auth_code`、`/poll` | PiliPlus `lib/http/login.dart` | 独立 HD profile/签名，不带 Cookie；用户点击后轮询、单次传输、最长两分钟，token mid 须匹配当前 Web 账号 |
 | 会话与 WBI M0/M2 | `/x/web-interface/nav`、cookie info/refresh/confirm | K `BiliKernel.Abstractions/Bili/BiliApis.cs`、Core Authenticator；U AccountApi | SessionStore；刷新要取得所需 refresh 数据，缺失则重新登录 |
-| 推荐 M2 | `/x/web-interface/index/top/feed/rcmd`；App `/x/v2/feed/index` | K `Services/Services.Media/Core/VideoDiscoveryClient.cs` | CatalogClient；优先验证 Web，不能把 App token 参数搬过来 |
+| 推荐 | Web `/x/web-interface/index/top/feed/rcmd`；App `app.bilibili.com` GET `/x/v2/feed/index` | K VideoDiscoveryClient；PiliPlus `lib/http/video.dart` | App 签名、稳定 buvid、可选 access_key，idx 从 0 开始、首请求 pull=true；25 秒总 deadline、读最多三次、2 MiB/100 卡片、双空页预算 |
+| App 推荐反馈/撤销 | `app.bilibili.com` GET `/x/feed/dislike`、`/x/feed/dislike/cancel` | PiliPlus `lib/http/video.dart`、`video_popup_menu.dart` | token 必需；使用服务端 three_point_v2 的 reason_id/feedback_id，撤销携带 aid/goto；虽为 GET，仍按单次写入处理，未知结果不重放 |
 | 热门/排行 | `/x/web-interface/popular`、`popular/series/list`、`popular/series/one`、`popular/precious`、`ranking/v2` | 官网热门脚本；PiliPlus VideoHttp；U RankAPI；K VideoDiscoveryClient | Web 综合热门分页、每周期数选择、入站及榜单单份列表；不混用 App gRPC 或旧 newlist 分区，见[协议记录](validation/popular-tabs.md) |
 | 搜索 M2 | `/x/web-interface/wbi/search/type`、`/all/v2` | K `Services/Services.Search/Core/SearchClient.cs` | SearchClient；WBI、Cookie、排序及分页 |
 | 视频详情 M0/M2 | `/x/web-interface/view/detail`、`GetVideoPageDetailWithRestAsync` | K `Services/Services.Media/Core/PlayerClient.cs` | VideoRepository；bvid/aid 解析、cid、分 P、合集 |
@@ -173,7 +176,7 @@ Cookie 由 domain/path/secure/expiry 规则的 CookieStore 维护，持久化整
 - WBI key 更新与会话刷新是不同流程，各自合并并发请求。外部时钟可注入测试，生产使用 UTC 时间戳。
 - CSRF 从当前 Cookie 会话取得，按端点规定放 query/body；Web CSRF 与 App 签名不是替代关系。
 - buvid 等设备上下文由协议模块按需要获取和持久化，保持同一安装内一致；不能每次请求随机生成或全局伪造设备参数。
-- App/TV 若未来启用，独立声明 app key、签名和 token 所需上下文；客户端内的静态参数不被当作能安全保存的秘密。
+- App 推荐/HD 授权通过 `AppProfile` 声明 app key、签名与 token 上下文；静态签名参数是兼容协议参数，不当作能安全保存的秘密。App host 不加入 Web Cookie 目的地白名单；token 仅保存在独立系统安全槽，普通数据库只保存设备标识与撤销标记。
 
 ## 6. 重试、降级和错误
 

@@ -866,7 +866,7 @@ final class _RelatedVideosSliverState
 
   @override
   Widget build(BuildContext context) => ref
-      .watch(relatedVideosProvider(widget.id))
+      .watch(filteredRelatedVideosProvider(widget.id))
       .when(
         loading: () => _state(const StateView.loading(message: '正在加载相关推荐…')),
         error: (error, _) => _state(

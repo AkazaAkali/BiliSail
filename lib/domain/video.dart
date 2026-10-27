@@ -1,4 +1,5 @@
 import 'user.dart';
+import 'recommendation_source.dart';
 import 'video_access.dart';
 export 'video_access.dart';
 
@@ -27,6 +28,9 @@ final class VideoSummary {
     required this.author,
     required this.duration,
     this.playCount,
+    this.likeCount,
+    this.categoryName,
+    this.isFollowed,
     this.danmakuCount,
     this.publishedAt,
     this.authorAvatarUrl,
@@ -43,6 +47,9 @@ final class VideoSummary {
   final String author;
   final Duration duration;
   final int? playCount;
+  final int? likeCount;
+  final String? categoryName;
+  final bool? isFollowed;
   final int? danmakuCount;
   final DateTime? publishedAt;
   final Uri? authorAvatarUrl;
@@ -62,8 +69,51 @@ final class RecommendationFeedback {
     required this.goto,
     required this.trackId,
     required this.ownerMid,
-  });
+  }) : source = RecommendationSource.web,
+       reasons = const [],
+       selectedReason = null,
+       identityRevision = 0;
+  RecommendationFeedback.app({
+    required this.aid,
+    required this.ownerMid,
+    required List<RecommendationFeedbackReason> reasons,
+    required this.identityRevision,
+    this.selectedReason,
+  }) : source = RecommendationSource.app,
+       goto = 'av',
+       trackId = '',
+       reasons = List.unmodifiable(reasons);
   final String aid, goto, trackId, ownerMid;
+  final RecommendationSource source;
+  final List<RecommendationFeedbackReason> reasons;
+  final RecommendationFeedbackReason? selectedReason;
+  final int identityRevision;
+  RecommendationFeedback selectReason(RecommendationFeedbackReason reason) {
+    if (!reasons.any(
+      (item) => item.id == reason.id && item.kind == reason.kind,
+    )) {
+      throw ArgumentError('Unknown recommendation feedback reason');
+    }
+    return RecommendationFeedback.app(
+      aid: aid,
+      ownerMid: ownerMid,
+      reasons: reasons,
+      identityRevision: identityRevision,
+      selectedReason: reason,
+    );
+  }
+}
+
+enum RecommendationFeedbackReasonKind { dislike, feedback }
+
+final class RecommendationFeedbackReason {
+  const RecommendationFeedbackReason({
+    required this.id,
+    required this.name,
+    required this.kind,
+  });
+  final String id, name;
+  final RecommendationFeedbackReasonKind kind;
 }
 
 final class VideoPart {

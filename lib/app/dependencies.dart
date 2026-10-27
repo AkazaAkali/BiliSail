@@ -41,6 +41,8 @@ import '../features/profile/application/profile_controller.dart';
 import '../features/profile/data/api_profile_repository.dart';
 import '../features/feed/application/feed_controller.dart';
 import '../features/feed/data/api_feed_repository.dart';
+import '../features/feed/data/app_recommendation_identity_store.dart';
+import '../features/feed/application/app_recommendation_identity.dart';
 import '../features/feed/application/home_controller.dart';
 import '../features/feed/application/watch_later_removal_controller.dart';
 import '../features/feed/data/api_home_repository.dart';
@@ -123,6 +125,16 @@ class AppDependencies {
   final ApiRequests requests;
   final BiliApiClient api;
   final SessionRepository session;
+  late final appRecommendationIdentity = AppRecommendationIdentityStore(
+    api: api,
+    requests: requests,
+    database: database,
+    credentials: SystemCredentialStore(
+      keyPrefix: 'bilisail.app_recommendation.v1',
+    ),
+    accountScope: () => session.accountScope,
+    accountChanges: session.changes,
+  );
   final SqliteLibraryRepository library;
   final PlaybackManager playback;
   final PlaybackVolumeMemory playbackVolumeMemory;
@@ -387,7 +399,14 @@ class AppDependencies {
           ),
         ),
         feedRepositoryProvider.overrideWithValue(
-          ApiFeedRepository(api, requests),
+          ApiFeedRepository(
+            api,
+            requests,
+            appIdentity: appRecommendationIdentity,
+          ),
+        ),
+        appRecommendationIdentityRepositoryProvider.overrideWithValue(
+          appRecommendationIdentity,
         ),
         homeRepositoryProvider.overrideWithValue(
           ApiHomeRepository(
@@ -527,7 +546,11 @@ class AppDependencies {
       } finally {
         requests.advanceSession();
         try {
-          await session.dispose();
+          try {
+            await appRecommendationIdentity.close();
+          } finally {
+            await session.dispose();
+          }
         } finally {
           try {
             sponsorTransport.close();

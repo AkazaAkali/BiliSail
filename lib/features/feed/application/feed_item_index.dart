@@ -9,6 +9,18 @@ final class FeedItemIndex {
   final _positions = <VideoId, int>{};
   _FeedItems _snapshot = _FeedItems(const [], 0);
 
+  List<VideoSummary> get items => _snapshot;
+
+  void remove(Set<VideoId> ids) {
+    if (!ids.any(_positions.containsKey)) return;
+    final remaining = _snapshot
+        .where((item) => !ids.contains(item.id))
+        .toList();
+    _positions.clear();
+    _snapshot = _FeedItems(const [], 0);
+    merge(remaining);
+  }
+
   List<VideoSummary> merge(List<VideoSummary> incoming) {
     if (incoming.isEmpty) return _snapshot;
     final chunks = List<List<VideoSummary>>.of(_snapshot._chunks);

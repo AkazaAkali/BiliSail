@@ -8,6 +8,9 @@ import '../../../core/network/api_requests.dart';
 import '../../../domain/page_result.dart';
 import '../../../domain/request_cancellation.dart';
 import '../../../domain/video.dart';
+import '../../../domain/recommendation_source.dart';
+import '../../../domain/app_failure.dart';
+import 'app_recommendation_identity_store.dart';
 import '../../video/domain/video_actions_repository.dart';
 import '../domain/feed_repository.dart';
 import '../domain/popular_feed.dart';
@@ -17,8 +20,10 @@ class ApiFeedRepository
         FeedRepository,
         PopularFeedRepository,
         RankingFeedRepository,
+        AppRecommendationFeedRepository,
         RecommendationFeedbackRepository {
-  ApiFeedRepository(this.api, this.requests);
+  ApiFeedRepository(this.api, this.requests, {this.appIdentity});
+  final AppRecommendationIdentityStore? appIdentity;
   final BiliApiClient api;
   final ApiRequests requests;
 
@@ -43,6 +48,47 @@ class ApiFeedRepository
     required RequestCancellation cancellation,
   }) => requests.run((context) async {
     try {
+      if (feedback.source == RecommendationSource.app) {
+        final store = appIdentity;
+        if (store == null) {
+          throw const ApiFailure(
+            ApiFailureCategory.unavailable,
+            'app_feedback',
+          );
+        }
+        final identity = await store.requestIdentity();
+        final token = identity.accessToken;
+        if (identity.revision != feedback.identityRevision) {
+          throw const ApiFailure(ApiFailureCategory.cancelled, 'app_feedback');
+        }
+        if (token == null) {
+          throw const AppFailure(
+            AppFailureKind.authentication,
+            '请在推荐流设置中扫码授权 App 推荐后再反馈',
+          );
+        }
+        final reason = feedback.selectedReason;
+        await AppRecommendationClient(api).feedback(
+          aid: feedback.aid,
+          buvid: identity.buvid,
+          accessToken: token,
+          undo: undo,
+          reason: reason == null
+              ? null
+              : ApiAppFeedbackReason(
+                  id: reason.id,
+                  name: reason.name,
+                  kind: reason.kind == RecommendationFeedbackReasonKind.dislike
+                      ? ApiAppFeedbackKind.dislike
+                      : ApiAppFeedbackKind.feedback,
+                ),
+          context: context,
+        );
+        if (identity.revision != store.revision) {
+          throw const ApiFailure(ApiFailureCategory.cancelled, 'app_feedback');
+        }
+        return;
+      }
       final client = FeedCardActionsClient(api);
       final value = ApiRecommendationFeedback(
         aid: feedback.aid,
@@ -67,6 +113,76 @@ class ApiFeedRepository
       }
       rethrow;
     }
+  }, cancellation: cancellation);
+
+  @override
+  Future<PageResult<VideoSummary>> loadAppRecommendations({
+    required int page,
+    required RequestCancellation cancellation,
+  }) => requests.run((context) async {
+    final store = appIdentity;
+    if (store == null) {
+      throw const ApiFailure(ApiFailureCategory.unavailable, 'app_recommended');
+    }
+    final identity = await store.requestIdentity();
+    ApiPage<ApiAppRecommendation> result;
+    try {
+      result = await AppRecommendationClient(api).load(
+        page: page,
+        buvid: identity.buvid,
+        accessToken: identity.accessToken,
+        context: context,
+      );
+    } on ApiFailure catch (failure) {
+      if (failure.category == ApiFailureCategory.authentication &&
+          identity.accessToken != null &&
+          identity.revision == store.revision) {
+        await store.invalidateAuthorization();
+      }
+      rethrow;
+    }
+    if (identity.revision != store.revision) {
+      throw const ApiFailure(ApiFailureCategory.cancelled, 'app_recommended');
+    }
+    return PageResult(
+      hasMore: result.hasMore,
+      items: List.unmodifiable(
+        result.items.map((item) {
+          final video = item.video;
+          return VideoSummary(
+            id: VideoId(video.bvid),
+            title: video.title,
+            coverUrl: video.coverUrl?.toString() ?? '',
+            author: video.ownerName,
+            authorId: UserId.tryParse(video.ownerMid),
+            duration: video.duration,
+            previewCid: video.previewCid,
+            playCount: video.playCount,
+            danmakuCount: video.danmakuCount,
+            likeCount: video.likeCount,
+            categoryName: video.categoryName,
+            isFollowed: video.isFollowed,
+            recommendationReason: video.recommendationReason,
+            recommendationFeedback: RecommendationFeedback.app(
+              aid: item.aid,
+              ownerMid: video.ownerMid ?? '0',
+              identityRevision: identity.revision,
+              reasons: item.reasons
+                  .map(
+                    (reason) => RecommendationFeedbackReason(
+                      id: reason.id,
+                      name: reason.name,
+                      kind: reason.kind == ApiAppFeedbackKind.dislike
+                          ? RecommendationFeedbackReasonKind.dislike
+                          : RecommendationFeedbackReasonKind.feedback,
+                    ),
+                  )
+                  .toList(),
+            ),
+          );
+        }),
+      ),
+    );
   }, cancellation: cancellation);
 
   @override
@@ -184,6 +300,9 @@ class ApiFeedRepository
                 authorId: UserId.tryParse(item.ownerMid),
                 duration: item.duration,
                 playCount: item.playCount,
+                likeCount: item.likeCount,
+                categoryName: item.categoryName,
+                isFollowed: item.isFollowed,
                 danmakuCount: item.danmakuCount,
                 publishedAt: item.publishedAt,
                 recommendationReason: item.recommendationReason,

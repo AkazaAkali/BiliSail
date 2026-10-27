@@ -1,0 +1,1 @@
+enum RecommendationSource { web, app }

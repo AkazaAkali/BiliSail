@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../domain/app_failure.dart';
 import '../../../domain/video.dart';
+import '../../../domain/recommendation_source.dart';
+import '../../../shared/ui/app_dialog.dart';
 import '../../../shared/ui/app_notice.dart';
 import '../../video/domain/video_actions_repository.dart';
 import '../../../core/presentation/workspace_activity.dart';
@@ -12,6 +14,7 @@ import '../../../shared/ui/state_view.dart';
 import '../../../shared/ui/retained_tab_view.dart';
 import '../../../shared/ui/content_section_tabs.dart';
 import '../application/feed_controller.dart';
+import '../application/app_recommendation_identity.dart';
 import '../domain/home_channel.dart';
 import 'home_content.dart';
 import 'home_channel_swipe.dart';
@@ -25,6 +28,8 @@ typedef _FeedContent = ({
   String? categoryId,
   bool hasMore,
   bool loadingMore,
+  bool refreshing,
+  int? previousStartIndex,
   Object? pageError,
 });
 
@@ -191,7 +196,7 @@ final class _HomeChannelPage extends ConsumerStatefulWidget {
 final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
   final Map<HomeChannel, String> _sections = {};
   final Set<(HomeChannel, String)> _visitedSections = {};
-  (List<VideoSummary>, HomeChannel)? _gridVersion;
+  (List<VideoSummary>, HomeChannel, int?)? _gridVersion;
   Widget? _grid;
 
   Widget _videoItemsSliver(_FeedContent feed, HomeChannel channel) {
@@ -212,23 +217,27 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
       ),
       data: (items) {
         final controller = ref.read(feedControllerProvider.notifier);
-        final version = (items, channel);
+        final version = (items, channel, feed.previousStartIndex);
         // Pagination flags belong to the footer. Keep the same grid widget
         // while its data/actions are unchanged so its visible rows stay built.
         final previous = _gridVersion;
         if (previous == null ||
             !identical(previous.$1, items) ||
-            previous.$2 != channel) {
+            previous.$2 != channel ||
+            previous.$3 != feed.previousStartIndex) {
           _gridVersion = version;
           _grid = FeedVideoGrid(
             items: items,
             channel: channel,
+            previousStartIndex: feed.previousStartIndex,
             onReject: _rejectRecommendation,
             onUndo: _undoRecommendationFeedback,
           );
         }
         return SliverMainAxisGroup(
           slivers: [
+            if (feed.refreshing)
+              const SliverToBoxAdapter(child: LinearProgressIndicator()),
             if (items.isEmpty)
               status(const StateView.empty(message: '这里暂时没有视频'))
             else
@@ -333,7 +342,36 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
     }
     final controller = ref.read(feedControllerProvider.notifier);
     try {
-      await controller.rejectRecommendation(video);
+      RecommendationFeedbackReason? reason;
+      final feedback = video.recommendationFeedback;
+      final query = ref.read(recommendationQueryKeyProvider);
+      if (feedback?.source == RecommendationSource.app) {
+        final reasons =
+            feedback?.reasons ?? const <RecommendationFeedbackReason>[];
+        if (reasons.isEmpty) {
+          if (mounted) showAppNotice(context, '此推荐暂未提供可用的反馈原因');
+          return;
+        }
+        reason = await showAppDialog<RecommendationFeedbackReason>(
+          context: context,
+          builder: (context) => SimpleDialog(
+            title: const Text('不感兴趣'),
+            children: [
+              for (final item in reasons)
+                SimpleDialogOption(
+                  onPressed: () => Navigator.of(context).pop(item),
+                  child: Text(item.name),
+                ),
+            ],
+          ),
+        );
+        if (!mounted ||
+            reason == null ||
+            query != ref.read(recommendationQueryKeyProvider)) {
+          return;
+        }
+      }
+      await controller.rejectRecommendation(video, reason: reason);
     } on UnknownWriteOutcome {
       if (mounted &&
           widget.channel == HomeChannel.recommended &&
@@ -390,6 +428,8 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
                 categoryId: state.categoryId,
                 hasMore: state.hasMore,
                 loadingMore: state.loadingMore,
+                refreshing: state.refreshing,
+                previousStartIndex: state.previousStartIndex,
                 pageError: state.pageError,
               );
             }),
@@ -401,6 +441,8 @@ final class _HomeChannelPageState extends ConsumerState<_HomeChannelPage> {
             categoryId: null,
             hasMore: false,
             loadingMore: false,
+            refreshing: false,
+            previousStartIndex: null,
             pageError: null,
           );
     final section = _sections[channel] ?? channel.sections.firstOrNull;

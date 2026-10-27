@@ -338,10 +338,12 @@ void main() {
       const entry = {
         'bvid': 'BV1234567890',
         'title': 'Home video',
+        'tname': '音乐',
+        'is_followed': 1,
         'cid': 12345,
         'duration': 60,
         'owner': {'name': 'Creator'},
-        'stat': {'view': 42, 'danmaku': 2},
+        'stat': {'view': 42, 'danmaku': 2, 'like': 3},
       };
       final client = BiliApiClient(
         transport: _FakeTransport((uri, _) async {
@@ -386,6 +388,9 @@ void main() {
       expect(recommended.items.single.title, 'Home video');
       expect(recommended.items.single.recommendationReason, '已关注');
       expect(recommended.items.single.previewCid, '12345');
+      expect(recommended.items.single.likeCount, 3);
+      expect(recommended.items.single.categoryName, '音乐');
+      expect(recommended.items.single.isFollowed, isTrue);
       expect(recommended.hasMore, isTrue);
       expect(recommended.nextCursor, '3');
       expect(requests.last.queryParameters['fresh_idx'], '2');

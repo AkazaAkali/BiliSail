@@ -173,6 +173,8 @@
 
 ## 6. 尚待实测或决定的事项
 
+2026-10-27 推荐流设置只读参考本机 PiliPlus `936072449e82e3d90c28c728c0087bf5136fa441` 的推荐设置、过滤工具、推荐控制器与 HTTP 映射；App 接入进一步核对 `lib/utils/app_sign.dart`、`lib/common/constants.dart`、`lib/utils/accounts/account_manager/account_mgr.dart`、`lib/http/login.dart`、`lib/models/home/rcmd/result.dart` 和 `lib/utils/id_utils.dart`。独立实现十一项对应能力及 App 扫码授权，未复制 GPLv3 应用源码/资源、修改相邻仓库或导入其依赖。设备 buvid 与 App token 分开存储，token 只进系统安全存储。参考 lock 实际解析 crypto 3.0.7、dio 5.11.1；media-kit overrides 及锁定 fork 不随本轮采用，本项目继续使用现有依赖。对应范围与未测项见[推荐流设置](recommendation-settings-design.md)、[App 推荐设计](app-recommendation-design.md)。
+
 2026-10-07 下载能力另只读查看 U 的 `Controls/Dialogs/DownloadDialog.xaml.cs`、`ViewModels/Download/DownloadDialogViewModel.cs`、`Services/DownloadService.cs`、`Services/BackgroundDownloadService.cs` 与 `Models/Download/*`，以及 K 的 `Services/Services.Media/Core/PlayerClient.cs`。仅借鉴端点、分轨、选集、队列和附属文件职责，独立编写 Dart/Flutter；不参考下载 XAML 样式、不新增源码/资源复制、不修改相邻仓库。采用范围和验证见 [下载方案](downloads.md)。
 
 1. Web QR 与实际取得的 Cookie/refresh 信息是否满足 MVP 端点，游客可用范围如何。

@@ -16,24 +16,57 @@ final class FeedVideoGrid extends StatelessWidget {
     required this.channel,
     required this.onReject,
     required this.onUndo,
+    this.previousStartIndex,
   });
 
   final List<VideoSummary> items;
   final HomeChannel channel;
   final ValueChanged<VideoSummary> onReject;
   final ValueChanged<VideoId> onUndo;
+  final int? previousStartIndex;
+
+  Widget _grid(int start, int end) => SliverResponsiveCardGrid(
+    itemCount: end - start,
+    itemBuilder: (context, offset) {
+      final index = start + offset;
+      return _FeedVideoCard(
+        key: ValueKey((items[index].id, index)),
+        video: items[index],
+        recommended: channel == HomeChannel.recommended,
+        onReject: onReject,
+        onUndo: onUndo,
+      );
+    },
+  );
 
   @override
-  Widget build(BuildContext context) => SliverResponsiveCardGrid(
-    itemCount: items.length,
-    itemBuilder: (context, index) => _FeedVideoCard(
-      key: ValueKey((items[index].id, index)),
-      video: items[index],
-      recommended: channel == HomeChannel.recommended,
-      onReject: onReject,
-      onUndo: onUndo,
-    ),
-  );
+  Widget build(BuildContext context) {
+    final boundary = previousStartIndex;
+    if (boundary == null || boundary < 0 || boundary >= items.length) {
+      return _grid(0, items.length);
+    }
+    return SliverMainAxisGroup(
+      slivers: [
+        if (boundary > 0) _grid(0, boundary),
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Row(
+              children: [
+                Expanded(child: Divider()),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12),
+                  child: Text('上次看到这里'),
+                ),
+                Expanded(child: Divider()),
+              ],
+            ),
+          ),
+        ),
+        _grid(boundary, items.length),
+      ],
+    );
+  }
 }
 
 typedef _FeedbackState = ({bool rejected, bool busy, bool uncertain});

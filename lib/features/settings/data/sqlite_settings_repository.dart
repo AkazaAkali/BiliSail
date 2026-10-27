@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../../../domain/recommendation_settings.dart';
+
 import '../../../core/storage/app_database.dart';
 import '../domain/app_settings.dart';
 import '../domain/shortcut_settings.dart';
@@ -63,6 +65,9 @@ class SqliteSettingsRepository implements SettingsRepository {
       defaultDanmakuFontScale,
     );
     return AppSettings(
+      recommendations: RecommendationSettings.fromJson(
+        decoded['recommendations'],
+      ),
       navigationMode:
           WorkspaceNavigationMode.values
               .where((item) => item.name == decoded['navigationMode'])
@@ -213,7 +218,8 @@ class SqliteSettingsRepository implements SettingsRepository {
     return database.writeSetting(
       'preferences.v1',
       jsonEncode({
-        'schemaVersion': 28,
+        'schemaVersion': 30,
+        'recommendations': value.recommendations.toJson(),
         'navigationBarMode': value.navigationBarMode.name,
         'sidebarStyle': value.sidebarStyle.name,
         'sidebarCollapsed': value.sidebarCollapsed,

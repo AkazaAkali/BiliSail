@@ -1,14 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../domain/app_failure.dart';
 import '../../../domain/page_result.dart';
 import '../../../domain/request_cancellation.dart';
 import '../../../domain/video.dart';
+import '../../../domain/recommendation_settings.dart';
+import '../../../shared/application/recommendation_filter_provider.dart';
 import '../../video/domain/video_actions_repository.dart';
 import '../domain/feed_repository.dart';
 import '../domain/home_channel.dart';
 import '../domain/popular_feed.dart';
-import 'feed_item_index.dart';
+import 'filtered_feed_index.dart';
+import 'app_recommendation_identity.dart';
 
 final feedRepositoryProvider = Provider<FeedRepository>(
   (ref) => throw UnimplementedError('FeedRepository must be provided by app'),
@@ -48,6 +53,8 @@ final class FeedState {
     this.weeklyIssues = const [],
     this.hasMore = false,
     this.loadingMore = false,
+    this.refreshing = false,
+    this.previousStartIndex,
     this.pageError,
     this.rejecting = const {},
     this.rejected = const {},
@@ -63,6 +70,8 @@ final class FeedState {
   bool get popular => channel == HomeChannel.popular;
   final bool hasMore;
   final bool loadingMore;
+  final bool refreshing;
+  final int? previousStartIndex;
   final Object? pageError;
   final Set<VideoId> rejecting;
   final Set<VideoId> rejected;
@@ -79,6 +88,9 @@ final class FeedState {
     List<PopularWeek>? weeklyIssues,
     bool? hasMore,
     bool? loadingMore,
+    bool? refreshing,
+    int? previousStartIndex,
+    bool clearPreviousStart = false,
     Object? pageError,
     bool clearPageError = false,
     Set<VideoId>? rejecting,
@@ -93,6 +105,10 @@ final class FeedState {
     weeklyIssues: weeklyIssues ?? this.weeklyIssues,
     hasMore: hasMore ?? this.hasMore,
     loadingMore: loadingMore ?? this.loadingMore,
+    refreshing: refreshing ?? this.refreshing,
+    previousStartIndex: clearPreviousStart
+        ? null
+        : previousStartIndex ?? this.previousStartIndex,
     pageError: clearPageError ? null : pageError ?? this.pageError,
     rejecting: rejecting ?? this.rejecting,
     rejected: rejected ?? this.rejected,
@@ -110,7 +126,7 @@ final class FeedController extends Notifier<FeedState> {
   int _pagesWithoutNewItems = 0;
   RequestCancellation? _cancellation;
   final Map<HomeChannel, (FeedState, int, int)> _savedChannels = {};
-  final _itemIndices = <Object, FeedItemIndex>{};
+  final _itemIndices = <Object, FilteredFeedIndex>{};
   final _unloadedChannels = <HomeChannel, FeedState>{};
   final _savedPopular = <PopularSection, (FeedState, int, int)>{};
   final _unloadedPopular = <PopularSection, FeedState>{};
@@ -121,6 +137,7 @@ final class FeedController extends Notifier<FeedState> {
   final _rejected = <VideoId, RecommendationFeedback>{};
   final _uncertainRejections = <VideoId>{};
   final _uncertainRestorations = <VideoId>{};
+  Object? _recommendationKey;
 
   /// Keep cached content visible during the widget's deferred channel change.
   /// A temporary short loading page would clamp the restored scroll offset.
@@ -174,7 +191,7 @@ final class FeedController extends Notifier<FeedState> {
 
   void _saveCurrent() {
     final snapshot = (
-      state.copyWith(loadingMore: false),
+      state.copyWith(loadingMore: false, refreshing: false),
       _page,
       _pagesWithoutNewItems,
     );
@@ -213,6 +230,36 @@ final class FeedController extends Notifier<FeedState> {
 
   @override
   FeedState build() {
+    _recommendationKey = ref.read(recommendationQueryKeyProvider);
+    ref.listen(recommendationQueryKeyProvider, (_, next) {
+      if (_recommendationKey == next) return;
+      _recommendationKey = next;
+      _savedChannels.remove(HomeChannel.recommended);
+      _unloadedChannels.remove(HomeChannel.recommended);
+      _itemIndices.remove(HomeChannel.recommended);
+      for (final token in _rejectWrites.values) {
+        token.cancel();
+      }
+      _rejectWrites.clear();
+      _rejected.clear();
+      _uncertainRejections.clear();
+      _uncertainRestorations.clear();
+      if (state.channel == HomeChannel.recommended) {
+        _generation++;
+        _cancellation?.cancel();
+        _page = 0;
+        _pagesWithoutNewItems = 0;
+        state = const FeedState();
+        unawaited(refresh());
+      } else {
+        // Notify retained recommendation selectors without replacing other data.
+        state = state.copyWith();
+      }
+    });
+    ref.listen(
+      recommendationFilterProvider,
+      (_, filter) => _applyPreferences(filter),
+    );
     ref.onDispose(() {
       _generation++;
       _cancellation?.cancel();
@@ -237,11 +284,63 @@ final class FeedController extends Notifier<FeedState> {
     return const FeedState();
   }
 
+  RecommendationSurface _surface(FeedState value) =>
+      value.channel == HomeChannel.recommended
+      ? RecommendationSurface.recommended
+      : RecommendationSurface.discovery;
+
+  int? _previousStart(FilteredFeedIndex index) {
+    final settings = ref.read(recommendationSettingsProvider);
+    return settings.keepPrevious && settings.showPreviousMarker
+        ? index.previousStartIndex
+        : null;
+  }
+
+  void _applyPreferences(RecommendationFilter filter) {
+    for (final index in _itemIndices.values) {
+      index.configure(filter);
+    }
+    FeedState update(FeedState value) {
+      final index = _itemIndices[_indexKey(value)];
+      if (index == null || value.items.asData == null) return value;
+      final items = _boundedItems(index.items, value: value);
+      final marker = _previousStart(index);
+      if (identical(items, value.items.asData?.value) &&
+          marker == value.previousStartIndex) {
+        return value;
+      }
+      return value.copyWith(
+        items: AsyncData(items),
+        previousStartIndex: marker,
+        clearPreviousStart: marker == null,
+      );
+    }
+
+    void updateCache<K>(Map<K, (FeedState, int, int)> cache) {
+      for (final entry in cache.entries.toList()) {
+        cache[entry.key] = (
+          update(entry.value.$1),
+          entry.value.$2,
+          entry.value.$3,
+        );
+      }
+    }
+
+    updateCache(_savedChannels);
+    updateCache(_savedPopular);
+    updateCache(_savedWeeks);
+    final next = update(state);
+    if (!identical(next, state)) state = next;
+  }
+
   Future<void> selectRecommended() async {
     await selectChannel(HomeChannel.recommended);
   }
 
-  Future<bool> rejectRecommendation(VideoSummary video) async {
+  Future<bool> rejectRecommendation(
+    VideoSummary video, {
+    RecommendationFeedbackReason? reason,
+  }) async {
     if (!ref.mounted ||
         state.channel != HomeChannel.recommended ||
         state.items.asData?.value.any((item) => item.id == video.id) != true ||
@@ -260,7 +359,17 @@ final class FeedController extends Notifier<FeedState> {
     if (_rejected.length + _uncertainRejections.length >= 500) {
       throw const AppFailure(AppFailureKind.protocol, '本次浏览的反馈操作已达上限');
     }
-    return _submitFeedback(video.id, feedback, undo: false);
+    if (feedback.source != ref.read(recommendationQueryKeyProvider).source) {
+      return false;
+    }
+    if (feedback.source == RecommendationSource.app && reason == null) {
+      throw const AppFailure(AppFailureKind.protocol, '请选择此视频的反馈原因');
+    }
+    return _submitFeedback(
+      video.id,
+      reason == null ? feedback : feedback.selectReason(reason),
+      undo: false,
+    );
   }
 
   Future<bool> undoRecommendationFeedback(VideoId id) async {
@@ -346,6 +455,7 @@ final class FeedController extends Notifier<FeedState> {
       state = _withFeedback(saved.$1);
       _page = saved.$2;
       _pagesWithoutNewItems = saved.$3;
+      if (_page == 0) await refresh();
       return;
     }
     state = _withFeedback(
@@ -427,17 +537,27 @@ final class FeedController extends Notifier<FeedState> {
             state.popular && state.popularSection == PopularSection.ranking)) {
       ref.invalidate(rankingCategoriesProvider);
     }
+    final previousIndex = _itemIndices[_indexKey(state)];
+    final keepPrevious =
+        state.channel == HomeChannel.recommended &&
+        ref.read(recommendationSettingsProvider).keepPrevious &&
+        state.items.asData != null;
+    final previous = keepPrevious
+        ? previousIndex?.rawItems.take(200).toList() ?? <VideoSummary>[]
+        : <VideoSummary>[];
     final generation = ++_generation;
     _cancellation?.cancel();
     final cancellation = RequestCancellation();
     _cancellation = cancellation;
     _page = 0;
     _pagesWithoutNewItems = 0;
-    _itemIndices.remove(_indexKey(state));
+    if (!keepPrevious) _itemIndices.remove(_indexKey(state));
     state = state.copyWith(
-      items: const AsyncLoading(),
+      items: keepPrevious ? state.items : const AsyncLoading(),
       hasMore: false,
       loadingMore: false,
+      refreshing: keepPrevious,
+      clearPreviousStart: true,
       clearPageError: true,
     );
     if (!state.channel.hasVideoFeed) {
@@ -455,15 +575,30 @@ final class FeedController extends Notifier<FeedState> {
           cancellation.isCancelled) {
         return;
       }
-      final index = FeedItemIndex();
+      final index = FilteredFeedIndex(
+        ref.read(recommendationFilterProvider),
+        _surface(state),
+      );
       final merged = index.merge(result.items);
-      final items = _boundedItems(merged);
+      final freshCount = merged.length;
+      final freshIds = result.items.map((item) => item.id).toSet();
+      final retained = previous
+          .where((item) => !freshIds.contains(item.id))
+          .toList();
+      if (retained.isNotEmpty) {
+        index.merge(retained);
+        index.markPrevious(retained.map((item) => item.id));
+      }
+      final items = _boundedItems(index.items);
       _itemIndices[_indexKey(state)] = index;
       _page = 1;
-      _pagesWithoutNewItems = items.isEmpty ? 1 : 0;
+      _pagesWithoutNewItems = freshCount == 0 ? 1 : 0;
       state = state.copyWith(
         items: AsyncData(items),
         hasMore: result.hasMore && _underLimit(items),
+        refreshing: false,
+        previousStartIndex: _previousStart(index),
+        clearPreviousStart: _previousStart(index) == null,
       );
     } catch (error, stackTrace) {
       if (!ref.mounted ||
@@ -472,11 +607,20 @@ final class FeedController extends Notifier<FeedState> {
           error is AppFailure && error.kind == AppFailureKind.cancelled) {
         return;
       }
-      state = state.copyWith(items: AsyncError(error, stackTrace));
+      state = keepPrevious
+          ? state.copyWith(refreshing: false, pageError: error)
+          : state.copyWith(
+              items: AsyncError(error, stackTrace),
+              refreshing: false,
+            );
     }
   }
 
   Future<void> loadMore() async {
+    if (_page == 0 && state.pageError != null && !state.refreshing) {
+      await refresh();
+      return;
+    }
     final current = state.items.asData?.value;
     if (current == null || !state.hasMore || state.loadingMore) return;
     final generation = _generation;
@@ -504,6 +648,8 @@ final class FeedController extends Notifier<FeedState> {
         items: AsyncData(items),
         hasMore: result.hasMore && _underLimit(items),
         loadingMore: false,
+        previousStartIndex: _previousStart(index),
+        clearPreviousStart: _previousStart(index) == null,
         pageError:
             result.hasMore && _pagesWithoutNewItems >= _maxPagesWithoutNewItems
             ? const AppFailure(AppFailureKind.protocol, '连续多页没有新视频，可重试继续加载')
@@ -520,9 +666,12 @@ final class FeedController extends Notifier<FeedState> {
     }
   }
 
-  List<VideoSummary> _boundedItems(List<VideoSummary> items) =>
-      state.popular &&
-          state.popularSection != PopularSection.all &&
+  List<VideoSummary> _boundedItems(
+    List<VideoSummary> items, {
+    FeedState? value,
+  }) =>
+      (value ?? state).popular &&
+          (value ?? state).popularSection != PopularSection.all &&
           items.length > maximumPopularEntries
       ? List.unmodifiable(items.take(maximumPopularEntries))
       : items;
@@ -538,6 +687,15 @@ final class FeedController extends Notifier<FeedState> {
     bool reloadWeeklyIndex = false,
   }) async {
     final repository = ref.read(feedRepositoryProvider);
+    if (state.channel == HomeChannel.recommended &&
+        ref.read(recommendationQueryKeyProvider).source ==
+            RecommendationSource.app) {
+      if (repository is! AppRecommendationFeedRepository) {
+        throw const AppFailure(AppFailureKind.protocol, '当前推荐服务暂不支持 App 来源');
+      }
+      return (repository as AppRecommendationFeedRepository)
+          .loadAppRecommendations(page: page, cancellation: cancellation);
+    }
     if (state.channel == HomeChannel.ranking ||
         state.popular && state.popularSection == PopularSection.ranking) {
       if (repository is RankingFeedRepository) {

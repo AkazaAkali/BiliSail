@@ -5,6 +5,7 @@ export '../../../domain/audio_normalization.dart'
 import '../../../domain/video_codec.dart';
 import '../../../domain/media_cdn.dart';
 import 'shortcut_settings.dart';
+import '../../../domain/recommendation_settings.dart';
 
 export '../../../domain/video_codec.dart';
 export '../../../domain/media_cdn.dart' show MediaCdnPreference;
@@ -47,6 +48,7 @@ enum SponsorBlockMode { disabled, manual, automatic }
 
 final class AppSettings {
   AppSettings({
+    this.recommendations = const RecommendationSettings.defaults(),
     this.shortcuts = const ShortcutSettings.defaults(),
     this.theme = AppThemePreference.system,
     this.navigationMode = WorkspaceNavigationMode.dualTabs,
@@ -108,6 +110,7 @@ final class AppSettings {
 
   /// Constant defaults have no caller-owned collection inputs.
   const AppSettings.defaults({
+    this.recommendations = const RecommendationSettings.defaults(),
     this.shortcuts = const ShortcutSettings.defaults(),
     this.navigationMode = WorkspaceNavigationMode.dualTabs,
     this.navigationBarMode = NavigationBarMode.automatic,
@@ -166,6 +169,7 @@ final class AppSettings {
        _sponsorBlockCategories = supportedSponsorCategories;
 
   final ShortcutSettings shortcuts;
+  final RecommendationSettings recommendations;
   final AppThemePreference theme;
   final WorkspaceNavigationMode navigationMode;
   final NavigationBarMode navigationBarMode;
@@ -243,6 +247,7 @@ final class AppSettings {
   List<String> get sponsorBlockCategories => _sponsorBlockCategories;
 
   AppSettings copyWith({
+    RecommendationSettings? recommendations,
     ShortcutSettings? shortcuts,
     AppThemePreference? theme,
     WorkspaceNavigationMode? navigationMode,
@@ -301,6 +306,7 @@ final class AppSettings {
     List<String>? sponsorBlockCategories,
   }) => AppSettings(
     shortcuts: shortcuts ?? this.shortcuts,
+    recommendations: recommendations ?? this.recommendations,
     theme: theme ?? this.theme,
     navigationMode: navigationMode ?? this.navigationMode,
     navigationBarMode: navigationBarMode ?? this.navigationBarMode,

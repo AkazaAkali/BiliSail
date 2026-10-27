@@ -13,6 +13,7 @@ import 'models/pgc_models.dart';
 import 'mappers/video_access_parser.dart';
 import 'transport.dart';
 import 'wbi.dart';
+import 'app_profile.dart';
 
 final class _WbiKeyFlight {
   _WbiKeyFlight(this.epoch);
@@ -145,6 +146,122 @@ final class BiliApiClient {
       throw ArgumentError('Unsupported Web API destination');
     }
     return _jsonValue(uri, endpoint, context);
+  }
+
+  /// App profile: no Web cookies, fixed destinations, and single-attempt writes.
+  Future<Map<String, Object?>> requestAppJson(
+    String path,
+    Map<String, String> parameters, {
+    required String endpoint,
+    required String buvid,
+    String? accessToken,
+    ApiRequestContext? context,
+  }) async {
+    const feedPaths = {
+      '/x/v2/feed/index',
+      '/x/feed/dislike',
+      '/x/feed/dislike/cancel',
+    };
+    const passportPaths = {
+      '/x/passport-tv-login/qrcode/auth_code',
+      '/x/passport-tv-login/qrcode/poll',
+    };
+    final passport = passportPaths.contains(path);
+    if (!passport && !feedPaths.contains(path)) {
+      throw ArgumentError('Unsupported App destination');
+    }
+    if (!RegExp(r'^[A-Za-z0-9_-]{16,128}$').hasMatch(buvid)) {
+      throw ArgumentError('Invalid App device identity');
+    }
+    final feedback = path.startsWith('/x/feed/dislike');
+    if (feedback && (accessToken == null || accessToken.isEmpty)) {
+      throw ApiFailure(ApiFailureCategory.authentication, endpoint);
+    }
+    final active = boundedReadContext(context);
+    final epoch = _sessionProvider?.sessionEpoch;
+    void check() => _checkDecodeContext(
+      active,
+      epoch,
+      active.deadline!,
+      endpoint: endpoint,
+    );
+    check();
+    final signed = AppProfile.sign({
+      ...parameters,
+      if (accessToken != null && accessToken.isNotEmpty)
+        'access_key': accessToken,
+    }, _clock());
+    final headers = {
+      'Accept': 'application/json',
+      'User-Agent': AppProfile.userAgent,
+      'buvid': buvid,
+      'app-key': 'android_hd',
+      'env': 'prod',
+    };
+    final uri = Uri.https(
+      passport ? 'passport.bilibili.com' : 'app.bilibili.com',
+      path,
+    );
+    ApiHttpResponse response;
+    if (passport) {
+      final transport = _transport;
+      if (transport is! ApiFormTransport) {
+        throw ApiFailure(ApiFailureCategory.unavailable, endpoint);
+      }
+      final budget = active.deadline!.difference(_clock());
+      try {
+        response = await (transport as ApiFormTransport)
+            .postForm(
+              uri,
+              fields: signed,
+              headers: headers,
+              timeout: budget,
+              cancellation: active.cancellation,
+            )
+            .timeout(budget);
+      } on TimeoutException {
+        throw ApiFailure(ApiFailureCategory.timeout, endpoint);
+      }
+    } else {
+      response = await _sendWithRetry(
+        uri.replace(queryParameters: signed),
+        endpoint,
+        headers,
+        active,
+        epoch,
+        maxAttempts: feedback ? 1 : 3,
+        maxBytes: 2 * 1024 * 1024,
+      );
+    }
+    check();
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiFailure(
+        response.statusCode == 429
+            ? ApiFailureCategory.rateLimited
+            : response.statusCode == 401 || response.statusCode == 403
+            ? ApiFailureCategory.authentication
+            : ApiFailureCategory.http,
+        endpoint,
+        httpStatus: response.statusCode,
+      );
+    }
+    if (response.body.length > 2 * 1024 * 1024) {
+      throw ApiFailure(ApiFailureCategory.protocol, endpoint);
+    }
+    if (path.endsWith('/qrcode/poll')) {
+      Object? root;
+      try {
+        root = jsonDecode(utf8.decode(response.body));
+      } on FormatException {
+        throw ApiFailure(ApiFailureCategory.protocol, endpoint);
+      }
+      final code = root is Map<String, Object?> ? _int(root['code']) : null;
+      if (const {86039, 86101, 86090, 86038}.contains(code)) {
+        return {'status_code': code};
+      }
+    }
+    final value = _decodeJson(response, endpoint);
+    return value == null ? const {} : _map(value, endpoint);
   }
 
   /// PGC metadata shares the HTTP/session budget and the process decode gate.
@@ -2119,6 +2236,13 @@ final class BiliApiClient {
       ownerAvatarUrl: _uri(owner?['face'] ?? data['upic']),
       duration: Duration(seconds: duration),
       playCount: _count(stat?['view'] ?? data['play']),
+      likeCount: _count(stat?['like']),
+      categoryName: _string(data['tname']),
+      isFollowed: switch (data['is_followed']) {
+        true || 1 => true,
+        false || 0 => false,
+        _ => null,
+      },
       danmakuCount: _count(stat?['danmaku'] ?? data['video_review']),
       publishedAt: _publishedAt(data['pubdate']),
       recommendationReason: _recommendationReason(data['rcmd_reason']),

@@ -153,8 +153,8 @@ void main() {
     expect(position.pixels, closeTo(interruptedPixels + 350, 1));
     await second.up();
     await tester.pumpAndSettle();
-    expect(category.value, SettingsCategory.shortcuts);
-    expect(changes, [SettingsCategory.shortcuts]);
+    expect(category.value, SettingsCategory.values[2]);
+    expect(changes, [SettingsCategory.values[2]]);
     expect(repository.loads, 1);
     expect(repository.writes, 0);
     expect(tester.takeException(), isNull);

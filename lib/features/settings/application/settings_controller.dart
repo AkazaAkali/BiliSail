@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../../../domain/recommendation_settings.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/app_settings.dart';
@@ -58,6 +60,8 @@ final class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> setTheme(AppThemePreference value) =>
       update((current) => current.copyWith(theme: value));
+  Future<void> setRecommendations(RecommendationSettings value) =>
+      update((current) => current.copyWith(recommendations: value));
   Future<void> setNavigationMode(WorkspaceNavigationMode value) =>
       update((current) => current.copyWith(navigationMode: value));
   Future<void> setNavigationBarMode(NavigationBarMode value) =>

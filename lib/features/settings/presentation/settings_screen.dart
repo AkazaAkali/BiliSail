@@ -20,6 +20,7 @@ import '../domain/app_update.dart';
 import '../domain/app_settings.dart';
 import '../domain/settings_category.dart';
 import 'shortcut_settings_section.dart';
+import 'recommendation_settings_section.dart';
 
 const _usageNotice = <Widget>[
   Text('本应用是哔哩哔哩第三方客户端，视频、影视、直播及相关内容均来自哔哩哔哩，与官方无隶属关系。'),
@@ -368,6 +369,19 @@ final class _SettingsCategoryPageState
                           ShortcutSettingsSection(
                             settings: s.shortcuts,
                             save: (value) => controller.setShortcuts(value),
+                          ),
+                        ]),
+                      if (widget.category == SettingsCategory.recommendation)
+                        _section('推荐流设置', [
+                          RecommendationSettingsSection(
+                            settings: s.recommendations,
+                            save: (change) => controller.update(
+                              (current) => current.copyWith(
+                                recommendations: change(
+                                  current.recommendations,
+                                ),
+                              ),
+                            ),
                           ),
                         ]),
                       if (widget.category == SettingsCategory.cache)
