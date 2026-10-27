@@ -139,6 +139,7 @@ class SqliteSettingsRepository implements SettingsRepository {
       defaultPlaybackRate: number('defaultPlaybackRate', 1.0),
       fullscreenSwipeControls: boolean('fullscreenSwipeControls', true),
       defaultVolume: number('defaultVolume', 100.0),
+      rememberVolumeGlobally: boolean('rememberVolumeGlobally', false),
       audioNormalization:
           AudioNormalizationMode.values
               .where((item) => item.name == decoded['audioNormalization'])
@@ -201,7 +202,7 @@ class SqliteSettingsRepository implements SettingsRepository {
     return database.writeSetting(
       'preferences.v1',
       jsonEncode({
-        'schemaVersion': 26,
+        'schemaVersion': 27,
         'sidebarStyle': value.sidebarStyle.name,
         'sidebarCollapsed': value.sidebarCollapsed,
         'fullscreenSwipeControls': value.fullscreenSwipeControls,
@@ -232,6 +233,7 @@ class SqliteSettingsRepository implements SettingsRepository {
         'videoDecoding': value.videoDecoding.name,
         'defaultPlaybackRate': value.defaultPlaybackRate,
         'defaultVolume': value.defaultVolume,
+        'rememberVolumeGlobally': value.rememberVolumeGlobally,
         'audioNormalization': value.audioNormalization.name,
         'danmakuArea': value.danmakuArea,
         'danmakuTopMargin': value.danmakuTopMargin,
@@ -258,5 +260,22 @@ class SqliteSettingsRepository implements SettingsRepository {
         'sponsorBlockCategories': value.sponsorBlockCategories,
       }),
     );
+  }
+
+  // Keep frequent player changes separate from preference snapshots so a
+  // concurrent settings save cannot overwrite the most recent volume.
+  Future<double?> loadRememberedVolume() async {
+    final stored = await database.readSetting('playback.volume.v1');
+    final volume = stored == null ? null : double.tryParse(stored);
+    return volume != null && volume.isFinite && volume >= 0 && volume <= 100
+        ? volume
+        : null;
+  }
+
+  Future<void> saveRememberedVolume(double volume) {
+    if (!volume.isFinite || volume < 0 || volume > 100) {
+      throw ArgumentError.value(volume, 'volume');
+    }
+    return database.writeSetting('playback.volume.v1', volume.toString());
   }
 }

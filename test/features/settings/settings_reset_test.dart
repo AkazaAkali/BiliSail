@@ -54,6 +54,7 @@ void main() {
           preferredQuality: 120,
           defaultPlaybackRate: 2,
           defaultVolume: 20,
+          rememberVolumeGlobally: true,
           danmakuEnabled: false,
           danmakuArea: .25,
           danmakuFontScale: 1.5,

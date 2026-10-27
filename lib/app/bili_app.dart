@@ -415,6 +415,10 @@ class _BiliAppState extends ConsumerState<BiliApp> {
         ref.watch<AppSettings>(settingsDefaultsProvider);
     final cardInteractions = ref.watch(videoCardControllerProvider);
     _input.configure(settings.shortcuts);
+    widget.dependencies.playbackVolumeMemory.configure(
+      enabled: settings.rememberVolumeGlobally,
+      defaultVolume: settings.defaultVolume,
+    );
     return ImageCacheBinding(
       cache: widget.dependencies.images,
       child: MaterialApp.router(

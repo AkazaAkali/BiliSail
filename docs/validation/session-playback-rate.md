@@ -45,3 +45,20 @@ Android/macOS 原生运行未测，当前 Windows 主机不构建 macOS。本轮
 - Windows 真实 `MediaKitEngine` 专项通过：默认 60% → 手动 32.5% → 新页继承 32.5% → 新页静音，旧页仍为 32.5% → 关闭全部页后继承 0% → 重建应用运行状态后恢复 60%。既有倍速和长按隔离断言同测通过。使用本地音视频分轨 fixture、暂停打开，验证了引擎音量状态；不作为主观响度或系统音量验证。命令为设置 `BILI_TEST_MEDIA_DIR=test/fixtures/media` 后运行 `flutter test integration_test/windows_playback_test.dart -d windows --plain-name "Windows native playback inherits run rate and volume and a new run restores defaults"`；Windows Debug 测试入口构建成功，仅运行此专项，未复跑整套原生测试。日志：[Windows 原生专项](../../artifacts/session-playback-volume-windows.log)。
 
 Android/macOS 原生运行、跨进程真实退出重启及 Release 构建本轮未测；重启语义通过重建共享内存状态验证。本轮无在线账户请求。
+
+## 全局音量记忆（2026-10-27）
+
+- “设置 → 播放 → 全局音量记忆”默认关闭；旧配置缺失或字段非法时仍关闭，保留有效选择。开启后默认音量滑条禁用，原值保留；关闭后恢复编辑，下一次应用启动使用默认音量。本次运行内已有的手动音量继承保持不变。
+- 开启时使用本次运行最近成功的手动音量；尚未调节时优先恢复已记忆的值，首次没有记录才以当前默认音量初始化。此后成功调节音量会更新独立记录，包含静音、小数值和 100%；默认音量修改不覆盖记忆。
+- 视频、分 P、影视、直播和离线播放共用原有 `PlaybackVolumeMemory`，普通／全屏、滑条、手势和快捷键走同一 `PlaybackSession.setVolume`。悬停预览不参与记录。已有播放页、同源恢复、清晰度切换和重试继续使用各自源快照，不广播改变其他页面音量。
+- `AppSettings.rememberVolumeGlobally` 保存在 `preferences.v1`，快照版本 26 → 27；最近音量通过 `SqliteSettingsRepository` 独立存入 `playback.volume.v1`，避免并发保存偏好覆盖播放器的新值。SQLite schema 仍为 3，无需改表。非法、非有限或超出 0–100 的已存音量忽略。
+- `AppDependencies` 启动时读取音量并注入所有会话，根应用同步开关，关闭全部播放页后仍可启停记忆。存储最多保留一个进行中的写入和一个最新待写值；应用退出等待写入完成后关闭数据库。失败保留本次运行的音量，通过错误回调报告，后续成功写入可恢复；不把保存失败伪装为持久化成功。
+
+自动回归覆盖新运行读取独立 SQLite 记录、关闭后的默认值、重新开启、静音与小数值、与偏好保存交错、写入合并和迟到 revision、保存失败及恢复、已有源保留、设置控件禁用和保存失败回退。本轮未修改原生播放器适配器；Windows／Android／macOS 安装运行、跨进程退出重启和实际听感尚未验证。
+
+本轮验证：
+
+- 定向设置／播放回归 **292 项通过**，见[定向日志](../../artifacts/global-volume-targeted-tests.log)。`flutter analyze --no-pub` 无问题，本任务文件、四个包及 Linux 插件格式检查通过；Linux 插件单独分析通过。见[静态分析日志](../../artifacts/global-volume-analysis.log)。文档新增相对链接和 `git diff --check` 通过。
+- `tool/check.ps1 -SkipPub -Stage RootTests`：根应用 **3076 项通过**，13 项 Windows 符号链接用例因权限条件跳过，见[根应用日志](../../artifacts/global-volume-root-tests.log)。
+- `tool/check.ps1 -SkipPub -Stage PackageTests`：`bili_api` **478**、`bili_player` **83**、`bili_danmaku` **93**、`bili_mux` **5** 项通过。mux 的 **10** 项原生用例因未设置 `BILI_MUX_LIBRARY` 跳过，见[包测试日志](../../artifacts/global-volume-package-tests.log)。
+- 完整 `tool/check.ps1 -SkipPub` 在格式阶段被同期修改的 `lib/app/shell.dart` 阻塞；末次独立 Lint 阶段复查被同期修改的 `lib/features/playback/presentation/playback_timeline_bar.dart` 格式差异阻塞。保留这些非本任务修改，未为通过全量检查重排它们；完整检查未标为通过。打包／签名边界脚本均已通过，见[末次 Lint 日志](../../artifacts/global-volume-lint.log)。

@@ -74,6 +74,7 @@ final class AppSettings {
     this.videoDecoding = VideoDecodingPreference.automatic,
     this.defaultPlaybackRate = 1.0,
     this.defaultVolume = 100.0,
+    this.rememberVolumeGlobally = false,
     this.audioNormalization = AudioNormalizationMode.off,
     this.danmakuArea = 0.75,
     this.danmakuTopMargin = 0,
@@ -134,6 +135,7 @@ final class AppSettings {
        videoDecoding = VideoDecodingPreference.automatic,
        defaultPlaybackRate = 1.0,
        defaultVolume = 100.0,
+       rememberVolumeGlobally = false,
        audioNormalization = AudioNormalizationMode.off,
        danmakuTopMargin = 0,
        danmakuLineSpacing = 5,
@@ -194,6 +196,7 @@ final class AppSettings {
   final VideoDecodingPreference videoDecoding;
   final double defaultPlaybackRate;
   final double defaultVolume;
+  final bool rememberVolumeGlobally;
   final AudioNormalizationMode audioNormalization;
   final double danmakuArea;
 
@@ -264,6 +267,7 @@ final class AppSettings {
     VideoDecodingPreference? videoDecoding,
     double? defaultPlaybackRate,
     double? defaultVolume,
+    bool? rememberVolumeGlobally,
     AudioNormalizationMode? audioNormalization,
     double? danmakuArea,
     double? danmakuTopMargin,
@@ -323,6 +327,8 @@ final class AppSettings {
     videoDecoding: videoDecoding ?? this.videoDecoding,
     defaultPlaybackRate: defaultPlaybackRate ?? this.defaultPlaybackRate,
     defaultVolume: defaultVolume ?? this.defaultVolume,
+    rememberVolumeGlobally:
+        rememberVolumeGlobally ?? this.rememberVolumeGlobally,
     audioNormalization: audioNormalization ?? this.audioNormalization,
     danmakuArea: danmakuArea ?? this.danmakuArea,
     danmakuTopMargin: danmakuTopMargin ?? this.danmakuTopMargin,

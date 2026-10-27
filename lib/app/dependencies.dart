@@ -106,6 +106,7 @@ class AppDependencies {
     this.session,
     this.library,
     this.playback,
+    this.playbackVolumeMemory,
     this.window,
     this.sponsorTransport,
     this.playbackLog,
@@ -124,6 +125,7 @@ class AppDependencies {
   final SessionRepository session;
   final SqliteLibraryRepository library;
   final PlaybackManager playback;
+  final PlaybackVolumeMemory playbackVolumeMemory;
   final WindowService window;
   final playbackWindow = DesktopPlaybackWindowController();
   final DioApiTransport sponsorTransport;
@@ -206,7 +208,17 @@ class AppDependencies {
       createEngine: () => MediaKitEngine(onDiagnostic: playbackLog?.record),
     );
     final playbackRateMemory = PlaybackRateMemory();
-    final playbackVolumeMemory = PlaybackVolumeMemory();
+    final playbackVolumeMemory = PlaybackVolumeMemory(
+      savedVolume: await settings.loadRememberedVolume(),
+      saveVolume: settings.saveRememberedVolume,
+      onSaveError: (error, stack) => FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stack,
+          library: 'playback volume persistence',
+        ),
+      ),
+    );
     final playback = PlaybackManager(
       createSession: () {
         final repository = OfflinePlaybackRepository(
@@ -288,6 +300,7 @@ class AppDependencies {
       session,
       library,
       playback,
+      playbackVolumeMemory,
       window,
       sponsorTransport,
       playbackLog,
@@ -520,7 +533,11 @@ class AppDependencies {
             api.close();
           } finally {
             try {
-              await database.close();
+              try {
+                await playbackVolumeMemory.flush();
+              } finally {
+                await database.close();
+              }
             } finally {
               try {
                 await playbackLog?.close();

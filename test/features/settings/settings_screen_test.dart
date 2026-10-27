@@ -14,6 +14,55 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   for (final failSave in [false, true]) {
+    testWidgets(
+      'global volume memory retains defaults and rolls back on failure: $failSave',
+      (tester) async {
+        final repository = _SettingsRepository()
+          ..settings = AppSettings(defaultVolume: 35.5)
+          ..failSave = failSave;
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              settingsRepositoryProvider.overrideWithValue(repository),
+            ],
+            child: MaterialApp(
+              builder: AppNoticeHost.builder,
+              home: const Scaffold(
+                body: SettingsScreen(category: SettingsCategory.playback),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final toggle = find.widgetWithText(SwitchListTile, '全局音量记忆');
+        final slider = find.byType(Slider);
+        expect(tester.widget<Slider>(slider).onChanged, isNotNull);
+        await tester.ensureVisible(toggle);
+        await tester.pumpAndSettle();
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect(repository.settings.rememberVolumeGlobally, !failSave);
+        expect(repository.settings.defaultVolume, 35.5);
+        expect(tester.widget<SwitchListTile>(toggle).value, !failSave);
+        expect(
+          tester.widget<Slider>(slider).onChanged,
+          failSave ? isNotNull : isNull,
+        );
+        expect(tester.widget<Slider>(slider).value, 35.5);
+        if (failSave) {
+          expect(find.text('设置保存失败，请重试'), findsOneWidget);
+        } else {
+          await tester.tap(toggle);
+          await tester.pumpAndSettle();
+          expect(repository.settings.rememberVolumeGlobally, isFalse);
+          expect(tester.widget<Slider>(slider).onChanged, isNotNull);
+          expect(repository.settings.defaultVolume, 35.5);
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+  for (final failSave in [false, true]) {
     testWidgets('default comments save or roll back (failure: $failSave)', (
       tester,
     ) async {

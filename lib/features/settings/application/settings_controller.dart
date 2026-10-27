@@ -117,6 +117,8 @@ final class SettingsController extends AsyncNotifier<AppSettings> {
       update((current) => current.copyWith(defaultPlaybackRate: value));
   Future<void> setDefaultVolume(double value) =>
       update((current) => current.copyWith(defaultVolume: value));
+  Future<void> setRememberVolumeGlobally(bool value) =>
+      update((current) => current.copyWith(rememberVolumeGlobally: value));
   Future<void> setDanmakuArea(double value) =>
       update((current) => current.copyWith(danmakuArea: value));
   Future<void> setDanmakuTopMargin(double value) =>

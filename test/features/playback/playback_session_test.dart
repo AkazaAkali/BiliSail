@@ -2070,6 +2070,42 @@ void main() {
     expect(second.snapshots.value.rate, 2);
   });
 
+  test(
+    'global volume ignores defaults and preserves each existing source',
+    () async {
+      final writes = <double>[];
+      final memory = PlaybackVolumeMemory(
+        savedVolume: 32.5,
+        saveVolume: (volume) async => writes.add(volume),
+      );
+      final manager = _manager(volumeMemory: memory);
+      addTearDown(manager.close);
+      final settings = AppSettings(
+        defaultVolume: 60,
+        rememberVolumeGlobally: true,
+      );
+      final first = manager.acquire('first')..configureSettings(settings);
+      await first.open(_detail('1'), _part('1'));
+      expect(first.snapshots.value.volume, 32.5);
+      first.configureSettings(settings.copyWith(defaultVolume: 80));
+      await _flush();
+      expect(first.snapshots.value.volume, 32.5);
+      await first.setVolume(0);
+      final second = manager.acquire('second')..configureSettings(settings);
+      await second.open(_detail('2'), _part('2'));
+      expect(second.snapshots.value.volume, 0);
+      await second.setVolume(25);
+      expect(first.snapshots.value.volume, 0);
+      await first.changeQuality(64);
+      expect(first.snapshots.value.volume, 0);
+      await first.open(_detail('next'), _part('next'));
+      expect(first.snapshots.value.volume, 25);
+      await memory.flush();
+      expect(writes.last, 25);
+      expect(settings.defaultVolume, 60);
+    },
+  );
+
   for (final concurrent in [false, true]) {
     test(
       'later sources inherit run volume with concurrent playback $concurrent',

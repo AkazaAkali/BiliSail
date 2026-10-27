@@ -238,6 +238,7 @@ final class _SettingsCategoryPageState
     Future<void> Function(double) save, [
     String suffix = '',
     bool continuous = false,
+    bool enabled = true,
   ]) => _SettingSlider(
     title: title,
     value: value,
@@ -245,6 +246,7 @@ final class _SettingsCategoryPageState
     max: max,
     suffix: suffix,
     continuous: continuous,
+    enabled: enabled,
     save: (v) => _save(() => save(v)),
   );
   Widget _section(String title, List<Widget> children) => Padding(
@@ -469,6 +471,12 @@ final class _SettingsCategoryPageState
                             '启动时使用默认倍速；播放页修改后，本次运行中的后续视频继承修改后的倍速',
                             style: TextStyle(fontSize: 12),
                           ),
+                          _toggle(
+                            '全局音量记忆',
+                            s.rememberVolumeGlobally,
+                            controller.setRememberVolumeGlobally,
+                            '开启后忽略默认音量，记住最近使用的音量，重启应用后继续使用',
+                          ),
                           _slider(
                             '默认音量',
                             s.defaultVolume,
@@ -477,10 +485,13 @@ final class _SettingsCategoryPageState
                             controller.setDefaultVolume,
                             '%',
                             true,
+                            !s.rememberVolumeGlobally,
                           ),
-                          const Text(
-                            '启动时使用默认音量；播放页修改后，本次运行中的后续播放继承修改后的音量',
-                            style: TextStyle(fontSize: 12),
+                          Text(
+                            s.rememberVolumeGlobally
+                                ? '全局音量记忆已开启，默认音量暂不生效；关闭后，应用下次启动使用默认音量'
+                                : '启动时使用默认音量；播放页修改后，本次运行中的后续播放继承修改后的音量',
+                            style: const TextStyle(fontSize: 12),
                           ),
                         ]),
                       if (widget.category == SettingsCategory.playback)
@@ -696,11 +707,13 @@ final class _SettingSlider extends StatefulWidget {
     required this.suffix,
     required this.save,
     this.continuous = false,
+    this.enabled = true,
   });
   final String title, suffix;
   final double value, min, max;
   final Future<void> Function(double) save;
   final bool continuous;
+  final bool enabled;
   @override
   State<_SettingSlider> createState() => _SettingSliderState();
 }
@@ -724,11 +737,13 @@ final class _SettingSliderState extends State<_SettingSlider> {
               ? null
               : ((widget.max - widget.min) * (widget.max <= 3 ? 20 : 1))
                     .round(),
-          onChanged: (v) => setState(() => _draft = v),
-          onChangeEnd: (v) async {
-            await widget.save(v);
-            if (mounted) setState(() => _draft = null);
-          },
+          onChanged: widget.enabled ? (v) => setState(() => _draft = v) : null,
+          onChangeEnd: widget.enabled
+              ? (v) async {
+                  await widget.save(v);
+                  if (mounted) setState(() => _draft = null);
+                }
+              : null,
         ),
       ],
     );

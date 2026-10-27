@@ -17,6 +17,59 @@ void main() {
     repository = SqliteSettingsRepository(database);
   });
   tearDown(() => database.close());
+  test(
+    'global volume setting migrates and persists independently of defaults',
+    () async {
+      expect(AppSettings().rememberVolumeGlobally, isFalse);
+      expect(const AppSettings.defaults().rememberVolumeGlobally, isFalse);
+      expect((await repository.load()).rememberVolumeGlobally, isFalse);
+      for (final invalid in [null, 'true', 1, <Object>[]]) {
+        await database.writeSetting(
+          'preferences.v1',
+          jsonEncode({
+            'schemaVersion': 26,
+            'defaultVolume': 35.5,
+            'theme': 'dark',
+            'rememberVolumeGlobally': invalid,
+          }),
+        );
+        final loaded = await repository.load();
+        expect(loaded.rememberVolumeGlobally, isFalse);
+        for (final enabled in [true, false]) {
+          await repository.save(
+            loaded.copyWith(rememberVolumeGlobally: enabled),
+          );
+          final reloaded = await SqliteSettingsRepository(database).load();
+          expect(reloaded.rememberVolumeGlobally, enabled);
+          expect(reloaded.defaultVolume, 35.5);
+          expect(reloaded.theme, AppThemePreference.dark);
+        }
+      }
+      expect(database.schemaVersion, 3);
+    },
+  );
+  test('remembered volume rejects invalid stored values', () async {
+    expect(await repository.loadRememberedVolume(), isNull);
+    for (final invalid in [
+      'null',
+      'true',
+      'NaN',
+      'Infinity',
+      '-1',
+      '101',
+      '{}',
+    ]) {
+      await database.writeSetting('playback.volume.v1', invalid);
+      expect(await repository.loadRememberedVolume(), isNull);
+    }
+    for (final volume in [0.0, 35.5, 100.0]) {
+      await repository.saveRememberedVolume(volume);
+      expect(
+        await SqliteSettingsRepository(database).loadRememberedVolume(),
+        volume,
+      );
+    }
+  });
   test('default comments migrate and persist both choices', () async {
     expect(AppSettings().defaultShowComments, isFalse);
     expect(const AppSettings.defaults().defaultShowComments, isFalse);
@@ -201,7 +254,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 26);
+      expect(snapshot['schemaVersion'], 27);
       expect(snapshot['wheelDampingRatio'], ratio);
     }
     expect(database.schemaVersion, 3);
@@ -320,7 +373,7 @@ void main() {
         final snapshot = jsonDecode(
           (await database.readSetting('preferences.v1')) ?? '{}',
         ) as Map<String, Object?>;
-        expect(snapshot['schemaVersion'], 26);
+        expect(snapshot['schemaVersion'], 27);
         expect(snapshot['preferredLiveQuality'], quality);
       }
       expect(database.schemaVersion, 3);
@@ -424,7 +477,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 26);
+          expect(snapshot['schemaVersion'], 27);
           expect(snapshot['playerControlsMode'], mode.name);
         }
         expect(database.schemaVersion, 3);
@@ -500,7 +553,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 26);
+      expect(snapshot['schemaVersion'], 27);
       expect(snapshot['navigationMode'], 'singlePage');
       expect(
         (await platformRepository.load()).navigationMode,
@@ -533,7 +586,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 26);
+          expect(snapshot['schemaVersion'], 27);
           expect(snapshot['navigationMode'], mode.name);
         }
         for (final selected in WorkspaceNavigationMode.values) {
@@ -584,7 +637,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 26);
+      expect(snapshot['schemaVersion'], 27);
       expect(snapshot['theme'], 'dark');
       expect(database.schemaVersion, 3);
     },
@@ -627,7 +680,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 26);
+      expect(snapshot['schemaVersion'], 27);
       expect(snapshot['allowConcurrentPlayback'], allowed);
       expect(snapshot['navigationMode'], 'singlePage');
       final reloaded = await repository.load();

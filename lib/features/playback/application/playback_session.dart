@@ -1304,6 +1304,10 @@ class PlaybackSession extends ChangeNotifier {
   void configureSettings(AppSettings settings) {
     final previous = _settings;
     _settings = settings.normalized();
+    _volumeMemory.configure(
+      enabled: _settings.rememberVolumeGlobally,
+      defaultVolume: _settings.defaultVolume,
+    );
     if (_settings.navigationMode == WorkspaceNavigationMode.multipleTabs) {
       _navigationCheckpoints.clear();
     }
@@ -1372,7 +1376,8 @@ class PlaybackSession extends ChangeNotifier {
           _applyRate(_rateMemory.rateFor(_settings.defaultPlaybackRate)),
         );
       }
-      if (previous.defaultVolume != _settings.defaultVolume) {
+      if (!_settings.rememberVolumeGlobally &&
+          previous.defaultVolume != _settings.defaultVolume) {
         unawaited(
           _applyVolume(_volumeMemory.volumeFor(_settings.defaultVolume)),
         );
