@@ -413,6 +413,16 @@ final class _BiliAppShellState extends State<BiliAppShell>
     _commitWorkspace();
   }
 
+  void _returnToPlayback() {
+    final playback = _workspace.latestPlayback;
+    if (playback == null) return;
+    if (_desktopDual && _workspace.activeId == playback.id) {
+      setState(() => _windowActivation++);
+    } else {
+      _selectTab(playback.id);
+    }
+  }
+
   void _updatePageLocation(WorkspaceTab tab, Uri location) {
     if (!mounted ||
         !_workspace.updateLocation(
@@ -680,7 +690,10 @@ final class _BiliAppShellState extends State<BiliAppShell>
     child: Builder(
       builder: (context) => Scaffold(
         floatingActionButton:
-            _dualTabs &&
+            MediaQuery.sizeOf(context).width -
+                        MediaQuery.paddingOf(context).horizontal <
+                    _compactNavigationWidth &&
+                _dualTabs &&
                 !_desktopDual &&
                 !tab.isPlayback &&
                 _workspace.playbackId != null &&
@@ -702,23 +715,36 @@ final class _BiliAppShellState extends State<BiliAppShell>
                 SidebarStyle.expanded => true,
                 SidebarStyle.compact => false,
               };
-              final sidebarToggle = compact ? null : _sidebarToggle(context);
+              final playback = _workspace.latestPlayback;
+              final navigationTools = compact
+                  ? null
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _sidebarToggle(context),
+                        if (!tab.isPlayback && playback != null)
+                          _returnToPlaybackButton(context),
+                      ],
+                    );
               final colors = Theme.of(context).colorScheme;
               return Column(
                 children: [
                   if (_dualTabs || _singlePage) ...[
                     if (!_android && widget.windowControlsBuilder != null)
-                      _dualWindowCaption(context, sidebarToggle: sidebarToggle)
+                      _dualWindowCaption(
+                        context,
+                        navigationTools: navigationTools,
+                      )
                     else if (!_android && !_desktopDual && tab.isPlayback)
-                      _playbackHeader(context, sidebarToggle: sidebarToggle)
-                    else if (sidebarToggle != null)
+                      _playbackHeader(context, navigationTools: navigationTools)
+                    else if (navigationTools != null)
                       SizedBox(
                         key: const ValueKey('workspace-sidebar-toolbar'),
                         height: 40,
-                        child: Row(children: [sidebarToggle]),
+                        child: Row(children: [navigationTools]),
                       ),
                   ] else
-                    _tabStrip(context, sidebarToggle: sidebarToggle),
+                    _tabStrip(context, navigationTools: navigationTools),
                   Expanded(
                     key: const ValueKey('workspace-body'),
                     child: Row(
@@ -814,13 +840,13 @@ final class _BiliAppShellState extends State<BiliAppShell>
     ),
   );
 
-  Widget _dualWindowCaption(BuildContext context, {Widget? sidebarToggle}) =>
+  Widget _dualWindowCaption(BuildContext context, {Widget? navigationTools}) =>
       SizedBox(
         key: const ValueKey('dual-window-caption'),
         height: 32,
         child: Row(
           children: [
-            ?sidebarToggle,
+            ?navigationTools,
             if (_frameShowsBack(context)) _backButton(),
             if (!_android && _frameTab(context).isPlayback) _homeButton(),
             Expanded(
@@ -842,13 +868,13 @@ final class _BiliAppShellState extends State<BiliAppShell>
         ),
       );
 
-  Widget _playbackHeader(BuildContext context, {Widget? sidebarToggle}) =>
+  Widget _playbackHeader(BuildContext context, {Widget? navigationTools}) =>
       SizedBox(
         key: const ValueKey('workspace-playback-header'),
         height: 44,
         child: Row(
           children: [
-            ?sidebarToggle,
+            ?navigationTools,
             if (_singlePage)
               _backButton()
             else
@@ -1169,6 +1195,29 @@ final class _BiliAppShellState extends State<BiliAppShell>
           curve: Curves.easeInOutCubic,
           child: const Icon(Icons.menu_open_rounded, size: 20),
         ),
+      ),
+    );
+  }
+
+  Widget _returnToPlaybackButton(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8, top: 2, bottom: 2),
+      child: IconButton(
+        key: const ValueKey('workspace-return-to-playback'),
+        tooltip: '回到播放页',
+        style: IconButton.styleFrom(
+          minimumSize: const Size(36, 28),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          foregroundColor: colors.primary,
+          backgroundColor: colors.surfaceContainerLow,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(color: colors.outlineVariant),
+          ),
+        ),
+        onPressed: _returnToPlayback,
+        icon: const Icon(Icons.play_circle_outline_rounded, size: 20),
       ),
     );
   }
@@ -1597,7 +1646,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
     );
   }
 
-  Widget _tabStrip(BuildContext context, {Widget? sidebarToggle}) {
+  Widget _tabStrip(BuildContext context, {Widget? navigationTools}) {
     final colors = Theme.of(context).colorScheme;
     return ColoredBox(
       color: colors.surfaceContainerLow,
@@ -1605,7 +1654,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
         height: 42,
         child: Row(
           children: [
-            ?sidebarToggle,
+            ?navigationTools,
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) => Row(

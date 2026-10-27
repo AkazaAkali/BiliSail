@@ -22,6 +22,149 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 void main() {
+  final returnToPlayback = find.byKey(
+    const ValueKey('workspace-return-to-playback'),
+  );
+  for (final mode in WorkspaceNavigationMode.values) {
+    for (final caption in [false, true]) {
+      _workspaceTestWidgets(
+        'wide return to playback retains the page in $mode, caption=$caption',
+        (tester) async {
+          tester.view.devicePixelRatio = 1;
+          tester.view.physicalSize = const Size(1280, 800);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(tester.view.resetPhysicalSize);
+          final disposed = <String>[];
+          final router = _router(
+            (_, tab) => _CounterPage(tab: tab, onDispose: disposed.add),
+            navigationMode: mode,
+            customCaption: caption,
+          );
+          addTearDown(router.dispose);
+          await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+          await tester.pumpAndSettle();
+          expect(returnToPlayback, findsNothing);
+          router.go('/video/BV1234567890');
+          await tester.pumpAndSettle();
+          final playback = tester.element(find.byType(_CounterPage));
+          await tester.tap(find.text('count 0'));
+          await tester.pump();
+          expect(returnToPlayback, findsNothing);
+          for (final section in ['home', 'dynamic', 'live']) {
+            await tester.tap(find.byKey(ValueKey('workspace-nav-$section')));
+            await tester.pumpAndSettle();
+            expect(returnToPlayback, findsOneWidget);
+            expect(find.byTooltip('回到播放页'), findsOneWidget);
+            expect(tester.getTopLeft(returnToPlayback).dy, lessThan(44));
+            expect(find.byType(FloatingActionButton), findsNothing);
+            await tester.tap(returnToPlayback);
+            await tester.pumpAndSettle();
+            expect(
+              router.routeInformationProvider.value.uri.path,
+              '/video/BV1234567890',
+            );
+            expect(tester.element(find.byType(_CounterPage)), same(playback));
+            expect(find.text('count 1'), findsOneWidget);
+          }
+          await tester.tap(find.byKey(const ValueKey('workspace-nav-home')));
+          await tester.pumpAndSettle();
+          await tester.tap(
+            find.byKey(const ValueKey('workspace-sidebar-toggle')),
+          );
+          await tester.pumpAndSettle();
+          expect(returnToPlayback.hitTestable(), findsOneWidget);
+          tester.view.physicalSize = const Size(599, 800);
+          await tester.pumpAndSettle();
+          expect(returnToPlayback, findsNothing);
+          tester.view.physicalSize = const Size(600, 800);
+          await tester.pumpAndSettle();
+          expect(returnToPlayback.hitTestable(), findsOneWidget);
+          await tester.tap(returnToPlayback);
+          await tester.pumpAndSettle();
+          expect(tester.element(find.byType(_CounterPage)), same(playback));
+          expect(disposed, isEmpty);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  _workspaceTestWidgets(
+    'dual return keeps the floating entry when safe area makes the layout narrow',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(620, 800);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final router = _router(
+        (_, tab) => Text('page ${tab.location.path}'),
+        navigationMode: WorkspaceNavigationMode.dualTabs,
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(
+        InputTestApp.router(
+          routerConfig: router,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(padding: const EdgeInsets.symmetric(horizontal: 20)),
+            child: child!,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      router.go('/video/A');
+      await tester.pumpAndSettle();
+      router.go('/');
+      await tester.pumpAndSettle();
+      expect(returnToPlayback, findsNothing);
+      expect(find.byTooltip('返回播放'), findsOneWidget);
+      await tester.tap(find.byTooltip('返回播放'));
+      await tester.pumpAndSettle();
+      expect(router.routeInformationProvider.value.uri.path, '/video/A');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  _workspaceTestWidgets(
+    'wide return uses the latest surviving playback visit',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1280, 800);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final router = _router((_, tab) => Text('page ${tab.location.path}'));
+      addTearDown(router.dispose);
+      await tester.pumpWidget(InputTestApp.router(routerConfig: router));
+      await tester.pumpAndSettle();
+      for (final path in ['/video/A', '/pgc/42', '/live/12', '/offline/task']) {
+        router.go(path);
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.byKey(const ValueKey('workspace-tab-tab-1')));
+      await tester.pumpAndSettle();
+      for (final entry in [
+        ('tab-1', '/video/A'),
+        ('tab-4', '/offline/task'),
+        ('tab-3', '/live/12'),
+        ('tab-2', '/pgc/42'),
+      ]) {
+        await tester.tap(find.byKey(const ValueKey('workspace-nav-home')));
+        await tester.pumpAndSettle();
+        await tester.tap(returnToPlayback);
+        await tester.pumpAndSettle();
+        expect(router.routeInformationProvider.value.uri.path, entry.$2);
+        await tester.tap(find.byKey(const ValueKey('workspace-nav-home')));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(ValueKey('close-workspace-tab-${entry.$1}')),
+        );
+        await tester.pumpAndSettle();
+      }
+      expect(returnToPlayback, findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final mode in WorkspaceNavigationMode.values) {
     _workspaceTestWidgets(
       'player Home follows $mode and releases only single-page media',
@@ -341,7 +484,13 @@ void main() {
             }
             expect(
               find.byTooltip('返回播放'),
-              dual && playbackCreated && !playback
+              dual && playbackCreated && !playback && width < 600
+                  ? findsOneWidget
+                  : findsNothing,
+            );
+            expect(
+              returnToPlayback,
+              playbackCreated && !playback && width >= 600
                   ? findsOneWidget
                   : findsNothing,
             );
@@ -1682,6 +1831,9 @@ GoRouter _router(
         for (final path in [
           '/',
           '/video/:bvid',
+          '/pgc/:id',
+          '/live/:id',
+          '/offline/:id',
           '/user/:mid',
           '/search',
           '/settings',

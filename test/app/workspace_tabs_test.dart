@@ -2,6 +2,63 @@ import 'package:bilisail/app/workspace_tabs.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('latest playback follows visits and falls back when pages close', () {
+    final workspace = WorkspaceTabs();
+    expect(workspace.latestPlayback, isNull);
+    final media = <WorkspaceTab>[];
+    for (final route in ['/video/A', '/pgc/42', '/live/12', '/offline/task']) {
+      workspace.acceptRoute(Uri.parse(route));
+      media.add(workspace.active);
+      expect(workspace.latestPlayback?.id, media.last.id);
+    }
+    workspace.select(media.first.id);
+    workspace.acceptRoute(Uri.parse('/?channel=dynamic'));
+    expect(workspace.latestPlayback?.id, media.first.id);
+    // A background source update is not a visit to that media page.
+    workspace.updateLocation(media.last.id, Uri.parse('/offline/next'));
+    expect(workspace.latestPlayback?.id, media.first.id);
+    for (final tab in [media.first, ...media.skip(1).toList().reversed]) {
+      expect(workspace.latestPlayback?.id, tab.id);
+      expect(workspace.close(tab.id), isTrue);
+    }
+    expect(workspace.latestPlayback, isNull);
+  });
+
+  test('latest playback survives root navigation and bounded Back history', () {
+    final workspace = WorkspaceTabs()..setSingleMode(true);
+    workspace.acceptRoute(Uri.parse('/video/A'));
+    final first = workspace.active;
+    workspace.acceptRoute(Uri.parse('/video/B'));
+    final second = workspace.active;
+    workspace.select(first.id);
+    workspace.acceptRoute(Uri.parse('/?channel=dynamic'));
+    for (var index = 0; index < WorkspaceTabs.maximumHistory * 2; index++) {
+      workspace.acceptRoute(Uri.parse('/user/${index % 2}'));
+    }
+    expect(workspace.latestPlayback?.id, first.id);
+    expect(workspace.close(first.id), isTrue);
+    expect(workspace.latestPlayback?.id, second.id);
+    workspace.setSingleMode(false);
+    workspace.setDualMode(true);
+    expect(workspace.playbackId, second.id);
+    expect(workspace.latestPlayback?.id, second.id);
+  });
+
+  test('Back and closing the selected tab count as playback visits', () {
+    final workspace = WorkspaceTabs();
+    workspace.acceptRoute(Uri.parse('/video/A'));
+    final first = workspace.active;
+    workspace.acceptRoute(Uri.parse('/video/B'));
+    final second = workspace.active;
+    expect(workspace.goBack(), isTrue);
+    expect(workspace.latestPlayback?.id, first.id);
+    workspace.select(second.id);
+    workspace.acceptRoute(Uri.parse('/user/42'));
+    expect(workspace.close(workspace.activeId), isTrue);
+    expect(workspace.activeId, second.id);
+    expect(workspace.latestPlayback?.id, second.id);
+  });
+
   test('single player Home closes media and restores the entry search', () {
     final workspace = WorkspaceTabs()..setSingleMode(true);
     workspace.acceptRoute(Uri.parse('/?channel=popular'));

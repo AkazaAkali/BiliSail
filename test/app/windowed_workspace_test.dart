@@ -15,6 +15,56 @@ import 'package:go_router/go_router.dart';
 import '../support/detached_window_fake.dart';
 
 void main() {
+  for (final platform in [TargetPlatform.windows, TargetPlatform.macOS]) {
+    testWidgets(
+      'wide return raises the retained detached playback window on $platform',
+      (tester) async {
+        final fixture = _WindowedWorkspace(tester);
+        addTearDown(fixture.dispose);
+        final returnToPlayback = find.byKey(
+          const ValueKey('workspace-return-to-playback'),
+        );
+        await tester.pumpWidget(fixture.app);
+        await tester.pumpAndSettle();
+        expect(returnToPlayback, findsNothing);
+        fixture.router.go('/video/BV1234567890');
+        await tester.pumpAndSettle();
+        final playback = tester.element(_page('tab-1'));
+        final view = View.of(playback);
+        final window = fixture.windows.lastWindow!;
+        // The browser can still show the return button while the route already
+        // selects playback, so repeated presses must also raise its window.
+        for (var index = 0; index < 2; index++) {
+          final activations = window.activationCount;
+          await tester.tap(returnToPlayback);
+          await tester.pumpAndSettle();
+          expect(window.activationCount, activations + 1);
+        }
+        await tester.tap(find.byKey(const ValueKey('workspace-nav-dynamic')));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(const ValueKey('workspace-sidebar-toggle')),
+        );
+        await tester.pumpAndSettle();
+        final activations = window.activationCount;
+        await tester.tap(returnToPlayback);
+        await tester.pumpAndSettle();
+        expect(window.activationCount, activations + 1);
+        expect(fixture.windows.creationCount, 1);
+        expect(tester.element(_page('tab-1')), same(playback));
+        expect(View.of(playback), same(view));
+        expect(fixture.disposedPages, isEmpty);
+        window.requestClose();
+        await tester.pumpAndSettle();
+        expect(returnToPlayback, findsNothing);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+      },
+      variant: TargetPlatformVariant.only(platform),
+    );
+  }
+
   testWidgets(
     'player Home focuses the browser while preserving the detached playback view',
     (tester) async {

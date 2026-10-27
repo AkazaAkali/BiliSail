@@ -67,6 +67,7 @@ final class WorkspaceTabs {
   bool _singleMode = false;
   String _browseId = 'home';
   String? _playbackId;
+  final List<String> _playbackVisits = [];
   final List<Uri> _playbackHistory = [];
   ({String id, Uri location, List<String> history})? _playbackEntry;
   ({String tabId, String browseId, Uri rootLocation, List<String> history})?
@@ -109,7 +110,7 @@ final class WorkspaceTabs {
       _browseId = activeId;
     }
     if (!_tabs.any((tab) => tab.id == _playbackId)) {
-      _playbackId = _tabs.where((tab) => tab.isPlayback).lastOrNull?.id;
+      _playbackId = latestPlayback?.id;
     }
     if (!_tabs.any((tab) => tab.id == _browseId && !tab.isPlayback)) {
       _browseId = 'home';
@@ -129,6 +130,19 @@ final class WorkspaceTabs {
 
   String get browseId => _browseId;
   String? get playbackId => _playbackId;
+
+  /// Most recently visited media page that is still retained in the workspace.
+  /// Unlike Back history, this stays bounded by the open pages, not visit count.
+  WorkspaceTab? get latestPlayback {
+    for (final id in _playbackVisits.reversed) {
+      final tab = _tabs
+          .where((tab) => tab.id == id && tab.isPlayback)
+          .firstOrNull;
+      if (tab != null) return tab;
+    }
+    return null;
+  }
+
   List<Uri> get playbackHistory => List.unmodifiable(_playbackHistory);
   bool get canGoBackBrowsing => _browseId != 'home';
 
@@ -246,11 +260,18 @@ final class WorkspaceTabs {
       _activeId = id;
     }
     if (active.isPlayback) {
+      _rememberPlaybackVisit();
       if (_playbackId != id) _playbackHistory.clear();
       _playbackId = id;
     } else {
       _browseId = id;
     }
+  }
+
+  void _rememberPlaybackVisit() {
+    _playbackVisits
+      ..remove(_activeId)
+      ..add(_activeId);
   }
 
   /// Back traverses visits, rather than the visual order of the tab strip.
@@ -277,6 +298,7 @@ final class WorkspaceTabs {
       _playbackId = activeId;
       _playbackHistory.clear();
     }
+    if (active.isPlayback) _rememberPlaybackVisit();
     _trimHistory();
     if (_singleMode && !_backHistory.contains(leaving)) close(leaving);
     return true;
@@ -444,6 +466,7 @@ final class WorkspaceTabs {
     if (index < 0 || _tabs[index].pinned) return false;
     final wasActive = _activeId == id;
     _tabs.removeAt(index);
+    _playbackVisits.remove(id);
     _backHistory.removeWhere((previous) => previous == id);
     if (id == _playbackId) {
       _playbackId = null;
@@ -452,6 +475,7 @@ final class WorkspaceTabs {
     if (id == _browseId) _browseId = 'home';
     if (wasActive) {
       _activeId = _dualMode ? _browseId : _tabs[index > 0 ? index - 1 : 0].id;
+      if (active.isPlayback) _rememberPlaybackVisit();
     }
     _trimHistory();
     return true;
