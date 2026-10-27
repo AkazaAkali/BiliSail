@@ -516,6 +516,7 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
   final Set<int> _pressedPointers = {};
   final Set<String> _hoveredControlRegions = {};
   bool _mouseInside = false;
+  PointerDeviceKind? _doubleTapKind;
   late AppLifecycleState? _appLifecycleState;
   bool _controlEditorFocused = false;
   int _openControlsMenus = 0;
@@ -726,6 +727,22 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
     } else {
       widget.controlsVisible.value = !widget.controlsVisible.value;
       _scheduleControlsHide();
+    }
+  }
+
+  void _onSurfaceDoubleTap() {
+    final kind = _doubleTapKind;
+    _doubleTapKind = null;
+    if (!widget.active || !_appActive || kind == null) return;
+    final input = InputScope.of<Object>(context);
+    if (input?.routes.modal == true || (input?.dispatcher.barriers ?? 0) != 0) {
+      return;
+    }
+    _focusNode.requestFocus();
+    if (kind == PointerDeviceKind.touch) {
+      unawaited(widget.session.togglePlaying());
+    } else {
+      _toggleFullScreen();
     }
   }
 
@@ -1024,11 +1041,11 @@ class _PlayerViewState extends State<_PlayerView> with WidgetsBindingObserver {
                                         ),
                                         behavior: HitTestBehavior.translucent,
                                         onTap: _onSurfaceTap,
-                                        onDoubleTap: () {
-                                          if (!widget.active) return;
-                                          _focusNode.requestFocus();
-                                          _toggleFullScreen();
-                                        },
+                                        onDoubleTapDown: (details) =>
+                                            _doubleTapKind = details.kind,
+                                        onDoubleTapCancel: () =>
+                                            _doubleTapKind = null,
+                                        onDoubleTap: _onSurfaceDoubleTap,
                                       ),
                                     ),
                                   ),

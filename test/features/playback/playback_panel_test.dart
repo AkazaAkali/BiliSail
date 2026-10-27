@@ -1799,9 +1799,9 @@ void main() {
         final inlineWidth = tester.getSize(find.byType(DanmakuOverlay)).width;
         for (final fullscreen in [true, false, true, false]) {
           final point = tester.getTopLeft(target) + const Offset(130, 70);
-          await tester.tapAt(point);
+          await tester.tapAt(point, kind: PointerDeviceKind.mouse);
           await tester.pump(const Duration(milliseconds: 50));
-          await tester.tapAt(point);
+          await tester.tapAt(point, kind: PointerDeviceKind.mouse);
           await _pumpFrames(tester);
           await _pumpSurfaceTap(tester);
           expect(window.fullScreen, fullscreen);
@@ -3651,7 +3651,147 @@ void main() {
     });
   }
 
-  for (final kind in [PointerDeviceKind.mouse, PointerDeviceKind.touch]) {
+  for (final (content, target) in <(String, ContentPlaybackTarget?)>[
+    ('video', null),
+    ('pgc', const PgcPlaybackTarget('12', cid: '123')),
+    ('live', const LivePlaybackTarget('12')),
+    ('offline', const OfflinePlaybackTarget('local-task')),
+  ]) {
+    for (final mode in PlayerControlsMode.values) {
+      for (final fullscreen in [false, true]) {
+        for (final visible in [false, true]) {
+          testWidgets(
+            'touch double tap toggles playback once content=$content mode=${mode.name} fullscreen=$fullscreen controls=$visible',
+            (tester) async {
+              final engine = _FakeEngine();
+              final session = _session(engine);
+              final window = _FakeWindowService();
+              addTearDown(session.close);
+              await tester.pumpWidget(
+                _app(
+                  session,
+                  window,
+                  AppSettings(playerControlsMode: mode),
+                  target: target,
+                ),
+              );
+              await _pumpFrames(tester);
+              if (fullscreen) {
+                await tester.tap(find.byTooltip('全屏（F）'));
+                await _pumpFrames(tester);
+              }
+              await session.pause();
+              await session.seek(const Duration(seconds: 12));
+              if (!visible) {
+                await tester.pump(const Duration(seconds: 5));
+                await tester.pump(const Duration(milliseconds: 216));
+                await tester.pump();
+              }
+              final controls = find.byKey(const ValueKey('player-controls'));
+              final expectedControls = visible ? findsOneWidget : findsNothing;
+              final generation = session.sourceGeneration;
+              final pauses = engine.pauses;
+              final opens = engine.opens;
+              final seeks = engine.seeks;
+              final position = engine.currentSnapshot.position;
+              expect(controls, expectedControls);
+
+              for (final playing in [true, false]) {
+                await tester.tapAt(_surfacePoint(tester));
+                await tester.pump(const Duration(milliseconds: 50));
+                expect(engine.currentSnapshot.desiredPlaying, !playing);
+                await tester.tapAt(_surfacePoint(tester));
+                await _pumpSurfaceTap(tester);
+                expect(engine.currentSnapshot.desiredPlaying, playing);
+                expect(window.fullScreen, fullscreen);
+                expect(controls, expectedControls);
+              }
+
+              expect(engine.pauses, pauses + 1);
+              expect(engine.opens, opens);
+              expect(engine.seeks, seeks);
+              expect(session.sourceGeneration, generation);
+              expect(engine.currentSnapshot.position, position);
+              expect(engine.currentSnapshot.rate, 1);
+              expect(find.byType(VideoSurface), findsOneWidget);
+              expect(engine.maxSurfaces, 1);
+              expect(tester.takeException(), isNull);
+              await tester.pumpWidget(const SizedBox());
+              await _pumpFrames(tester);
+            },
+          );
+        }
+      }
+    }
+  }
+
+  for (final platform in [
+    TargetPlatform.android,
+    TargetPlatform.iOS,
+    TargetPlatform.windows,
+    TargetPlatform.macOS,
+    TargetPlatform.linux,
+  ]) {
+    testWidgets('touch double tap pauses on ${platform.name}', (tester) async {
+      final engine = _FakeEngine();
+      final session = _session(engine);
+      final window = _FakeWindowService();
+      addTearDown(session.close);
+      await tester.pumpWidget(
+        _app(session, window, const AppSettings.defaults()),
+      );
+      await _pumpFrames(tester);
+      expect(engine.currentSnapshot.desiredPlaying, isTrue);
+      await tester.tapAt(_surfacePoint(tester));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tapAt(_surfacePoint(tester));
+      await _pumpSurfaceTap(tester);
+      expect(engine.currentSnapshot.desiredPlaying, isFalse);
+      expect(window.fullScreen, isFalse);
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+    }, variant: TargetPlatformVariant.only(platform));
+  }
+
+  for (final cancel in [false, true]) {
+    testWidgets(
+      'second touch ${cancel ? 'cancel' : 'drag'} is not a double tap',
+      (tester) async {
+        final engine = _FakeEngine();
+        final session = _session(engine);
+        final window = _FakeWindowService();
+        addTearDown(session.close);
+        await tester.pumpWidget(
+          _app(session, window, const AppSettings.defaults()),
+        );
+        await _pumpFrames(tester);
+        await session.pause();
+        await tester.tapAt(_surfacePoint(tester));
+        await tester.pump(const Duration(milliseconds: 50));
+        final second = await tester.startGesture(_surfacePoint(tester));
+        if (cancel) {
+          await second.cancel();
+        } else {
+          await second.moveBy(const Offset(60, 0));
+          await second.up();
+        }
+        await _pumpSurfaceTap(tester);
+        expect(engine.currentSnapshot.desiredPlaying, isFalse);
+        expect(window.fullScreen, isFalse);
+        // Cancellation must also leave the next complete double tap usable.
+        await tester.tapAt(_surfacePoint(tester));
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tapAt(_surfacePoint(tester));
+        await _pumpSurfaceTap(tester);
+        expect(engine.currentSnapshot.desiredPlaying, isTrue);
+        expect(window.fullScreen, isFalse);
+        await tester.pumpWidget(const SizedBox());
+        await _pumpFrames(tester);
+      },
+    );
+  }
+
+  for (final kind in [PointerDeviceKind.mouse, PointerDeviceKind.stylus]) {
     for (final visible in [true, false]) {
       testWidgets(
         '${kind.name} double tap preserves ${visible ? 'visible' : 'hidden'} controls across fullscreen',
@@ -3868,14 +4008,20 @@ void main() {
             expect(engine.currentSnapshot.desiredPlaying, playing);
             expect(controls, live ? findsNothing : findsOneWidget);
 
-            // The double-tap recognizer must win without issuing a play command.
+            // Double taps suppress single taps and dispatch by pointer kind.
             final point = _surfacePoint(tester);
             await tester.tapAt(point, kind: kind);
             await tester.pump(const Duration(milliseconds: 50));
             await tester.tapAt(point, kind: kind);
             await _pumpFrames(tester);
-            expect(window.fullScreen, !fullscreen);
-            expect(engine.currentSnapshot.desiredPlaying, playing);
+            expect(
+              window.fullScreen,
+              kind == PointerDeviceKind.touch ? fullscreen : !fullscreen,
+            );
+            expect(
+              engine.currentSnapshot.desiredPlaying,
+              kind == PointerDeviceKind.touch ? !playing : playing,
+            );
             expect(engine.opens, 1);
             expect(engine.maxSurfaces, 1);
             if (mouse != null) await mouse.removePointer();
