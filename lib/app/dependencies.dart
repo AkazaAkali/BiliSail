@@ -171,6 +171,7 @@ class AppDependencies {
     final settings = SqliteSettingsRepository(
       database,
       defaultNavigationMode: defaultWorkspaceNavigationMode,
+      defaultShortcuts: defaultShortcuts,
       defaultHighEnergyProgressEnabled: defaultHighEnergyProgressEnabled,
       defaultDanmakuArea: defaultDanmakuArea,
       defaultDanmakuFontScale: defaultDanmakuFontScale,

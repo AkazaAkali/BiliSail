@@ -12,6 +12,41 @@ import '../support/native_window_events.dart';
 import '../support/window_service_fake.dart';
 
 void main() {
+  testWidgets('Apple playback window uses configured tab shortcuts', (
+    tester,
+  ) async {
+    var activations = 0, backs = 0;
+    var shortcuts = const ShortcutSettings.defaults(useAppleDefaults: true);
+    Widget build() => WorkspacePlaybackWindow(
+      shortcuts: shortcuts,
+      theme: ThemeData(),
+      onBack: () => backs++,
+      onClose: () {},
+      onActivateBrowser: () => activations++,
+      child: const SizedBox.expand(),
+    );
+    await tester.pumpWidget(build());
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.bracketRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.bracketLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(activations, 2);
+    shortcuts = shortcuts.withKeys(ShortcutAction.nextTab, ['Meta+K']);
+    await tester.pumpWidget(build());
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(activations, 3);
+    expect(backs, 1);
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
   testWidgets('native frame follows app theme independently of system theme', (
     tester,
   ) async {

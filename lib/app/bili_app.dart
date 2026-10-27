@@ -115,7 +115,9 @@ class _BiliAppState extends ConsumerState<BiliApp> {
                       theme: Theme.of(context),
                       shortcuts:
                           (ref.read(settingsControllerProvider).value ??
-                                  const AppSettings.defaults())
+                                  ref.read<AppSettings>(
+                                    settingsDefaultsProvider,
+                                  ))
                               .shortcuts,
                       onClose: onClose,
                       onBack: onBack,
@@ -138,7 +140,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
       onDownloadSeason: (context, season, selected) {
         final settings =
             ref.read(settingsControllerProvider).value ??
-            const AppSettings.defaults();
+            ref.read<AppSettings>(settingsDefaultsProvider);
         final items = DownloadItem.fromSeason(season);
         final current = items
             .where((item) => item.episodeId == selected?.episodeId)
@@ -159,7 +161,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
         builder: (context, ref, _) {
           final settings =
               ref.watch(settingsControllerProvider).value ??
-              const AppSettings.defaults();
+              ref.read<AppSettings>(settingsDefaultsProvider);
           return PlaybackPanel(
             detail: VideoDetail(
               summary: task.item.video,
@@ -187,7 +189,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
         builder: (context, ref, _) {
           final settings =
               ref.watch(settingsControllerProvider).value ??
-              const AppSettings.defaults();
+              ref.read<AppSettings>(settingsDefaultsProvider);
           final detail = _episodeDetail(season, episode);
           return PlaybackPanel(
             detail: detail,
@@ -227,7 +229,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
         builder: (context, ref, _) {
           final settings =
               ref.watch(settingsControllerProvider).value ??
-              const AppSettings.defaults();
+              ref.read<AppSettings>(settingsDefaultsProvider);
           final requestedId =
               LiveDanmakuRoomScope.requestedIdOf(context) ?? room.id;
           return LivePlayerDanmaku(
@@ -307,7 +309,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
         builder: (context, ref, _) {
           final settings =
               ref.watch(settingsControllerProvider).value ??
-              const AppSettings.defaults();
+              ref.read<AppSettings>(settingsDefaultsProvider);
           return PlaybackPanel(
             detail: detail,
             part: part,
@@ -353,7 +355,7 @@ class _BiliAppState extends ConsumerState<BiliApp> {
   ) {
     final settings =
         ref.read(settingsControllerProvider).value ??
-        const AppSettings.defaults();
+        ref.read<AppSettings>(settingsDefaultsProvider);
     final items = DownloadItem.fromVideo(detail);
     final current = items
         .where((item) => item.part.cid == selected.cid)

@@ -44,7 +44,15 @@ class ShortcutSettingsSection extends StatelessWidget {
     subtitle: Text(
       settings.keysFor(action).isEmpty
           ? '未绑定'
-          : settings.keysFor(action).map(shortcutLabel).join(' / '),
+          : settings
+                .keysFor(action)
+                .map(
+                  (key) => shortcutLabel(
+                    key,
+                    useAppleLabels: settings.useAppleDefaults,
+                  ),
+                )
+                .join(' / '),
     ),
     trailing: Row(
       mainAxisSize: MainAxisSize.min,
@@ -71,7 +79,7 @@ class ShortcutSettingsSection extends StatelessWidget {
         contentPadding: EdgeInsets.zero,
         title: const Text('启用快捷键'),
         subtitle: const Text(
-          '仅控制当前活动页。输入时保留编辑；明确绑定的侧键或 Ctrl / Meta 关闭组合仍可关闭标签。弹窗隔离底层；固定标签循环和图片操作不受总开关影响。',
+          '仅控制当前活动页。输入时保留编辑；明确绑定的标签切换组合键、侧键或 Ctrl / Command 关闭组合仍可操作标签。弹窗隔离底层；图片操作不受总开关影响。',
         ),
         value: settings.enabled,
         onChanged: (value) => _save(context, settings.withEnabled(value)),
@@ -82,6 +90,8 @@ class ShortcutSettingsSection extends StatelessWidget {
       for (final action in [
         ShortcutAction.closeTab,
         ShortcutAction.newTab,
+        ShortcutAction.nextTab,
+        ShortcutAction.previousTab,
         ShortcutAction.refresh,
       ])
         _binding(context, action),
@@ -125,6 +135,8 @@ class ShortcutSettingsSection extends StatelessWidget {
         (action) => ![
           ShortcutAction.closeTab,
           ShortcutAction.newTab,
+          ShortcutAction.nextTab,
+          ShortcutAction.previousTab,
           ShortcutAction.refresh,
         ].contains(action),
       ))
@@ -132,11 +144,15 @@ class ShortcutSettingsSection extends StatelessWidget {
       Align(
         alignment: Alignment.centerLeft,
         child: TextButton(
-          onPressed: () => _save(context, const ShortcutSettings.defaults()),
+          onPressed: () => _save(
+            context,
+            ShortcutSettings.defaults(
+              useAppleDefaults: settings.useAppleDefaults,
+            ),
+          ),
           child: const Text('恢复默认快捷键'),
         ),
       ),
-      const Text('Ctrl+Tab / Ctrl+Shift+Tab 保留用于切换标签。'),
     ],
   );
 }
@@ -225,9 +241,7 @@ class _ShortcutEditorState extends State<_ShortcutEditor> {
         .where((key) => key.isNotEmpty);
     final parsed = raw.map(ShortcutSettings.canonicalKey).toList();
     if (parsed.any((key) => key == null)) {
-      setState(
-        () => _error = '键名无效，例如 Space、Ctrl+K、MouseBack、Ctrl+MouseForward',
-      );
+      setState(() => _error = '键名无效，例如 Space、Ctrl+K、Command+K、MouseBack');
       return;
     }
     final candidate = widget.settings.withKeys(
@@ -265,7 +279,9 @@ class _ShortcutEditorState extends State<_ShortcutEditor> {
               autofocus: true,
               decoration: InputDecoration(
                 labelText: '快捷键',
-                hintText: '例如 Ctrl+W, MouseBack',
+                hintText: widget.settings.useAppleDefaults
+                    ? '例如 Command+W, MouseBack'
+                    : '例如 Ctrl+W, MouseBack',
                 errorText: _error,
                 errorMaxLines: 3,
               ),

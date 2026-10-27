@@ -72,6 +72,8 @@ final class InputNormalizer {
     LogicalKeyboardKey.quoteSingle: 'Quote',
     LogicalKeyboardKey.comma: 'Comma',
     LogicalKeyboardKey.period: 'Period',
+    LogicalKeyboardKey.bracketLeft: 'BracketLeft',
+    LogicalKeyboardKey.bracketRight: 'BracketRight',
     LogicalKeyboardKey.pageUp: 'PageUp',
     LogicalKeyboardKey.pageDown: 'PageDown',
     LogicalKeyboardKey.equal: 'Equal',

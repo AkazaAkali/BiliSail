@@ -4,6 +4,133 @@ import 'package:bilisail/features/settings/domain/shortcut_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('Apple defaults apply only to missing bindings and survive edits', () {
+    for (final snapshot in [
+      null,
+      <String, Object?>{},
+      {'bindings': <String, Object?>{}},
+    ]) {
+      final settings = ShortcutSettings.fromJson(
+        snapshot,
+        useAppleDefaults: true,
+      );
+      expect(settings.actionFor('Meta+W'), ShortcutAction.closeTab);
+      expect(settings.actionFor('MouseBack'), ShortcutAction.closeTab);
+      expect(settings.actionFor('Meta+T'), ShortcutAction.newTab);
+      expect(settings.actionFor('Meta+R'), ShortcutAction.refresh);
+      expect(settings.actionFor('Meta+1'), ShortcutAction.toggleRate);
+      expect(
+        settings.actionFor('Shift+Meta+BracketRight'),
+        ShortcutAction.nextTab,
+      );
+      expect(
+        settings.actionFor('Shift+Meta+BracketLeft'),
+        ShortcutAction.previousTab,
+      );
+      expect(settings.actionFor('Ctrl+W'), isNull);
+      expect(settings.actionFor('Meta+Tab'), isNull);
+      expect(settings.conflict, isNull);
+      final edited = settings
+          .withKeys(ShortcutAction.playPause, ['Meta+K'])
+          .withActionEnabled(ShortcutAction.fullscreen, false)
+          .withPlayback(seekSeconds: 8)
+          .withEnabled(false)
+          .withEnabled(true);
+      expect(edited.useAppleDefaults, isTrue);
+      expect(edited.actionFor('Meta+W'), ShortcutAction.closeTab);
+      expect(edited.actionFor('Meta+K'), ShortcutAction.playPause);
+    }
+    final custom = ShortcutSettings.fromJson({
+      'bindings': {
+        'closeTab': ['Ctrl+W'],
+        'newTab': <String>[],
+        'nextTab': ['Meta+K'],
+        'previousTab': <String>[],
+      },
+      'disabled': ['nextTab'],
+    }, useAppleDefaults: true);
+    final restored = ShortcutSettings.fromJson(
+      jsonDecode(jsonEncode(custom.toJson())),
+      useAppleDefaults: true,
+    );
+    expect(restored.keysFor(ShortcutAction.closeTab), ['Ctrl+W']);
+    expect(restored.keysFor(ShortcutAction.newTab), isEmpty);
+    expect(restored.keysFor(ShortcutAction.nextTab), ['Meta+K']);
+    expect(restored.keysFor(ShortcutAction.previousTab), isEmpty);
+    expect(restored.isEnabled(ShortcutAction.nextTab), isFalse);
+    expect(restored.issues, isEmpty);
+  });
+  test('new platform defaults preserve older explicit assignments', () {
+    final apple = ShortcutSettings.fromJson({
+      'bindings': {
+        'playPause': ['Meta+W', 'Shift+Meta+BracketRight'],
+      },
+    }, useAppleDefaults: true);
+    expect(apple.actionFor('Meta+W'), ShortcutAction.playPause);
+    expect(
+      apple.actionFor('Shift+Meta+BracketRight'),
+      ShortcutAction.playPause,
+    );
+    expect(apple.keysFor(ShortcutAction.closeTab), ['MouseBack']);
+    expect(apple.keysFor(ShortcutAction.nextTab), isEmpty);
+    expect(apple.conflict, isNull);
+    expect(apple.issues, isEmpty);
+    final standard = ShortcutSettings.fromJson({
+      'bindings': {
+        'playPause': ['Ctrl+Tab'],
+      },
+    });
+    expect(standard.actionFor('Ctrl+Tab'), ShortcutAction.playPause);
+    expect(standard.keysFor(ShortcutAction.nextTab), isEmpty);
+  });
+  test('tab cycling can be rebound, disabled, cleared and reassigned', () {
+    final settings = const ShortcutSettings.defaults()
+        .withKeys(ShortcutAction.nextTab, ['Alt+ArrowRight'])
+        .withKeys(ShortcutAction.previousTab, ['Alt+ArrowLeft'])
+        .withKeys(ShortcutAction.playPause, ['Ctrl+Tab']);
+    expect(settings.conflict, isNull);
+    final restored = ShortcutSettings.fromJson(settings.toJson());
+    expect(restored.actionFor('Alt+ArrowRight'), ShortcutAction.nextTab);
+    expect(restored.actionFor('Alt+ArrowLeft'), ShortcutAction.previousTab);
+    expect(restored.actionFor('Ctrl+Tab'), ShortcutAction.playPause);
+    expect(
+      restored
+          .withActionEnabled(ShortcutAction.nextTab, false)
+          .actionFor('Alt+ArrowRight'),
+      isNull,
+    );
+    expect(restored.withEnabled(false).actionFor('Alt+ArrowLeft'), isNull);
+    expect(
+      restored
+          .withKeys(ShortcutAction.previousTab, [])
+          .actionFor('Alt+ArrowLeft'),
+      isNull,
+    );
+    expect(
+      ShortcutSettings.canonicalKey('Command+Shift+]'),
+      'Shift+Meta+BracketRight',
+    );
+    expect(
+      ShortcutSettings.canonicalKey('Cmd+Shift+['),
+      'Shift+Meta+BracketLeft',
+    );
+    expect(ShortcutSettings.canonicalKey('⌘+Option+K'), 'Alt+Meta+K');
+  });
+  test(
+    'all conflicting keys are removed without reintroducing earlier ones',
+    () {
+      final settings = ShortcutSettings.fromJson({
+        'bindings': {
+          'nextTab': ['Ctrl+K', 'Meta+K'],
+          'previousTab': ['Ctrl+K', 'Meta+K'],
+        },
+      });
+      expect(settings.actionFor('Ctrl+K'), isNull);
+      expect(settings.actionFor('Meta+K'), isNull);
+      expect(settings.conflict, isNull);
+      expect(settings.issues, hasLength(2));
+    },
+  );
   test(
     'mouse side keys support modifiers, conflicts and round-trip storage',
     () {
@@ -118,13 +245,13 @@ void main() {
       const ShortcutSettings.defaults().withKeys(ShortcutAction.playPause, [
         'Ctrl+Tab',
       ]).conflict,
-      contains('保留'),
+      contains('已用于'),
     );
     expect(
       const ShortcutSettings.defaults().withKeys(ShortcutAction.playPause, [
         'Ctrl+Shift+Tab',
       ]).conflict,
-      contains('保留'),
+      contains('已用于'),
     );
     expect(ShortcutSettings.fromJson(conflict.toJson()).actionFor('F'), isNull);
     final restored = ShortcutSettings.fromJson({

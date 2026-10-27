@@ -16,6 +16,7 @@ void main() {
     TargetPlatform.android,
     TargetPlatform.windows,
     TargetPlatform.macOS,
+    TargetPlatform.iOS,
   ]) {
     test('reset saves and reloads all defaults for $platform', () async {
       final database = AppDatabase(NativeDatabase.memory());
@@ -23,6 +24,7 @@ void main() {
       final repository = SqliteSettingsRepository(
         database,
         defaultNavigationMode: workspaceNavigationModeForPlatform(platform),
+        defaultShortcuts: shortcutSettingsForPlatform(platform),
         defaultHighEnergyProgressEnabled: highEnergyProgressEnabledForPlatform(
           platform,
         ),
@@ -91,6 +93,14 @@ void main() {
       );
       expect(await database.readSetting('downloads.v1'), '{"concurrency":2}');
       void expectPlatformDefaults(AppSettings settings) {
+        expect(
+          settings.shortcuts.keysFor(ShortcutAction.closeTab),
+          defaults.shortcuts.keysFor(ShortcutAction.closeTab),
+        );
+        expect(
+          settings.shortcuts.keysFor(ShortcutAction.nextTab),
+          defaults.shortcuts.keysFor(ShortcutAction.nextTab),
+        );
         expect(settings.theme, AppThemePreference.system);
         expect(settings.navigationMode, defaults.navigationMode);
         expect(settings.danmakuArea, defaults.danmakuArea);

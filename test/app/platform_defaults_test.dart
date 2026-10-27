@@ -1,9 +1,40 @@
 import 'package:bilisail/app/platform_defaults.dart';
 import 'package:bilisail/features/settings/domain/app_settings.dart';
+import 'package:bilisail/features/settings/domain/shortcut_settings.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'macOS and iOS use Command defaults while other platforms retain Ctrl',
+    () {
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      for (final platform in TargetPlatform.values) {
+        debugDefaultTargetPlatformOverride = platform;
+        final apple =
+            platform == TargetPlatform.macOS || platform == TargetPlatform.iOS;
+        final settings = shortcutSettingsForPlatform(platform);
+        expect(defaultShortcuts.useAppleDefaults, apple);
+        expect(settings.keysFor(ShortcutAction.closeTab), [
+          apple ? 'Meta+W' : 'Ctrl+W',
+          'MouseBack',
+        ]);
+        expect(settings.keysFor(ShortcutAction.newTab), [
+          apple ? 'Meta+T' : 'Ctrl+T',
+        ]);
+        expect(settings.keysFor(ShortcutAction.refresh), [
+          apple ? 'Meta+R' : 'Ctrl+R',
+          'F5',
+        ]);
+        expect(settings.keysFor(ShortcutAction.nextTab), [
+          apple ? 'Shift+Meta+BracketRight' : 'Ctrl+Tab',
+        ]);
+        expect(settings.keysFor(ShortcutAction.previousTab), [
+          apple ? 'Shift+Meta+BracketLeft' : 'Ctrl+Shift+Tab',
+        ]);
+      }
+    },
+  );
   test('desktop and Android use their own player defaults', () {
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     for (final platform in TargetPlatform.values) {

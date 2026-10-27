@@ -14,6 +14,7 @@ class SqliteSettingsRepository implements SettingsRepository {
     this.defaultDanmakuFontScale = 1.0,
     this.defaultPlayerControlsMode = PlayerControlsMode.click,
     this.defaultVideoCardHoverPlayback = true,
+    this.defaultShortcuts = const ShortcutSettings.defaults(),
   });
   final AppDatabase database;
   final WorkspaceNavigationMode defaultNavigationMode;
@@ -22,8 +23,10 @@ class SqliteSettingsRepository implements SettingsRepository {
   final double defaultDanmakuFontScale;
   final PlayerControlsMode defaultPlayerControlsMode;
   final bool defaultVideoCardHoverPlayback;
+  final ShortcutSettings defaultShortcuts;
 
   AppSettings get defaults => AppSettings.defaults(
+    shortcuts: defaultShortcuts,
     navigationMode: defaultNavigationMode,
     highEnergyProgressEnabled: defaultHighEnergyProgressEnabled,
     danmakuArea: defaultDanmakuArea,
@@ -65,7 +68,10 @@ class SqliteSettingsRepository implements SettingsRepository {
               .where((item) => item.name == decoded['navigationMode'])
               .firstOrNull ??
           defaultNavigationMode,
-      shortcuts: ShortcutSettings.fromJson(decoded['shortcuts']),
+      shortcuts: ShortcutSettings.fromJson(
+        decoded['shortcuts'],
+        useAppleDefaults: defaultShortcuts.useAppleDefaults,
+      ),
       sidebarStyle:
           SidebarStyle.values
               .where((item) => item.name == decoded['sidebarStyle'])

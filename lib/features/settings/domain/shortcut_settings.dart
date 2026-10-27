@@ -4,7 +4,7 @@ export '../../../domain/shortcut_command.dart' show ShortcutAction;
 import '../../../domain/playback_rates.dart';
 
 final class ShortcutSettings {
-  const ShortcutSettings.defaults()
+  const ShortcutSettings.defaults({this.useAppleDefaults = false})
     : seekSeconds = 3,
       holdDelayMs = 400,
       holdRate = 2,
@@ -14,6 +14,7 @@ final class ShortcutSettings {
       issues = const [],
       storedJson = null;
   ShortcutSettings({
+    this.useAppleDefaults = false,
     this.seekSeconds = 3,
     this.holdDelayMs = 400,
     this.holdRate = 2,
@@ -30,6 +31,9 @@ final class ShortcutSettings {
          ),
        );
   final List<String> issues;
+
+  /// Injected platform policy, never persisted over a user's explicit bindings.
+  final bool useAppleDefaults;
   final Map<String, Object?>? storedJson;
   final int seekSeconds;
   final int holdDelayMs;
@@ -46,7 +50,8 @@ final class ShortcutSettings {
             .firstOrNull
       : null;
   List<String> keysFor(ShortcutAction action) =>
-      _overrides[action] ?? action.defaultKeys;
+      _overrides[action] ??
+      action.defaultsFor(useAppleDefaults: useAppleDefaults);
   Map<String, Object?> toJson() =>
       storedJson ??
       {
@@ -59,9 +64,12 @@ final class ShortcutSettings {
           for (final entry in _overrides.entries) entry.key.name: entry.value,
         },
       };
-  static ShortcutSettings fromJson(Object? value) {
+  static ShortcutSettings fromJson(
+    Object? value, {
+    bool useAppleDefaults = false,
+  }) {
     if (value is! Map<String, Object?>) {
-      return const ShortcutSettings.defaults();
+      return ShortcutSettings.defaults(useAppleDefaults: useAppleDefaults);
     }
     final bindings = value['bindings'];
     final overrides = <ShortcutAction, List<String>>{};
@@ -84,14 +92,27 @@ final class ShortcutSettings {
         }
       }
     }
-    // The new default must not displace an existing custom side-button binding.
-    if (!overrides.containsKey(ShortcutAction.closeTab) &&
-        overrides.values.any((keys) => keys.contains('MouseBack'))) {
-      overrides[ShortcutAction.closeTab] = ShortcutAction.closeTab.defaultKeys
-          .where((key) => key != 'MouseBack')
+    // Newly introduced defaults must not displace older explicit bindings.
+    final explicitKeys = overrides.values.expand((keys) => keys).toSet();
+    for (final action in ShortcutAction.values) {
+      if (overrides.containsKey(action)) continue;
+      final defaults = action.defaultsFor(useAppleDefaults: useAppleDefaults);
+      final introduced = {
+        ...defaults.where((key) => !action.defaultKeys.contains(key)),
+        if (action == ShortcutAction.nextTab ||
+            action == ShortcutAction.previousTab)
+          ...defaults,
+        if (action == ShortcutAction.closeTab) 'MouseBack',
+      };
+      final available = defaults
+          .where(
+            (key) => !introduced.contains(key) || !explicitKeys.contains(key),
+          )
           .toList();
+      if (available.length != defaults.length) overrides[action] = available;
     }
     final result = ShortcutSettings(
+      useAppleDefaults: useAppleDefaults,
       seekSeconds: value['seekSeconds'] is int
           ? (value['seekSeconds'] as int).clamp(1, 90)
           : 3,
@@ -120,13 +141,10 @@ final class ShortcutSettings {
       }
     }
     for (final entry in used.entries) {
-      if (entry.value.length > 1 ||
-          entry.key == 'Ctrl+Tab' ||
-          entry.key == 'Ctrl+Shift+Tab') {
+      if (entry.value.length > 1) {
         issues.add('${entry.key}：冲突键位已停用，请重新设置');
         for (final action in entry.value) {
-          overrides[action] = result
-              .keysFor(action)
+          overrides[action] = (overrides[action] ?? result.keysFor(action))
               .where((key) => key != entry.key)
               .toList();
         }
@@ -134,6 +152,7 @@ final class ShortcutSettings {
     }
     if (issues.isEmpty) return result;
     return ShortcutSettings(
+      useAppleDefaults: useAppleDefaults,
       seekSeconds: result.seekSeconds,
       holdDelayMs: result.holdDelayMs,
       holdRate: result.holdRate,
@@ -146,6 +165,7 @@ final class ShortcutSettings {
   }
 
   ShortcutSettings withEnabled(bool value) => ShortcutSettings(
+    useAppleDefaults: useAppleDefaults,
     seekSeconds: seekSeconds,
     holdDelayMs: holdDelayMs,
     holdRate: holdRate,
@@ -155,6 +175,7 @@ final class ShortcutSettings {
   );
   ShortcutSettings withKeys(ShortcutAction action, List<String> keys) =>
       ShortcutSettings(
+        useAppleDefaults: useAppleDefaults,
         seekSeconds: seekSeconds,
         holdDelayMs: holdDelayMs,
         holdRate: holdRate,
@@ -164,6 +185,7 @@ final class ShortcutSettings {
       );
   ShortcutSettings withActionEnabled(ShortcutAction action, bool value) =>
       ShortcutSettings(
+        useAppleDefaults: useAppleDefaults,
         seekSeconds: seekSeconds,
         holdDelayMs: holdDelayMs,
         holdRate: holdRate,
@@ -178,6 +200,7 @@ final class ShortcutSettings {
     int? holdDelayMs,
     double? holdRate,
   }) => ShortcutSettings(
+    useAppleDefaults: useAppleDefaults,
     seekSeconds: (seekSeconds ?? this.seekSeconds).clamp(1, 90),
     holdDelayMs: (holdDelayMs ?? this.holdDelayMs).clamp(200, 1500),
     holdRate: PlaybackRates.nearest((holdRate ?? this.holdRate).clamp(1.25, 3)),
@@ -191,9 +214,6 @@ final class ShortcutSettings {
       for (final raw in keysFor(action)) {
         final key = canonicalKey(raw);
         if (key == null) return '$raw 键名无效';
-        if (key == 'Ctrl+Tab' || key == 'Ctrl+Shift+Tab') {
-          return '$key 保留用于循环切换标签';
-        }
         final previous = used[key];
         if (previous != null && previous != action) {
           return '$key 已用于${previous.label}';

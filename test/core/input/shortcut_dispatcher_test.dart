@@ -1,7 +1,7 @@
 import 'package:bilisail/app/shortcut_coordinator.dart';
 import 'package:bilisail/core/input/input_stroke.dart';
 import 'package:bilisail/core/input/shortcut_dispatcher.dart';
-import 'package:bilisail/domain/shortcut_command.dart';
+import 'package:bilisail/features/settings/domain/shortcut_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 InputStroke stroke(
@@ -23,6 +23,116 @@ InputStroke stroke(
 );
 
 void main() {
+  test('platform defaults reconfigure even with identical stored JSON', () {
+    final input = ShortcutCoordinator();
+    addTearDown(input.dispose);
+    final calls = <Object>[];
+    input.register(
+      owner: 'workspace',
+      scope: CommandScope.workspace,
+      active: () => true,
+      commands: {
+        for (final action in [
+          ShortcutAction.closeTab,
+          ShortcutAction.nextTab,
+          ShortcutAction.previousTab,
+        ])
+          action: (_) {
+            calls.add(action);
+            return CommandOutcome.completed;
+          },
+      },
+    );
+    input.configure(const ShortcutSettings.defaults(useAppleDefaults: true));
+    input.dispatch(
+      stroke('Meta+W', InputPhase.down, id: 'close'),
+      const ShortcutContext(),
+    );
+    input.dispatch(
+      stroke('Shift+Meta+BracketRight', InputPhase.down, id: 'next'),
+      const ShortcutContext(),
+    );
+    input.dispatch(
+      stroke('Shift+Meta+BracketLeft', InputPhase.down, id: 'previous'),
+      const ShortcutContext(),
+    );
+    expect(calls, [
+      ShortcutAction.closeTab,
+      ShortcutAction.nextTab,
+      ShortcutAction.previousTab,
+    ]);
+    expect(
+      input
+          .dispatch(
+            stroke('Ctrl+Tab', InputPhase.down, id: 'old'),
+            const ShortcutContext(),
+          )
+          .claimed,
+      isFalse,
+    );
+  });
+  test('tab customization respects editing, switches and modal isolation', () {
+    final input = ShortcutCoordinator();
+    addTearDown(input.dispose);
+    var calls = 0;
+    input.register(
+      owner: 'workspace',
+      scope: CommandScope.workspace,
+      active: () => true,
+      commands: {
+        ShortcutAction.nextTab: (event) {
+          if (event.phase == InputPhase.down) calls++;
+          return CommandOutcome.completed;
+        },
+      },
+    );
+    final custom = const ShortcutSettings.defaults().withKeys(
+      ShortcutAction.nextTab,
+      ['Meta+K'],
+    );
+    input.configure(custom);
+    expect(
+      input
+          .dispatch(
+            stroke('Meta+K', InputPhase.down, id: 'custom'),
+            const ShortcutContext(editing: true),
+          )
+          .claimed,
+      isTrue,
+    );
+    expect(calls, 1);
+    input.dispatch(
+      stroke('Meta+K', InputPhase.up, id: 'custom'),
+      const ShortcutContext(),
+    );
+    input.dispatch(
+      stroke('Meta+K', InputPhase.down, id: 'modal'),
+      const ShortcutContext(modal: true),
+    );
+    expect(calls, 1);
+    input.configure(custom.withKeys(ShortcutAction.nextTab, ['K']));
+    input.dispatch(
+      stroke('K', InputPhase.down, id: 'plain'),
+      const ShortcutContext(editing: true),
+    );
+    expect(calls, 1);
+    for (final settings in [
+      custom.withEnabled(false),
+      custom.withActionEnabled(ShortcutAction.nextTab, false),
+      custom.withKeys(ShortcutAction.nextTab, []),
+    ]) {
+      input.configure(settings);
+      input.dispatch(
+        stroke('Meta+K', InputPhase.down, id: 'disabled'),
+        const ShortcutContext(),
+      );
+      input.dispatch(
+        stroke('Meta+K', InputPhase.up, id: 'disabled'),
+        const ShortcutContext(),
+      );
+      expect(calls, 1);
+    }
+  });
   test('diagnostics are bounded and redact editor chords', () {
     final input = ShortcutCoordinator();
     addTearDown(input.dispose);

@@ -17,6 +17,52 @@ void main() {
     repository = SqliteSettingsRepository(database);
   });
   tearDown(() => database.close());
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.iOS]) {
+    test(
+      'Apple shortcut defaults persist, preserve custom bindings and reset on $platform',
+      () async {
+        final repo = SqliteSettingsRepository(
+          database,
+          defaultShortcuts: shortcutSettingsForPlatform(platform),
+        );
+        expect(
+          (await repo.load()).shortcuts.actionFor('Meta+W'),
+          ShortcutAction.closeTab,
+        );
+        await database.writeSetting(
+          'preferences.v1',
+          jsonEncode({
+            'theme': 'dark',
+            'shortcuts': {'holdRate': 2},
+          }),
+        );
+        final legacy = await repo.load();
+        expect(legacy.shortcuts.actionFor('Meta+T'), ShortcutAction.newTab);
+        await repo.save(
+          legacy.copyWith(
+            shortcuts: legacy.shortcuts
+                .withKeys(ShortcutAction.closeTab, ['Ctrl+W'])
+                .withKeys(ShortcutAction.nextTab, ['Meta+K'])
+                .withKeys(ShortcutAction.previousTab, [])
+                .withActionEnabled(ShortcutAction.nextTab, false),
+          ),
+        );
+        final restored = await repo.load();
+        expect(restored.shortcuts.useAppleDefaults, isTrue);
+        expect(restored.shortcuts.keysFor(ShortcutAction.closeTab), ['Ctrl+W']);
+        expect(restored.shortcuts.keysFor(ShortcutAction.nextTab), ['Meta+K']);
+        expect(restored.shortcuts.isEnabled(ShortcutAction.nextTab), isFalse);
+        expect(restored.shortcuts.keysFor(ShortcutAction.previousTab), isEmpty);
+        expect(restored.shortcuts.actionFor('Meta+R'), ShortcutAction.refresh);
+        await repo.save(repo.defaults);
+        expect(
+          (await repo.load()).shortcuts.actionFor('Shift+Meta+BracketRight'),
+          ShortcutAction.nextTab,
+        );
+        expect(database.schemaVersion, 3);
+      },
+    );
+  }
   test(
     'global volume setting migrates and persists independently of defaults',
     () async {

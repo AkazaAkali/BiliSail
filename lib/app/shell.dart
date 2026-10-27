@@ -17,12 +17,12 @@ import '../core/input/input_stroke.dart';
 import '../core/input/shortcut_dispatcher.dart';
 import '../core/presentation/input_scope.dart';
 import 'shortcut_coordinator.dart';
-import '../domain/shortcut_command.dart';
 import '../features/settings/domain/shortcut_settings.dart';
 import '../features/settings/domain/settings_category.dart';
 import '../features/settings/domain/app_settings.dart';
 import '../shared/ui/smooth_scroll_behavior.dart';
 import '../shared/ui/bili_icons.dart';
+import '../shared/ui/shortcut_hint.dart';
 import '../shared/ui/app_notice.dart';
 import '../shared/ui/playback_navigation.dart';
 import '../shared/ui/app_dialog.dart';
@@ -619,9 +619,9 @@ final class _BiliAppShellState extends State<BiliAppShell>
         } else if (!_goBackWithinPage()) {
           _closeTab(_workspace.activeId);
         }
-      case ReservedShortcut.nextTab:
+      case ShortcutAction.nextTab:
         _cycleTabs();
-      case ReservedShortcut.previousTab:
+      case ShortcutAction.previousTab:
         _cycleTabs(backwards: true);
     }
     return CommandOutcome.completed;
@@ -641,8 +641,8 @@ final class _BiliAppShellState extends State<BiliAppShell>
         for (final command in <Object>[
           ShortcutAction.newTab,
           ShortcutAction.closeTab,
-          ReservedShortcut.nextTab,
-          ReservedShortcut.previousTab,
+          ShortcutAction.nextTab,
+          ShortcutAction.previousTab,
         ])
           command: (stroke) => _workspaceCommand(command, stroke),
       },
@@ -1682,7 +1682,11 @@ final class _BiliAppShellState extends State<BiliAppShell>
                         width: 42,
                         child: IconButton(
                           key: const ValueKey('new-workspace-tab'),
-                          tooltip: '新建标签页 (Ctrl+T)',
+                          tooltip: shortcutHint(
+                            widget.shortcuts,
+                            ShortcutAction.newTab,
+                            '新建标签页',
+                          ),
                           onPressed: _newTab,
                           icon: const Icon(Icons.add, size: 18),
                         ),

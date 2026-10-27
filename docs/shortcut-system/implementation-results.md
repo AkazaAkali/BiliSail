@@ -5,12 +5,12 @@
 ## 当前结构
 
 - [AppInputHost](../../lib/core/presentation/app_input_host.dart) 位于根 Navigator 外层，拥有唯一业务键盘提前监听和鼠标全局路由。InputNormalizer 共用录制／执行键名表，Quote／quoteSingle 统一，修饰键精确匹配；未知逻辑标识可回退到两个标点物理位置，合法其他 Unicode 布局不会强行解释为 US 标点。
-- [ShortcutDispatcher](../../lib/core/input/shortcut_dispatcher.dart) 为纯 Dart 泛型内核；[命令目录](../../lib/domain/shortcut_command.dart) 保持 20 个动作和默认别名；[组合根](../../lib/app/shortcut_coordinator.dart) 编译设置、目录归属及固定／图片绑定。输入只选择一个目标；重复注册返回 duplicateTarget，边界／忙碌仍消费已认领序列。
+- [ShortcutDispatcher](../../lib/core/input/shortcut_dispatcher.dart) 为纯 Dart 泛型内核；[命令目录](../../lib/domain/shortcut_command.dart) 提供 22 个动作和平台默认别名；[组合根](../../lib/app/shortcut_coordinator.dart) 编译设置、目录归属及图片绑定。输入只选择一个目标；重复注册返回 duplicateTarget，边界／忙碌仍消费已认领序列。
 - [InputScope 与目标注册](../../lib/core/presentation/input_scope.dart) 提供可释放句柄、source revision、编辑／控件保护和非 Route 弹层屏障。根／Shell Navigator observer 共用路由账本，包括 requestFocus:false 的弹窗。普通弹窗隔离底层；全屏属于呈现，保留所属页的工作区／页面／媒体命令。
 - [PlaybackShortcutController](../../lib/features/playback/application/playback_shortcut_controller.dart) 由 PlaybackPanel owner 持有，普通／全屏视图共享；视图只保留绘制和控件行为。长按达到阈值即标记正在加速，异步 begin 未完成时释放也不会变成短按 seek；失焦、弹层、切页、换源、设置修改、呈现交接均可取消。
 - PlaybackSession 保存待确认音量／永久倍速目标；[MediaCommandPump](../../lib/features/playback/application/media_command_pump.dart) 将原生调用限制为一个进行中与一个最新目标。快速离散调速从目标值推进；失败清除本代次待处理动作，不自动重放。临时开始／恢复与永久调速共享协调规则，临时倍速不写共享记忆。
 
-旧 shell／route／player／UGC／PGC 的业务键盘监听、鼠标 Listener、Expando 去重和固定循环 CallbackShortcuts 均已移除。[keyboard_shortcuts.dart](../../lib/core/presentation/keyboard_shortcuts.dart) 只保留侧键名称的展示格式化。[页面选集契约](../../lib/shared/ui/playback_page_commands.dart) 移到 shared/ui，避免 core 依赖应用命令；播放器按钮复用该契约，输入执行由页面注册负责。
+旧 shell／route／player／UGC／PGC 的业务键盘监听、鼠标 Listener、Expando 去重和固定循环 CallbackShortcuts 均已移除。[keyboard_shortcuts.dart](../../lib/core/presentation/keyboard_shortcuts.dart) 提供侧键、Command／Option 和方括号的展示格式化。[页面选集契约](../../lib/shared/ui/playback_page_commands.dart) 移到 shared/ui，避免 core 依赖应用命令；播放器按钮复用该契约，输入执行由页面注册负责。
 
 ## 行为与设置
 
@@ -18,11 +18,34 @@
 - 上述默认值调整通过 `tool/check.ps1 -SkipPub`：根应用与四个包格式、静态分析、打包边界检查及 2,603 项测试通过；10 项 mux 原生测试因未配置 `BILI_MUX_LIBRARY` 跳过。日志为 `build/shortcut-default-check-2026-10-24.log`。本轮未构建或实机验证，未发现可连接的 Flutter 调试实例。
 - 真实按下冻结物理身份、目标句柄及媒体代次；修饰键先释放不影响对应 KeyUp。无有效 Down 的 Repeat／Up 不创建动作，合成事件只清理。已消费序列的尾部不落入新标签或下一层弹窗。
 - 鼠标按 view／device 的按钮变化识别侧键边沿，支持与普通按钮同时按及 Move 中新增按钮位；双侧键同时新增不任选其一。初始 Move 同步状态，按住跨页面重建只执行一次；失焦／Cancel／移除清理状态。此范围为 Flutter 客户区。
-- 输入时仅明确绑定的侧键或 Ctrl／Meta 关闭组合、固定标签循环可越过编辑保护；普通 W／F8 关闭绑定仍保留输入。控件的 Enter／Space 激活和未绑定／禁用按键交回 Flutter。
-- 总开关控制 20 个可配置动作，固定 Ctrl+Tab／Ctrl+Shift+Tab 和图片查看器操作独立。图片命令通过顶部局部作用域执行，Esc 一次只关闭图片层，保留翻页／缩放重复和局部 Ctrl+滚轮／拖动。
+- 输入时仅明确绑定的侧键或 Ctrl／Meta 关闭组合，以及侧键或含 Ctrl／Alt／Meta 的标签切换组合可越过编辑保护；普通 W／F8 绑定仍保留输入。控件的 Enter／Space 激活和未绑定／禁用按键交回 Flutter。
+- 总开关控制 22 个可配置动作，包含上一／下一标签；图片查看器操作独立。图片命令通过顶部局部作用域执行，Esc 一次只关闭图片层，保留翻页／缩放重复和局部 Ctrl+滚轮／拖动。
 - 录制使用同一入口，整个 Flutter 客户区捕获侧键；Escape 可录制，取消使用按钮。候选按键释放后才退出独占，Ctrl+W／Ctrl+Tab 不执行底层命令。保存失败保留编辑草稿与旧生效配置，成功后统一替换编译表并取消旧长按。
 - 保留 preferences.v1 快捷键 JSON 的动作 name、bindings 数组、disabled、enabled 和播放参数；没有新增依赖、偏好版本或 SQLite migration。空列表仍为解除绑定；合法旧设置 round-trip 不变。损坏项局部停用，冲突键从双方移除，设置列出待修复项；用户未确认快捷键设置前仍保留原快照供后续修复。
 - 设置提供默认关闭、只在当前进程内存在的诊断，最多 256 条，关闭／离开该设置页清空。记录相对时间、设备／view、phase、逻辑／物理标识或按钮位、归一化匹配方式、命令、作用域、目标注册代次及分发／完成原因；编辑器和普通模态区屏蔽具体键值及按钮位，没有字符／文本／凭据日志或上传。播放器提示从当前设置读取首个有效绑定。
+
+## Apple 默认键位与可配置标签切换（2026-10-27）
+
+原实现所有平台共用 Ctrl 默认键，且将 `Ctrl+Tab`／`Ctrl+Shift+Tab` 编译为固定保留命令；设置页没有编辑入口，也拒绝将这两个键重新分配。现在上一／下一标签属于 `ShortcutAction`，可编辑、录制、解除绑定及单独停用，遵守快捷键总开关。主工作区和独立播放窗共用同一配置，保留按键重复、编辑保护、弹窗隔离和窗口交接规则。
+
+| 操作 | macOS／iOS 外接键盘默认 | Windows／Android／Linux 默认 |
+| --- | --- | --- |
+| 新建浏览标签 | Command+T | Ctrl+T |
+| 关闭标签／播放返回 | Command+W、MouseBack | Ctrl+W、MouseBack |
+| 刷新当前页 | Command+R、F5 | Ctrl+R、F5 |
+| 切换 1／2 倍速 | Command+1 | Ctrl+1 |
+| 下一标签 | Command+Shift+] | Ctrl+Tab |
+| 上一标签 | Command+Shift+[ | Ctrl+Shift+Tab |
+
+Apple 标签循环采用 [Safari 的 Command+Shift+方括号约定](https://support.apple.com/en-ie/guide/safari/cpsh003/27.0/mac/27)。配置和提示显示 Command／Option；编辑器接受 `Command`、`Cmd`、`⌘`、`Option`、`Opt`、`⌥` 与方括号，持久化继续使用稳定的 Meta／Alt／BracketLeft／BracketRight 键名。
+
+平台策略集中在 [platform_defaults.dart](../../lib/app/platform_defaults.dart)，由组合根注入设置仓储，领域层保持纯 Dart。新安装、缺失设置、恢复全部默认、恢复默认快捷键以及设置加载前的临时界面使用同一平台策略。有效旧绑定（包括 Ctrl、自定义 Meta、空列表与动作开关）保留；新增默认键若已被旧显式绑定占用，优先保留原绑定。其余实际键位冲突继续局部停用；多键冲突不会因后续过滤重新引入已移除的键。
+
+继续沿用 `preferences.v1` 的 bindings／disabled，不增加 SQLite schema 或 JSON 快照版本。自动回归涵盖两种 Apple 平台默认、旧设置与 SQLite 重启、两类恢复默认、Command 录制、标签循环重绑／停用、输入与模态隔离，以及独立播放窗配置更新。本轮在 Windows 运行 Flutter 的平台模拟回归，macOS／iOS 构建和物理键盘验收仍待目标平台确认。
+
+共同工作区的 `tool/check.ps1 -SkipPub` 完成并通过格式、静态分析、打包边界及 3,786 项测试（根应用 3,127、API 478、player 83、danmaku 93、mux 5），见 `build/apple-shortcuts/check-final.log`；根应用另有 13 项按平台条件跳过，10 项原生 mux 用例因未配置 `BILI_MUX_LIBRARY` 跳过。随后修正新建标签按钮的硬编码 Ctrl 提示，两种 Apple 平台的提示与键盘分发回归通过。本次涉及的 24 个源码／测试文件末次格式与定向静态分析通过；末次整仓 Lint 因同期 `lib/domain/recommendation_settings.dart`、`lib/features/feed/application/feed_item_index.dart` 的格式检查停止，见 `build/apple-shortcuts/lint-review.log`，未修改这些同期文件，不将最后工作区状态记为全量检查通过。未发现可连接的 Flutter 调试实例，未执行热重载或目标平台构建。
+
+最后重跑快捷键设置／录制／SQLite／恢复默认／分发器／平台默认／主工作区／独立播放窗 195 项定向回归全部通过，见 `build/apple-shortcuts/targeted-final.log`。文档本地链接和 `git diff --check` 通过。
 
 ## 双标签播放窗侧键交接（2026-10-25）
 

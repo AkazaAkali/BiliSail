@@ -11,8 +11,8 @@ final class ShortcutCoordinator extends ShortcutDispatcher<Object> {
         scopeFor: (command) => switch (command) {
           ShortcutAction.newTab ||
           ShortcutAction.closeTab ||
-          ReservedShortcut.nextTab ||
-          ReservedShortcut.previousTab => CommandScope.workspace,
+          ShortcutAction.nextTab ||
+          ShortcutAction.previousTab => CommandScope.workspace,
           ShortcutAction.refresh ||
           ShortcutAction.previousPart ||
           ShortcutAction.nextPart ||
@@ -23,16 +23,22 @@ final class ShortcutCoordinator extends ShortcutDispatcher<Object> {
           ShortcutAction.seekBack,
           ShortcutAction.volumeUp,
           ShortcutAction.volumeDown,
-          ReservedShortcut.nextTab,
-          ReservedShortcut.previousTab,
+          ShortcutAction.nextTab,
+          ShortcutAction.previousTab,
           ReservedShortcut.imagePrevious,
           ReservedShortcut.imageNext,
           ReservedShortcut.imageZoomIn,
           ReservedShortcut.imageZoomOut,
         }.contains(command),
         editorException: (command, chord) =>
-            command == ReservedShortcut.nextTab ||
-            command == ReservedShortcut.previousTab ||
+            ((command == ShortcutAction.nextTab ||
+                    command == ShortcutAction.previousTab) &&
+                (chord.isMouse ||
+                    chord.modifiers &
+                            (ShortcutChord.control |
+                                ShortcutChord.alt |
+                                ShortcutChord.meta) !=
+                        0)) ||
             (command == ShortcutAction.closeTab &&
                 (chord.isMouse ||
                     chord.modifiers &
@@ -55,7 +61,7 @@ final class ShortcutCoordinator extends ShortcutDispatcher<Object> {
   final routes = InputRouteObserver();
   String? _configuration;
   void configure(ShortcutSettings settings) {
-    final signature = settings.toJson().toString();
+    final signature = '${settings.useAppleDefaults}:${settings.toJson()}';
     if (_configuration == signature) return;
     _configuration = signature;
     final bindings = <ShortcutChord, Object>{};
@@ -71,13 +77,6 @@ final class ShortcutCoordinator extends ShortcutDispatcher<Object> {
         }
       }
     }
-    bindings[const ShortcutChord('Tab', modifiers: ShortcutChord.control)] =
-        ReservedShortcut.nextTab;
-    bindings[const ShortcutChord(
-          'Tab',
-          modifiers: ShortcutChord.control | ShortcutChord.shift,
-        )] =
-        ReservedShortcut.previousTab;
     replaceBindings(bindings, disabled: disabled);
   }
 }

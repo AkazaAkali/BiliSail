@@ -791,11 +791,11 @@ void main() {
     },
   );
   _workspaceTestWidgets(
-    'fixed tab cycling repeats across page activation with master switch disabled',
+    'configured tab cycling repeats across page activation',
     (tester) async {
       final router = _router(
         (_, tab) => Text('page ${tab.id}'),
-        shortcuts: const ShortcutSettings.defaults().withEnabled(false),
+        shortcuts: const ShortcutSettings.defaults(),
       );
       addTearDown(router.dispose);
       await tester.pumpWidget(InputTestApp.router(routerConfig: router));
@@ -818,6 +818,98 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     },
   );
+
+  _workspaceTestWidgets(
+    'Apple default tab commands dispatch in the workspace',
+    (tester) async {
+      final shortcuts = defaultShortcuts;
+      final router = _router(
+        (_, tab) => Text('page ${tab.id}'),
+        shortcuts: shortcuts,
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(
+        InputTestApp.router(routerConfig: router, shortcuts: shortcuts),
+      );
+      await tester.pumpAndSettle();
+      if (workspaceHeaderVisible) {
+        expect(find.byTooltip('新建标签页（⌘ Command+T）'), findsOneWidget);
+      }
+      for (var i = 0; i < 2; i++) {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('page tab-2'), findsOneWidget);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.bracketLeft);
+      await tester.pumpAndSettle();
+      expect(find.text('page tab-1'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.bracketRight);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      expect(find.text('page tab-2'), findsOneWidget);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('workspace-tab-tab-2')), findsNothing);
+      expect(find.text('page tab-1'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.iOS}),
+  );
+  for (final mode in [
+    'custom',
+    'master disabled',
+    'action disabled',
+    'unbound',
+  ]) {
+    _workspaceTestWidgets('tab cycling respects $mode configuration', (
+      tester,
+    ) async {
+      var shortcuts = const ShortcutSettings.defaults().withKeys(
+        ShortcutAction.nextTab,
+        ['Alt+K'],
+      );
+      shortcuts = switch (mode) {
+        'master disabled' => shortcuts.withEnabled(false),
+        'action disabled' => shortcuts.withActionEnabled(
+          ShortcutAction.nextTab,
+          false,
+        ),
+        'unbound' => shortcuts.withKeys(ShortcutAction.nextTab, []),
+        _ => shortcuts,
+      };
+      final router = _router(
+        (_, tab) => Text('page ${tab.id}'),
+        shortcuts: shortcuts,
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(
+        InputTestApp.router(routerConfig: router, shortcuts: shortcuts),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('new-workspace-tab')));
+      await tester.pumpAndSettle();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+      expect(find.text('page tab-1'), findsOneWidget);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await tester.pumpAndSettle();
+      expect(
+        find.text(mode == 'custom' ? 'page home' : 'page tab-1'),
+        findsOneWidget,
+      );
+    });
+  }
 
   _workspaceTestWidgets(
     'background page navigation updates its tab without selecting it',

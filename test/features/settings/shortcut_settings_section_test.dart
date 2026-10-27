@@ -8,6 +8,77 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final action in [ShortcutAction.nextTab, ShortcutAction.previousTab]) {
+    testWidgets(
+      'Apple ${action.name} can be recorded and persisted',
+      (tester) async {
+        var saved = const ShortcutSettings.defaults(useAppleDefaults: true);
+        await tester.pumpWidget(
+          InputTestApp(
+            shortcuts: saved,
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: ShortcutSettingsSection(
+                  settings: saved,
+                  save: (value) async => saved = value,
+                ),
+              ),
+            ),
+          ),
+        );
+        expect(find.textContaining('⌘ Command+W'), findsOneWidget);
+        await tester.ensureVisible(find.widgetWithText(ListTile, action.label));
+        await tester.tap(find.widgetWithText(ListTile, action.label));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('录制组合键'));
+        await tester.pumpAndSettle();
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.keyK);
+        await tester.pump();
+        expect(find.textContaining('释放按键后完成录制'), findsOneWidget);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.keyK);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller?.text,
+          'Meta+K',
+        );
+        await tester.tap(find.text('保存'));
+        await tester.pumpAndSettle();
+        expect(saved.actionFor('Meta+K'), action);
+        expect(saved.actionFor('Meta+W'), ShortcutAction.closeTab);
+        expect(saved.useAppleDefaults, isTrue);
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant({
+        TargetPlatform.macOS,
+        TargetPlatform.iOS,
+      }),
+    );
+  }
+  testWidgets('shortcut-only reset preserves Apple defaults', (tester) async {
+    var saved = const ShortcutSettings.defaults(useAppleDefaults: true)
+        .withKeys(ShortcutAction.closeTab, ['Ctrl+Q'])
+        .withKeys(ShortcutAction.nextTab, []);
+    await tester.pumpWidget(
+      InputTestApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: ShortcutSettingsSection(
+              settings: saved,
+              save: (value) async => saved = value,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.ensureVisible(find.text('恢复默认快捷键'));
+    await tester.tap(find.text('恢复默认快捷键'));
+    await tester.pumpAndSettle();
+    expect(saved.actionFor('Meta+W'), ShortcutAction.closeTab);
+    expect(saved.actionFor('Shift+Meta+BracketRight'), ShortcutAction.nextTab);
+    expect(saved.actionFor('Ctrl+Q'), isNull);
+  });
   for (final key in [
     LogicalKeyboardKey.escape,
     LogicalKeyboardKey.keyW,

@@ -105,6 +105,7 @@ final class AppSettings {
 
   /// Constant defaults have no caller-owned collection inputs.
   const AppSettings.defaults({
+    this.shortcuts = const ShortcutSettings.defaults(),
     this.navigationMode = WorkspaceNavigationMode.dualTabs,
     this.sidebarStyle = SidebarStyle.automatic,
     this.sidebarCollapsed = false,
@@ -115,8 +116,7 @@ final class AppSettings {
     this.danmakuFontScale = 1.0,
     this.playerControlsMode = PlayerControlsMode.click,
     this.fullscreenSwipeControls = true,
-  }) : shortcuts = const ShortcutSettings.defaults(),
-       theme = AppThemePreference.system,
+  }) : theme = AppThemePreference.system,
        font = AppFontPreference.harmonyOsSans,
        systemFontFamily = '',
        cacheImages = true,

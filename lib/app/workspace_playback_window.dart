@@ -9,7 +9,6 @@ import '../core/platform/playback_window_chrome.dart';
 import '../core/platform/window_service.dart';
 import '../core/presentation/app_input_host.dart';
 import '../core/presentation/input_scope.dart';
-import '../domain/shortcut_command.dart';
 import '../features/settings/domain/shortcut_settings.dart';
 import '../shared/ui/app_notice.dart';
 import '../shared/ui/smooth_scroll_behavior.dart';
@@ -181,7 +180,7 @@ class _WorkspacePlaybackWindowState extends State<WorkspacePlaybackWindow> {
       case ShortcutAction.closeTab:
         // The workspace handles page-local detail before media history/close.
         widget.onBack();
-      case ReservedShortcut.nextTab || ReservedShortcut.previousTab:
+      case ShortcutAction.nextTab || ShortcutAction.previousTab:
         widget.onActivateBrowser();
     }
     return CommandOutcome.completed;
@@ -212,8 +211,8 @@ class _WorkspacePlaybackWindowState extends State<WorkspacePlaybackWindow> {
             commands: {
               for (final command in <Object>[
                 ShortcutAction.closeTab,
-                ReservedShortcut.nextTab,
-                ReservedShortcut.previousTab,
+                ShortcutAction.nextTab,
+                ShortcutAction.previousTab,
               ])
                 command: (stroke) => _command(command, stroke),
             },

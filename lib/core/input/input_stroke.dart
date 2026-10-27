@@ -22,6 +22,8 @@ final class ShortcutChord {
       'Quote',
       'Comma',
       'Period',
+      'BracketLeft',
+      'BracketRight',
       'Tab',
       'MouseBack',
       'MouseForward',
@@ -36,6 +38,8 @@ final class ShortcutChord {
     'QUOTESINGLE': 'Quote',
     ';': 'Semicolon',
     "'": 'Quote',
+    '[': 'BracketLeft',
+    ']': 'BracketRight',
   };
   static String? keyName(String value) =>
       _names[value.toUpperCase()] ??
@@ -52,7 +56,8 @@ final class ShortcutChord {
         'CTRL' => control,
         'ALT' => alt,
         'SHIFT' => shift,
-        'META' => meta,
+        'META' || 'CMD' || 'COMMAND' || '⌘' => meta,
+        'OPTION' || 'OPT' || '⌥' => alt,
         _ => null,
       };
       if (mask == null) return null;

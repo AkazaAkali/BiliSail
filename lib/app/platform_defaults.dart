@@ -1,6 +1,16 @@
 import 'package:flutter/foundation.dart';
 
 import '../features/settings/domain/app_settings.dart';
+import '../features/settings/domain/shortcut_settings.dart';
+
+ShortcutSettings shortcutSettingsForPlatform(TargetPlatform platform) =>
+    ShortcutSettings.defaults(
+      useAppleDefaults:
+          platform == TargetPlatform.macOS || platform == TargetPlatform.iOS,
+    );
+
+ShortcutSettings get defaultShortcuts =>
+    shortcutSettingsForPlatform(defaultTargetPlatform);
 
 /// Platform defaults apply only when no valid user preference has been saved.
 WorkspaceNavigationMode workspaceNavigationModeForPlatform(

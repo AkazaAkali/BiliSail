@@ -129,8 +129,6 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
         _zoom(1.25);
       case ReservedShortcut.imageZoomOut:
         _zoom(.8);
-      default:
-        return CommandOutcome.noOp;
     }
     return CommandOutcome.completed;
   }
