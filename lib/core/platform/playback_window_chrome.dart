@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'window_caption.dart';
 import 'window_service.dart';
 
 class PlaybackWindowChrome extends StatelessWidget {
@@ -19,11 +20,19 @@ class PlaybackWindowChrome extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox(
     key: const ValueKey('playback-window-caption'),
-    height: 44,
+    height: desktopCaptionHeight,
     child: Row(
       children: [
-        _button('返回上一视频', Icons.arrow_back_rounded, onBack),
-        _button('回到主页', Icons.home_outlined, onHome),
+        DesktopCaptionButton(
+          tooltip: '返回上一视频',
+          icon: Icons.arrow_back_rounded,
+          onPressed: onBack,
+        ),
+        DesktopCaptionButton(
+          tooltip: '回到主页',
+          icon: Icons.home_outlined,
+          onPressed: onHome,
+        ),
         Expanded(
           child: GestureDetector(
             key: const ValueKey('playback-window-drag-region'),
@@ -36,51 +45,33 @@ class PlaybackWindowChrome extends StatelessWidget {
                 '哔帆 · 播放',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 13),
+                style: desktopCaptionTextStyle,
               ),
             ),
           ),
         ),
-        _button('最小化', Icons.remove_rounded, window.minimizePlaybackWindow),
+        DesktopCaptionButton(
+          tooltip: '最小化',
+          icon: Icons.remove_rounded,
+          onPressed: window.minimizePlaybackWindow,
+        ),
         ValueListenableBuilder<bool>(
           valueListenable: window.maximized,
-          builder: (context, maximized, _) => _button(
-            maximized ? '还原' : '最大化',
-            maximized ? Icons.filter_none_rounded : Icons.crop_square_rounded,
-            window.togglePlaybackWindowMaximized,
+          builder: (context, maximized, _) => DesktopCaptionButton(
+            tooltip: maximized ? '还原' : '最大化',
+            icon: maximized
+                ? Icons.filter_none_rounded
+                : Icons.crop_square_rounded,
+            onPressed: window.togglePlaybackWindowMaximized,
           ),
         ),
-        _button('关闭播放', Icons.close_rounded, onClose, close: true),
+        DesktopCaptionButton(
+          tooltip: '关闭播放',
+          icon: Icons.close_rounded,
+          onPressed: onClose,
+          close: true,
+        ),
       ],
-    ),
-  );
-
-  Widget _button(
-    String tooltip,
-    IconData icon,
-    VoidCallback onPressed, {
-    bool close = false,
-  }) => IconButton(
-    tooltip: tooltip,
-    onPressed: onPressed,
-    icon: Icon(icon, size: 18),
-    style: ButtonStyle(
-      fixedSize: const WidgetStatePropertyAll(Size(46, 44)),
-      padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-      shape: const WidgetStatePropertyAll(RoundedRectangleBorder()),
-      backgroundColor: close
-          ? WidgetStateProperty.resolveWith(
-              (states) => states.contains(WidgetState.hovered)
-                  ? const Color(0xffc42b1c)
-                  : null,
-            )
-          : null,
-      foregroundColor: close
-          ? WidgetStateProperty.resolveWith(
-              (states) =>
-                  states.contains(WidgetState.hovered) ? Colors.white : null,
-            )
-          : null,
     ),
   );
 }

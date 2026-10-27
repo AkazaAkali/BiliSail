@@ -44,3 +44,12 @@
 - `tool/check.ps1 -SkipPub` 通过：格式、静态分析、平台打包边界检查、根应用 3027 项与四包 659 项测试通过；13 项根测试因 Windows 符号链接权限跳过，10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。日志 `build/return-to-playback-check.log`。
 - 安全区边界修正后，五个工作区／侧栏／布局测试文件最终 224 项通过，覆盖总宽 620、左右安全区各 20 时仍使用窄屏浮动入口；日志 `build/return-to-playback-targeted.log`。最终根静态分析、两个文档共 38 个相对链接和 `git diff --check` 通过。未进行新的平台构建、原生媒体回归或实机操作验收。
 - 后续统一按钮配色与灰色禁用态：外壳／独立窗口／侧栏／布局共 181 项定向测试及三个修改文件的静态分析通过，覆盖初始无播放页不可点击、打开后启用、全部关闭后禁用。日志为 `build/return-to-playback-disabled-targeted.log`、`build/return-to-playback-disabled-analysis.log`。本次 `tool/check.ps1 -SkipPub` 在根格式阶段被同期 `lib/features/feed/data/app_recommendation_identity_store.dart` 的格式问题阻塞，未改动该文件，不能将本次全量检查报告为通过；日志 `build/return-to-playback-disabled-check.log`。
+
+## Windows 标题栏尺寸统一（2026-10-28）
+
+- Windows 双标签主窗口标题栏从 32 调整到与独立播放窗口一致的 44 逻辑像素，标题从 12 调整为 13 号字，保持垂直居中与单行省略。共用此标题栏的单标签模式同步采用相同尺寸，多标签栏继续保持原有 42 高度。
+- 两个窗口共用[标题栏尺寸和按钮组件](../../lib/core/platform/window_caption.dart)：返回、主页与窗口按钮采用 18 号图标、46 × 44 点击区域及一致的悬停样式，关闭按钮继续使用红色悬停。主窗口仍通过原有 window_manager 执行最小化、最大化／还原和关闭，播放窗口保留按 view 操作及拖动／双击最大化。
+- 标题栏内的侧栏开关和“回到播放页”调整为 36 × 36，四周留白与 44 高标题栏对齐，图标统一为 18；保留主题配色、灰色禁用态、提示及点击行为。普通工具栏和多标签栏沿用各自原有导航按钮尺寸。
+- [组件回归](../../test/core/platform/playback_window_chrome_test.dart)覆盖浅／深主题、420／600／1280 宽度、1／1.5 倍文字缩放、两个窗口的标题和按钮尺寸一致、窗口操作转发、最大化事件后切换还原按钮及监听释放。现有工作区回归同步更新标题栏和内容起点的高度断言。
+- 根检查首次在同期弹幕文件的两条 `TickerMode.of` 弃用提示处停止；随后这些文件更新后，`tool/check.ps1 -SkipPub` 的 Lint、RootTests、PackageTests 三阶段均通过，根应用 3183 项、四包 682 项测试通过。13 项根测试因 Windows 符号链接权限跳过，10 项 mux 原生测试因未配置 `BILI_MUX_LIBRARY` 跳过。日志为 `build/window-caption-check.log`、`build/window-caption-lint.log`、`build/window-caption-root-tests.log`、`build/window-caption-package-tests.log`；本任务七个 Dart 文件的定向分析和文档相对链接、`git diff --check` 同样通过。
+- 本轮未进行平台构建、原生窗口目视验收或性能测量；组件测试不代表实际窗口视觉确认。

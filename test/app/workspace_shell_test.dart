@@ -457,7 +457,7 @@ void main() {
                 tester
                     .getSize(find.byKey(const ValueKey('dual-window-caption')))
                     .height,
-                32,
+                44,
               );
             }
             final hasBack =
@@ -524,7 +524,7 @@ void main() {
                                     : profile
                                     ? 42
                                     : 0)
-                              : 32
+                              : 44
                         : !mobile ||
                               mode == WorkspaceNavigationMode.multipleTabs
                         ? 42

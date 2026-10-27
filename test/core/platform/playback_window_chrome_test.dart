@@ -1,9 +1,202 @@
+import 'package:bilisail/app/shell.dart';
+import 'package:bilisail/app/theme.dart';
+import 'package:bilisail/core/platform/desktop_window_chrome.dart';
 import 'package:bilisail/core/platform/playback_window_chrome.dart';
 import 'package:bilisail/core/platform/window_service.dart';
+import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:window_manager/window_manager.dart';
 
 void main() {
+  const channel = MethodChannel('window_manager');
+
+  for (final dark in [false, true]) {
+    testWidgets(
+      'main and playback captions match at desktop widths, dark=$dark',
+      (tester) async {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          (call) async => false,
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            channel,
+            null,
+          ),
+        );
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        final window = _Window();
+        for (final width in [420.0, 600.0, 1280.0]) {
+          tester.view.physicalSize = Size(width, 844);
+          for (final scale in [1.0, 1.5]) {
+            await tester.pumpWidget(
+              MaterialApp(
+                theme: dark ? BiliTheme.dark() : BiliTheme.light(),
+                builder: (context, child) => MediaQuery(
+                  data: MediaQuery.of(context)
+                      .copyWith(textScaler: TextScaler.linear(scale)),
+                  child: child!,
+                ),
+                home: Scaffold(
+                  body: Column(
+                    children: [
+                      Expanded(
+                        child: BiliAppShell(
+                          location: '/search?q=test',
+                          navigationMode: WorkspaceNavigationMode.dualTabs,
+                          windowControlsBuilder: (_) =>
+                              const DesktopWindowControls(),
+                          dragRegionBuilder: (_, child) => child,
+                          child: const SizedBox.expand(),
+                        ),
+                      ),
+                      PlaybackWindowChrome(
+                        window: window,
+                        onBack: () {},
+                        onHome: () {},
+                        onClose: () {},
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+            final main = find.byKey(const ValueKey('dual-window-caption'));
+            final playback = find.byKey(
+              const ValueKey('playback-window-caption'),
+            );
+            expect(tester.getSize(main).height, 44);
+            expect(tester.getSize(main), tester.getSize(playback));
+            expect(
+              tester.widget<Text>(find.text('哔帆')).style,
+              tester.widget<Text>(find.text('哔帆 · 播放')).style,
+            );
+            for (final (mainTooltip, playbackTooltip) in [
+              ('返回上一页', '返回上一视频'),
+              ('最小化', '最小化'),
+              ('最大化', '最大化'),
+              ('关闭窗口', '关闭播放'),
+            ]) {
+              final mainButton = find.descendant(
+                of: main,
+                matching: find.byTooltip(mainTooltip),
+              );
+              final playbackButton = find.descendant(
+                of: playback,
+                matching: find.byTooltip(playbackTooltip),
+              );
+              expect(tester.getSize(mainButton), const Size(46, 44));
+              expect(
+                tester.getSize(mainButton),
+                tester.getSize(playbackButton),
+              );
+              expect(
+                tester
+                    .widget<Icon>(
+                      find.descendant(
+                        of: mainButton,
+                        matching: find.byType(Icon),
+                      ),
+                    )
+                    .size,
+                18,
+              );
+            }
+            if (width >= 600) {
+              for (final key in [
+                'workspace-sidebar-toggle',
+                'workspace-return-to-playback',
+              ]) {
+                final button = find.byKey(ValueKey(key));
+                expect(tester.getSize(button), const Size(36, 36));
+                expect(tester.getCenter(button).dy, tester.getCenter(main).dy);
+              }
+            }
+            expect(
+              tester.takeException(),
+              isNull,
+              reason: '$width scale=$scale',
+            );
+          }
+        }
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.windows),
+    );
+  }
+
+  testWidgets('main caption keeps window actions and maximize events', (
+    tester,
+  ) async {
+    final calls = <String>[];
+    var maximized = false;
+    final previousListeners = windowManager.listeners;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      calls.add(call.method);
+      return switch (call.method) {
+        'isMaximized' => maximized,
+        'isMinimized' => false,
+        _ => null,
+      };
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topRight,
+            child: DesktopWindowControls(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('最小化'));
+    await tester.pumpAndSettle();
+    expect(calls, contains('minimize'));
+    await tester.tap(find.byTooltip('最大化'));
+    await tester.pumpAndSettle();
+    expect(calls, contains('maximize'));
+    Future<void> sendMaximized(bool value) async {
+      maximized = value;
+      await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+        'window_manager',
+        const StandardMethodCodec().encodeMethodCall(
+          MethodCall('onEvent', {
+            'eventName': value ? 'maximize' : 'unmaximize',
+          }),
+        ),
+        null,
+      );
+      await tester.pumpAndSettle();
+    }
+
+    await sendMaximized(true);
+    expect(find.byTooltip('还原'), findsOneWidget);
+    await tester.tap(find.byTooltip('还原'));
+    await tester.pumpAndSettle();
+    expect(calls, contains('unmaximize'));
+    await sendMaximized(false);
+    expect(find.byTooltip('最大化'), findsOneWidget);
+    await tester.tap(find.byTooltip('关闭窗口'));
+    await tester.pumpAndSettle();
+    expect(calls, contains('close'));
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(windowManager.listeners, previousListeners);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('44px caption routes controls and drag to its own window', (
     tester,
   ) async {

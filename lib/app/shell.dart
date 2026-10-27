@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/platform/window_caption.dart';
 import '../features/feed/domain/home_channel.dart';
 import '../features/search/presentation/search_category_bar.dart';
 import '../core/presentation/workspace_activity.dart';
@@ -745,16 +746,21 @@ final class _BiliAppShellState extends State<BiliAppShell>
                 SidebarStyle.compact => false,
               };
               final playback = _workspace.latestPlayback;
+              final captionTools =
+                  !_android &&
+                  widget.windowControlsBuilder != null &&
+                  (_dualTabs || _singlePage);
               final navigationTools = compact
                   ? null
                   : Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        _sidebarToggle(context),
+                        _sidebarToggle(context, caption: captionTools),
                         if (!tab.isPlayback)
                           _returnToPlaybackButton(
                             context,
                             enabled: playback != null,
+                            caption: captionTools,
                           ),
                       ],
                     );
@@ -875,12 +881,13 @@ final class _BiliAppShellState extends State<BiliAppShell>
   Widget _dualWindowCaption(BuildContext context, {Widget? navigationTools}) =>
       SizedBox(
         key: const ValueKey('dual-window-caption'),
-        height: 32,
+        height: desktopCaptionHeight,
         child: Row(
           children: [
             ?navigationTools,
-            if (_frameShowsBack(context)) _backButton(),
-            if (!_android && _frameTab(context).isPlayback) _homeButton(),
+            if (_frameShowsBack(context)) _backButton(caption: true),
+            if (!_android && _frameTab(context).isPlayback)
+              _homeButton(caption: true),
             Expanded(
               child:
                   widget.dragRegionBuilder?.call(
@@ -889,7 +896,12 @@ final class _BiliAppShellState extends State<BiliAppShell>
                       padding: EdgeInsets.only(left: 14),
                       child: Align(
                         alignment: Alignment.centerLeft,
-                        child: Text('哔帆', style: TextStyle(fontSize: 12)),
+                        child: Text(
+                          '哔帆',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: desktopCaptionTextStyle,
+                        ),
                       ),
                     ),
                   ) ??
@@ -1196,15 +1208,17 @@ final class _BiliAppShellState extends State<BiliAppShell>
         WorkspaceSection.settings => Icons.tune_rounded,
       };
 
-  Widget _sidebarToggle(BuildContext context) {
+  Widget _sidebarToggle(BuildContext context, {bool caption = false}) {
     final colors = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: caption ? 4 : 2),
       child: IconButton(
         key: const ValueKey('workspace-sidebar-toggle'),
         tooltip: _sidebarCollapsed ? '展开侧栏' : '收起侧栏',
         style: IconButton.styleFrom(
           minimumSize: const Size(36, 28),
+          fixedSize: caption ? const Size(36, 36) : null,
+          tapTargetSize: caption ? MaterialTapTargetSize.shrinkWrap : null,
           padding: const EdgeInsets.symmetric(horizontal: 8),
           foregroundColor: colors.onSurfaceVariant,
           backgroundColor: colors.surfaceContainerLow,
@@ -1226,7 +1240,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
               ? Duration.zero
               : const Duration(milliseconds: 240),
           curve: Curves.easeInOutCubic,
-          child: const Icon(Icons.menu_open_rounded, size: 20),
+          child: Icon(Icons.menu_open_rounded, size: caption ? 18 : 20),
         ),
       ),
     );
@@ -1235,15 +1249,22 @@ final class _BiliAppShellState extends State<BiliAppShell>
   Widget _returnToPlaybackButton(
     BuildContext context, {
     required bool enabled,
+    bool caption = false,
   }) {
     final colors = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.only(right: 8, top: 2, bottom: 2),
+      padding: EdgeInsets.only(
+        right: 8,
+        top: caption ? 4 : 2,
+        bottom: caption ? 4 : 2,
+      ),
       child: IconButton(
         key: const ValueKey('workspace-return-to-playback'),
         tooltip: '回到播放页',
         style: IconButton.styleFrom(
           minimumSize: const Size(36, 28),
+          fixedSize: caption ? const Size(36, 36) : null,
+          tapTargetSize: caption ? MaterialTapTargetSize.shrinkWrap : null,
           padding: const EdgeInsets.symmetric(horizontal: 8),
           foregroundColor: colors.onSurfaceVariant,
           disabledForegroundColor: colors.onSurface.withValues(alpha: .38),
@@ -1254,7 +1275,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
           ),
         ),
         onPressed: enabled ? _returnToPlayback : null,
-        icon: const Icon(Icons.play_circle_outline_rounded, size: 20),
+        icon: Icon(Icons.play_circle_outline_rounded, size: caption ? 18 : 20),
       ),
     );
   }
@@ -1749,19 +1770,33 @@ final class _BiliAppShellState extends State<BiliAppShell>
     );
   }
 
-  Widget _backButton() => IconButton(
-    key: const ValueKey('workspace-back'),
-    tooltip: '返回上一页',
-    onPressed: _canGoBack ? _goBack : null,
-    icon: const Icon(Icons.arrow_back, size: 20),
-  );
+  Widget _backButton({bool caption = false}) => caption
+      ? DesktopCaptionButton(
+          key: const ValueKey('workspace-back'),
+          tooltip: '返回上一页',
+          onPressed: _canGoBack ? _goBack : null,
+          icon: Icons.arrow_back_rounded,
+        )
+      : IconButton(
+          key: const ValueKey('workspace-back'),
+          tooltip: '返回上一页',
+          onPressed: _canGoBack ? _goBack : null,
+          icon: const Icon(Icons.arrow_back, size: 20),
+        );
 
-  Widget _homeButton() => IconButton(
-    key: const ValueKey('workspace-playback-home'),
-    tooltip: '回到主页',
-    onPressed: _playbackHome,
-    icon: const Icon(Icons.home_outlined, size: 20),
-  );
+  Widget _homeButton({bool caption = false}) => caption
+      ? DesktopCaptionButton(
+          key: const ValueKey('workspace-playback-home'),
+          tooltip: '回到主页',
+          onPressed: _playbackHome,
+          icon: Icons.home_outlined,
+        )
+      : IconButton(
+          key: const ValueKey('workspace-playback-home'),
+          tooltip: '回到主页',
+          onPressed: _playbackHome,
+          icon: const Icon(Icons.home_outlined, size: 20),
+        );
 
   Widget _horizontalTabs({
     required Key key,

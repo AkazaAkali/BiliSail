@@ -276,7 +276,7 @@ void main() {
         tester
             .getSize(find.byKey(const ValueKey('dual-window-caption')))
             .height,
-        32,
+        44,
       );
       expect(find.byType(View), findsOneWidget);
 
