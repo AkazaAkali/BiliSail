@@ -303,13 +303,22 @@ final class _SettingsCategoryPageState
                             'Android 默认单标签页，按访问顺序返回；从播放页进入 UP 主空间等页面后，返回原播放页并保留状态。其他平台默认双标签页：Windows 和 macOS 使用独立播放窗口；Android 在应用内切换浏览与播放页面。多标签页可分别保留多个页面。切换模式保留未关闭页面。macOS 切换到双标签页模式后，需要重启应用。',
                             style: TextStyle(fontSize: 12),
                           ),
-                          _choices('宽屏侧栏样式', s.sidebarStyle, const {
+                          _choices('导航栏模式', s.navigationBarMode, const {
+                            NavigationBarMode.automatic: '自动',
+                            NavigationBarMode.bottom: '底栏',
+                            NavigationBarMode.sidebar: '侧边栏',
+                          }, controller.setNavigationBarMode),
+                          const Text(
+                            '自动模式根据窗口宽度切换底栏和侧边栏；也可固定使用底栏或侧边栏。',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          _choices('侧栏样式', s.sidebarStyle, const {
                             SidebarStyle.automatic: '随窗口宽度',
                             SidebarStyle.expanded: '完整侧栏',
                             SidebarStyle.compact: '图标文字上下',
                           }, controller.setSidebarStyle),
                           const Text(
-                            '窗口宽度达到 600 时使用侧栏；自动模式在 1600 起展开。可用左上角按钮完全收起或展开，保留当前页面和侧栏样式。',
+                            '使用侧边栏时生效；随窗口宽度模式在 1600 起展开。可用左上角按钮完全收起或展开，保留当前页面和侧栏样式。',
                             style: TextStyle(fontSize: 12),
                           ),
                           _choices('应用主题', s.theme, const {

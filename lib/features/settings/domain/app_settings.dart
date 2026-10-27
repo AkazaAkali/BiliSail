@@ -13,6 +13,8 @@ enum AppThemePreference { system, light, dark }
 
 enum WorkspaceNavigationMode { singlePage, multipleTabs, dualTabs }
 
+enum NavigationBarMode { automatic, bottom, sidebar }
+
 enum SidebarStyle { automatic, expanded, compact }
 
 enum PlayerControlsMode { click, dynamic }
@@ -48,6 +50,7 @@ final class AppSettings {
     this.shortcuts = const ShortcutSettings.defaults(),
     this.theme = AppThemePreference.system,
     this.navigationMode = WorkspaceNavigationMode.dualTabs,
+    this.navigationBarMode = NavigationBarMode.automatic,
     this.sidebarStyle = SidebarStyle.automatic,
     this.sidebarCollapsed = false,
     this.allowConcurrentPlayback = false,
@@ -107,6 +110,7 @@ final class AppSettings {
   const AppSettings.defaults({
     this.shortcuts = const ShortcutSettings.defaults(),
     this.navigationMode = WorkspaceNavigationMode.dualTabs,
+    this.navigationBarMode = NavigationBarMode.automatic,
     this.sidebarStyle = SidebarStyle.automatic,
     this.sidebarCollapsed = false,
     this.allowConcurrentPlayback = false,
@@ -164,6 +168,7 @@ final class AppSettings {
   final ShortcutSettings shortcuts;
   final AppThemePreference theme;
   final WorkspaceNavigationMode navigationMode;
+  final NavigationBarMode navigationBarMode;
   final SidebarStyle sidebarStyle;
   final bool sidebarCollapsed;
   final bool allowConcurrentPlayback;
@@ -241,6 +246,7 @@ final class AppSettings {
     ShortcutSettings? shortcuts,
     AppThemePreference? theme,
     WorkspaceNavigationMode? navigationMode,
+    NavigationBarMode? navigationBarMode,
     SidebarStyle? sidebarStyle,
     bool? sidebarCollapsed,
     bool? allowConcurrentPlayback,
@@ -297,6 +303,7 @@ final class AppSettings {
     shortcuts: shortcuts ?? this.shortcuts,
     theme: theme ?? this.theme,
     navigationMode: navigationMode ?? this.navigationMode,
+    navigationBarMode: navigationBarMode ?? this.navigationBarMode,
     sidebarStyle: sidebarStyle ?? this.sidebarStyle,
     sidebarCollapsed: sidebarCollapsed ?? this.sidebarCollapsed,
     allowConcurrentPlayback:

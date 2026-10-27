@@ -183,7 +183,10 @@ void main() {
       expect(appearance.pixels, closeTo(saved, .1));
       category.value = SettingsCategory.appearance;
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ChoiceChip, '深色'));
+      final dark = find.widgetWithText(ChoiceChip, '深色');
+      await tester.ensureVisible(dark);
+      await tester.pumpAndSettle();
+      await tester.tap(dark);
       await tester.pumpAndSettle();
       expect(repository.settings.theme, AppThemePreference.dark);
       expect(repository.writes, 1);

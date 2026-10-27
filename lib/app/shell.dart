@@ -129,6 +129,7 @@ final class BiliAppShell extends StatefulWidget {
     this.shortcuts = const ShortcutSettings.defaults(),
     this.navigationMode,
     this.sidebarStyle = SidebarStyle.automatic,
+    this.navigationBarMode = NavigationBarMode.automatic,
     this.sidebarCollapsed,
     this.onSidebarCollapsedChanged,
     this.accountIdentity,
@@ -139,6 +140,7 @@ final class BiliAppShell extends StatefulWidget {
   final ShortcutSettings shortcuts;
   final WorkspaceNavigationMode? navigationMode;
   final SidebarStyle sidebarStyle;
+  final NavigationBarMode navigationBarMode;
   final bool? sidebarCollapsed;
   final ValueChanged<bool>? onSidebarCollapsedChanged;
   final Object? accountIdentity;
@@ -199,6 +201,12 @@ final class _BiliAppShellState extends State<BiliAppShell>
   bool get _android => Theme.of(context).platform == TargetPlatform.android;
   bool get _compactChannels =>
       MediaQuery.sizeOf(context).width < _compactNavigationWidth;
+  bool _usesBottomNavigation(double width) =>
+      switch (widget.navigationBarMode) {
+        NavigationBarMode.automatic => width < _compactNavigationWidth,
+        NavigationBarMode.bottom => true,
+        NavigationBarMode.sidebar => false,
+      };
   bool get _animatePrimaryNavigation =>
       _compactChannels &&
       (Theme.of(context).platform == TargetPlatform.android ||
@@ -690,9 +698,10 @@ final class _BiliAppShellState extends State<BiliAppShell>
     child: Builder(
       builder: (context) => Scaffold(
         floatingActionButton:
-            MediaQuery.sizeOf(context).width -
-                        MediaQuery.paddingOf(context).horizontal <
-                    _compactNavigationWidth &&
+            _usesBottomNavigation(
+                  MediaQuery.sizeOf(context).width -
+                      MediaQuery.paddingOf(context).horizontal,
+                ) &&
                 _dualTabs &&
                 !_desktopDual &&
                 !tab.isPlayback &&
@@ -709,7 +718,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
         body: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final compact = constraints.maxWidth < _compactNavigationWidth;
+              final compact = _usesBottomNavigation(constraints.maxWidth);
               final extended = switch (widget.sidebarStyle) {
                 SidebarStyle.automatic => constraints.maxWidth >= 1600,
                 SidebarStyle.expanded => true,
@@ -916,11 +925,12 @@ final class _BiliAppShellState extends State<BiliAppShell>
         ).any((view) => view.location == destination.location);
     return LayoutBuilder(
       builder: (context, constraints) => PredictiveBackRegion(
-        // Match the frame's width after SafeArea consumes horizontal padding.
+        // Match the frame's navigation layout after SafeArea consumes padding.
         enabled:
             supported &&
-            constraints.maxWidth - MediaQuery.paddingOf(context).horizontal <
-                _compactNavigationWidth &&
+            _usesBottomNavigation(
+              constraints.maxWidth - MediaQuery.paddingOf(context).horizontal,
+            ) &&
             !(_pageBack[_displayTab.id]?.canGoBack ?? false),
         identity: _backIdentity(_displayTab),
         destinationIdentity: destination == null
@@ -1409,10 +1419,10 @@ final class _BiliAppShellState extends State<BiliAppShell>
                       ],
                     ),
                   ),
-                  for (final item in const [
+                  for (final item in [
                     WorkspaceSection.home,
                     WorkspaceSection.dynamic,
-                    WorkspaceSection.live,
+                    if (!_compactChannels) WorkspaceSection.live,
                     WorkspaceSection.mine,
                   ])
                     entry(
@@ -1423,7 +1433,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
                             !_frameTab(context).isPlayback && section == item,
                       ),
                       !_frameTab(context).isPlayback && section == item,
-                      () => _selectSection(item, compact: false),
+                      () => _selectSection(item, compact: _compactChannels),
                       key: ValueKey('workspace-nav-${item.name}'),
                     ),
                 ],

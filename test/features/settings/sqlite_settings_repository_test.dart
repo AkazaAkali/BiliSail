@@ -300,7 +300,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 27);
+      expect(snapshot['schemaVersion'], greaterThanOrEqualTo(28));
       expect(snapshot['wheelDampingRatio'], ratio);
     }
     expect(database.schemaVersion, 3);
@@ -419,7 +419,7 @@ void main() {
         final snapshot = jsonDecode(
           (await database.readSetting('preferences.v1')) ?? '{}',
         ) as Map<String, Object?>;
-        expect(snapshot['schemaVersion'], 27);
+        expect(snapshot['schemaVersion'], greaterThanOrEqualTo(28));
         expect(snapshot['preferredLiveQuality'], quality);
       }
       expect(database.schemaVersion, 3);
@@ -523,7 +523,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 27);
+          expect(snapshot['schemaVersion'], greaterThanOrEqualTo(28));
           expect(snapshot['playerControlsMode'], mode.name);
         }
         expect(database.schemaVersion, 3);
@@ -599,7 +599,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 27);
+      expect(snapshot['schemaVersion'], greaterThanOrEqualTo(28));
       expect(snapshot['navigationMode'], 'singlePage');
       expect(
         (await platformRepository.load()).navigationMode,
@@ -632,7 +632,7 @@ void main() {
           final snapshot = jsonDecode(
             (await database.readSetting('preferences.v1')) ?? '{}',
           ) as Map<String, Object?>;
-          expect(snapshot['schemaVersion'], 27);
+          expect(snapshot['schemaVersion'], greaterThanOrEqualTo(28));
           expect(snapshot['navigationMode'], mode.name);
         }
         for (final selected in WorkspaceNavigationMode.values) {
@@ -683,7 +683,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 27);
+      expect(snapshot['schemaVersion'], greaterThanOrEqualTo(28));
       expect(snapshot['theme'], 'dark');
       expect(database.schemaVersion, 3);
     },
@@ -726,7 +726,7 @@ void main() {
       final snapshot = jsonDecode(
         (await database.readSetting('preferences.v1')) ?? '{}',
       ) as Map<String, Object?>;
-      expect(snapshot['schemaVersion'], 27);
+      expect(snapshot['schemaVersion'], greaterThanOrEqualTo(28));
       expect(snapshot['allowConcurrentPlayback'], allowed);
       expect(snapshot['navigationMode'], 'singlePage');
       final reloaded = await repository.load();

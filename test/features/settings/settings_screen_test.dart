@@ -766,7 +766,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(ChoiceChip, '自动'), findsNothing);
+    expect(
+      tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '自动')).selected,
+      isTrue,
+    );
     for (final (label, mode) in [
       ('单标签页', WorkspaceNavigationMode.singlePage),
       ('双标签页', WorkspaceNavigationMode.dualTabs),
@@ -1204,7 +1207,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ChoiceChip, '深色'));
+    final dark = find.widgetWithText(ChoiceChip, '深色');
+    await tester.ensureVisible(dark);
+    await tester.pumpAndSettle();
+    await tester.tap(dark);
     await tester.pumpAndSettle();
     expect(repository.settings.theme, AppThemePreference.system);
     expect(

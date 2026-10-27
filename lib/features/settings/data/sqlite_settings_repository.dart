@@ -77,6 +77,11 @@ class SqliteSettingsRepository implements SettingsRepository {
               .where((item) => item.name == decoded['sidebarStyle'])
               .firstOrNull ??
           SidebarStyle.automatic,
+      navigationBarMode:
+          NavigationBarMode.values
+              .where((item) => item.name == decoded['navigationBarMode'])
+              .firstOrNull ??
+          NavigationBarMode.automatic,
       sidebarCollapsed: boolean('sidebarCollapsed', false),
       allowConcurrentPlayback: boolean('allowConcurrentPlayback', false),
       cacheImages: boolean('cacheImages', true),
@@ -208,7 +213,8 @@ class SqliteSettingsRepository implements SettingsRepository {
     return database.writeSetting(
       'preferences.v1',
       jsonEncode({
-        'schemaVersion': 27,
+        'schemaVersion': 28,
+        'navigationBarMode': value.navigationBarMode.name,
         'sidebarStyle': value.sidebarStyle.name,
         'sidebarCollapsed': value.sidebarCollapsed,
         'fullscreenSwipeControls': value.fullscreenSwipeControls,
