@@ -193,7 +193,7 @@ class _AccountDialogState extends ConsumerState<AccountDialog>
                           const Icon(Icons.qr_code_2_rounded, size: 80),
                           const SizedBox(height: 16),
                           const Text(
-                            '登录后可请求账号可用的画质和字幕。\n也可以继续以游客身份观看。',
+                            '扫码一次即可登录，并使用账号的 Web 和 App 推荐。\n也可以继续以游客身份观看。',
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 20),

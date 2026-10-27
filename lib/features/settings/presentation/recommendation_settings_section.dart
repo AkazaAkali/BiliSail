@@ -141,7 +141,7 @@ final class _RecommendationSettingsSectionState
           ],
         ),
         const Text(
-          'Web 推荐使用当前网页登录；App 推荐可直接游客浏览，扫码授权后使用当前账号的 App 推荐。',
+          'Web 推荐使用当前网页登录；App 推荐可游客浏览，正常登录后自动使用账号推荐。',
           style: TextStyle(fontSize: 12),
         ),
         const AppRecommendationIdentitySettings(),

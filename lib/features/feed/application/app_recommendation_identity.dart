@@ -43,7 +43,6 @@ final class AppRecommendationIdentityController
   Future<void> setBuvid(String value) =>
       _update(() => _repository.setBuvid(value));
   Future<void> randomizeBuvid() => _update(_repository.randomizeBuvid);
-  Future<void> clearAuthorization() => _update(_repository.clearAuthorization);
 }
 
 final recommendationQueryKeyProvider = Provider((ref) {

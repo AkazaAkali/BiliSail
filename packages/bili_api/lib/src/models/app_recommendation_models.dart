@@ -34,13 +34,31 @@ final class ApiAppCredentials {
     required this.mid,
     required this.accessToken,
     required this.expiresAt,
+    this.refreshToken,
   });
   final String mid, accessToken;
   final DateTime expiresAt;
+  final String? refreshToken;
 }
 
 final class ApiAppQrPoll {
-  const ApiAppQrPoll(this.status, {this.credentials});
+  const ApiAppQrPoll(this.status, {this.credentials, this.cookies = const []});
   final ApiQrStatus status;
   final ApiAppCredentials? credentials;
+  final List<ApiLoginCookie> cookies;
+}
+
+final class ApiLoginCookie {
+  const ApiLoginCookie({
+    required this.name,
+    required this.value,
+    required this.domain,
+    this.expires,
+    this.path = '/',
+    this.secure = true,
+  });
+  final String name, value, domain;
+  final DateTime? expires;
+  final String path;
+  final bool secure;
 }

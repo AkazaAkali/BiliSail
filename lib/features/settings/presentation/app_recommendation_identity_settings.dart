@@ -1,14 +1,10 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../../domain/app_failure.dart';
 import '../../../shared/ui/app_dialog.dart';
 import '../../../shared/ui/app_notice.dart';
 import '../../feed/application/app_recommendation_identity.dart';
-import '../../feed/application/app_recommendation_authorization.dart';
 import '../../feed/domain/app_recommendation_identity_repository.dart';
 
 final class AppRecommendationIdentitySettings extends ConsumerStatefulWidget {
@@ -59,21 +55,11 @@ final class _AppRecommendationIdentitySettingsState
         error: (_, _) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('App 推荐身份读取失败，请检查系统安全存储。'),
+            const Text('登录信息读取失败，请重新登录后重试。'),
             TextButton(
               onPressed: () =>
                   ref.invalidate(appRecommendationIdentityProvider),
               child: const Text('重试'),
-            ),
-            TextButton(
-              onPressed: _saving
-                  ? null
-                  : () => _save(
-                      ref
-                          .read(appRecommendationIdentityProvider.notifier)
-                          .clearAuthorization,
-                    ),
-              child: const Text('清除 App 推荐授权'),
             ),
           ],
         ),
@@ -93,46 +79,11 @@ final class _AppRecommendationIdentitySettingsState
             ),
             Text(
               identity.authorizedMid == null
-                  ? 'App 推荐当前使用游客身份。'
+                  ? 'App 推荐当前使用游客身份；正常扫码登录后会自动使用账号推荐。缺少 App 凭据时请重新登录。'
                   : identity.expired
-                  ? 'App 推荐授权已过期，请重新扫码授权。'
-                  : 'App 推荐已绑定当前账号（${identity.authorizedMid}）。',
+                  ? 'App 登录信息已失效，请在账号菜单重新登录。'
+                  : 'App 推荐使用当前登录账号（${identity.authorizedMid}）。',
             ),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton(
-                  onPressed: _saving || !identity.canAuthorize
-                      ? null
-                      : () => showAppDialog<void>(
-                          context: context,
-                          builder: (_) => const _AppAuthorizationDialog(),
-                        ),
-                  child: Text(
-                    identity.authorizedMid == null ? '扫码授权 App 推荐' : '重新扫码授权',
-                  ),
-                ),
-                if (identity.authorizedMid != null)
-                  TextButton(
-                    onPressed: _saving
-                        ? null
-                        : () => _save(
-                            ref
-                                .read(
-                                  appRecommendationIdentityProvider.notifier,
-                                )
-                                .clearAuthorization,
-                          ),
-                    child: const Text('清除 App 推荐授权'),
-                  ),
-              ],
-            ),
-            if (!identity.canAuthorize)
-              const Text(
-                '登录哔哩哔哩后，可使用同一账号扫码授权 App 推荐。',
-                style: TextStyle(fontSize: 12),
-              ),
           ],
         ),
       );
@@ -167,8 +118,7 @@ final class _BuvidDialogState extends State<_BuvidDialog> {
           autofocus: true,
           maxLength: 128,
           decoration: const InputDecoration(
-            helperText:
-                '16–128 位字母、数字、下划线或连字符。\n修改后清除旧设备的 App 推荐授权，并刷新 App 推荐。',
+            helperText: '16–128 位字母、数字、下划线或连字符。\n修改后需在账号菜单重新登录，并刷新 App 推荐。',
             helperMaxLines: 4,
           ),
           validator: (text) => AppRecommendationIdentity.validBuvid(text ?? '')
@@ -196,83 +146,4 @@ final class _BuvidDialogState extends State<_BuvidDialog> {
       ),
     ],
   );
-}
-
-final class _AppAuthorizationDialog extends ConsumerStatefulWidget {
-  const _AppAuthorizationDialog();
-  @override
-  ConsumerState<_AppAuthorizationDialog> createState() =>
-      _AppAuthorizationDialogState();
-}
-
-final class _AppAuthorizationDialogState
-    extends ConsumerState<_AppAuthorizationDialog> {
-  final _key = Object();
-  late final AppLifecycleListener _lifecycle;
-  @override
-  void initState() {
-    super.initState();
-    _lifecycle = AppLifecycleListener(
-      onStateChange: (value) {
-        if (mounted) {
-          ref
-              .read(appRecommendationAuthorizationProvider(_key).notifier)
-              .setActive(value == AppLifecycleState.resumed);
-        }
-      },
-    );
-    Future.microtask(() {
-      if (mounted) {
-        unawaited(
-          ref
-              .read(appRecommendationAuthorizationProvider(_key).notifier)
-              .start(),
-        );
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _lifecycle.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final state = ref.watch(appRecommendationAuthorizationProvider(_key));
-    return AlertDialog(
-      title: const Text('授权 App 推荐'),
-      content: SizedBox(
-        width: 320,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (state.url case final url?)
-                Container(
-                  color: Colors.white,
-                  padding: const EdgeInsets.all(12),
-                  child: QrImageView(
-                    data: url.toString(),
-                    size: 220,
-                    backgroundColor: Colors.white,
-                  ),
-                ),
-              if (state.busy && state.url == null)
-                const CircularProgressIndicator(),
-              const SizedBox(height: 12),
-              Text(state.message),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(state.complete ? '完成' : '关闭'),
-        ),
-      ],
-    );
-  }
 }

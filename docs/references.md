@@ -171,6 +171,10 @@
 
 只读核对本地 PiliPlus 提交 `936072449e82e3d90c28c728c0087bf5136fa441` 的主导航、页面保留、推荐/动态/稍后再看、网格、图片及骨架实现，并对照 Android 官方 Navigation、ViewModel、Fragment 生命周期、RecyclerView 和 Compose 性能文档。仅借鉴状态/视图生命周期分开、页面头部归属和局部更新原则，独立修改本项目悬停订阅和重复裁剪；未复制 PiliPlus 的 GPLv3 源码或资源，未引入相邻运行时依赖。精确路径、依赖快照、采用边界与验证见[原生与 PiliPlus 导航对照](validation/android-navigation-reference-comparison-2026-10-26.md)。
 
+### 统一 Web / App 登录（2026-10-28）
+
+继续只读参考 PiliPlus `936072449e82e3d90c28c728c0087bf5136fa441` 的 `lib/http/login.dart`、`lib/pages/login/controller.dart`、`lib/utils/accounts/account.dart`；核对 HD 扫码的顶层 token 和 Cookie 列表。Cookie 登录补齐 token 另核对 bili-kernel `e26f6dbd071e20d4220806fcff7bd675f3c29fc5` 的 `Authorizers/Authorizers.Tv/Core/TvAuthorizeClient.cs` 中 SignInWithCookiesAsync。独立编写 Dart，未复制参考应用源码/资源或新增依赖；确认自己生成的登录码仅发生在明确用户登录动作内，不为旧保存账号自动授权。数据/许可及未验证项见[统一登录](unified-login-design.md)。
+
 ## 6. 尚待实测或决定的事项
 
 2026-10-27 推荐流设置只读参考本机 PiliPlus `936072449e82e3d90c28c728c0087bf5136fa441` 的推荐设置、过滤工具、推荐控制器与 HTTP 映射；App 接入进一步核对 `lib/utils/app_sign.dart`、`lib/common/constants.dart`、`lib/utils/accounts/account_manager/account_mgr.dart`、`lib/http/login.dart`、`lib/models/home/rcmd/result.dart` 和 `lib/utils/id_utils.dart`。独立实现十一项对应能力及 App 扫码授权，未复制 GPLv3 应用源码/资源、修改相邻仓库或导入其依赖。设备 buvid 与 App token 分开存储，token 只进系统安全存储。参考 lock 实际解析 crypto 3.0.7、dio 5.11.1；media-kit overrides 及锁定 fork 不随本轮采用，本项目继续使用现有依赖。对应范围与未测项见[推荐流设置](recommendation-settings-design.md)、[App 推荐设计](app-recommendation-design.md)。

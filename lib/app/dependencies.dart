@@ -126,14 +126,13 @@ class AppDependencies {
   final BiliApiClient api;
   final SessionRepository session;
   late final appRecommendationIdentity = AppRecommendationIdentityStore(
-    api: api,
-    requests: requests,
     database: database,
     credentials: SystemCredentialStore(
       keyPrefix: 'bilisail.app_recommendation.v1',
     ),
     accountScope: () => session.accountScope,
     accountChanges: session.changes,
+    sessionCredentials: session,
   );
   final SqliteLibraryRepository library;
   final PlaybackManager playback;
@@ -174,6 +173,7 @@ class AppDependencies {
     );
     final api = BiliApiClient(sessionProvider: requests);
     late final SessionRepository session;
+    late final AppDependencies dependencies;
     final library = SqliteLibraryRepository(
       database,
       accountScope: () => session.accountScope,
@@ -279,6 +279,7 @@ class AppDependencies {
       },
     );
     session = SessionRepository(
+      loadAppDevice: () => dependencies.appRecommendationIdentity.deviceId(),
       api: api,
       requests: requests,
       credentials: credentials ?? SystemCredentialStore(),
@@ -306,7 +307,7 @@ class AppDependencies {
         unawaited(downloads.sessionChanged().catchError((Object _) {}));
       }
     });
-    return AppDependencies._(
+    dependencies = AppDependencies._(
       database,
       requests,
       api,
@@ -325,6 +326,7 @@ class AppDependencies {
       downloadSources,
       downloadAccountSubscription,
     );
+    return dependencies;
   }
 
   Widget scope(Widget child) {

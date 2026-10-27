@@ -2,6 +2,8 @@
 
 日期：2026-10-27。承接[推荐流设置](recommendation-settings-design.md)，本轮接入 App 来源、独立 buvid、可选 App 授权和服务端反馈，保留原 Web 来源及已保存设置。
 
+2026-10-28 后续调整：App 凭据已并入正常登录，推荐设置不再提供独立扫码或更新登录入口；缺少凭据时提示重新登录。当前职责与验证见[统一登录设计](unified-login-design.md)。下文初次接入的独立授权方案及验证保留为历史记录。
+
 ## 参考核对与采用边界
 
 只读参考本机 PiliPlus `936072449e82e3d90c28c728c0087bf5136fa441`：
@@ -43,13 +45,13 @@ API fixture 覆盖签名编码、无 Cookie/重定向、deadline/取消/epoch、
 ## 实施入口与当前验证
 
 - [App profile](../packages/bili_api/lib/src/app_profile.dart)、[推荐协议](../packages/bili_api/lib/src/clients/app_recommendation_client.dart)、[扫码协议](../packages/bili_api/lib/src/clients/app_passport_client.dart)、[ID 转换](../packages/bili_api/lib/src/video_identifiers.dart)保持纯 Dart，公共入口显式导出。
-- [身份端口](../lib/features/feed/domain/app_recommendation_identity_repository.dart)、[身份仓储](../lib/features/feed/data/app_recommendation_identity_store.dart)、[授权控制器](../lib/features/feed/application/app_recommendation_authorization.dart)、[设置组件](../lib/features/settings/presentation/app_recommendation_identity_settings.dart)分别负责领域契约、持久化/会话、模态轮询、界面交互；通过 `lib/app/dependencies.dart` 组合，未增加全局 service locator。
+- [身份端口](../lib/features/feed/domain/app_recommendation_identity_repository.dart)、[身份仓储](../lib/features/feed/data/app_recommendation_identity_store.dart)、[统一会话仓储](../lib/features/auth/data/session_repository.dart)、[设置组件](../lib/features/settings/presentation/app_recommendation_identity_settings.dart)分别负责领域契约、持久化/会话、模态轮询、界面交互；通过 `lib/app/dependencies.dart` 组合，未增加全局 service locator。
 - 设置快照 schemaVersion 为 30，SQLite schema 为 3。设备标识在 `app-recommendation-device.v1`；普通 DB 的 `app-recommendation-authorization-revoked.v1` 仅为撤销标记。加密槽前缀 `bilisail.app_recommendation.v1`；先写撤销标记，再写凭据，最后提交有效标记。取消、账号变化或存储失败时清理新凭据；即使删除失败，重启也不能恢复已撤销槽。
 - 新增 [API 测试](../packages/bili_api/test/app_recommendation_client_test.dart)、[身份/反馈测试](../test/features/feed/app_recommendation_identity_test.dart)、[来源/取消测试](../test/features/feed/app_recommendation_source_test.dart)、[设置界面测试](../test/features/settings/app_recommendation_settings_test.dart)，覆盖安全保存/删除失败、错误账号、重启恢复、过期/失效授权、在途取消/登出、设备变化、隐藏频道和单次反馈等边界。
 - 2026-10-27 使用当前 API 包执行不带账号凭据的只读烟测：12 条可播放 App 推荐、60 个服务端反馈原因，12 个 aid/bvid 本地转换一致；单条公开 Web 详情交叉核对通过。交叉核对只用于烟测，生产列表不补查详情。输出仅为数量/布尔状态，日志 `build/app-recommendation-online-smoke.log` 不含请求 query、设备标识、二维码 key 或凭据。
 - 尚未进行真实账号扫码、个性化结果及反馈/撤销在线验收，也未运行三端 Profile/Release 帧耗时测量；不把游客 smoke、fixture 或卡片局部更新测试当作这些项目通过。
 
-## 最终自动检查（2026-10-28）
+## 初次接入自动检查（统一登录之前）
 
 `tool/check.ps1 -SkipPub` 通过，日志 `build/app-recommendation-check-final.log`：格式、静态分析与打包边界检查通过；根应用 3180、bili_api 487、bili_player 83、bili_danmaku 93、bili_mux 5，共 3848 项测试通过。根应用 13 项 Windows 符号链接用例、mux 10 项缺少 `BILI_MUX_LIBRARY` 的原生用例跳过，不能算作原生通过。
 

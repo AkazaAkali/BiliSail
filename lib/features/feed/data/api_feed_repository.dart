@@ -64,7 +64,7 @@ class ApiFeedRepository
         if (token == null) {
           throw const AppFailure(
             AppFailureKind.authentication,
-            '请在推荐流设置中扫码授权 App 推荐后再反馈',
+            '请在账号菜单重新登录后再反馈 App 推荐',
           );
         }
         final reason = feedback.selectedReason;

@@ -44,6 +44,19 @@ LoginCookie _cookie({
   expires: expires,
 );
 
+List<LoginCookie> _withCsrf(List<LoginCookie> cookies) => [
+  ...cookies,
+  LoginCookie(
+    name: 'bili_jct',
+    value: 'fixture-csrf',
+    domain: 'bilibili.com',
+    path: '/',
+    hostOnly: false,
+    secure: true,
+    expires: cookies.firstOrNull?.expires,
+  ),
+];
+
 final class _Credentials implements CredentialStore {
   String? value;
   int deletes = 0;
@@ -65,7 +78,7 @@ final class _Credentials implements CredentialStore {
   }
 }
 
-final class _Transport implements ApiTransport {
+final class _Transport implements ApiTransport, ApiFormTransport {
   int calls = 0;
   Future<ApiHttpResponse> Function()? handler;
   @override
@@ -79,6 +92,34 @@ final class _Transport implements ApiTransport {
     expect(uri.path, '/x/web-interface/nav');
     expect(headers['Cookie'], contains('SESSDATA=fixture'));
     return handler == null ? _nav() : await handler!();
+  }
+
+  @override
+  Future<ApiHttpResponse> postForm(
+    Uri uri, {
+    required Map<String, String> fields,
+    required Map<String, String> headers,
+    required Duration timeout,
+    ApiCancellation? cancellation,
+  }) async {
+    final data = uri.path.endsWith('/auth_code')
+        ? {
+            'auth_code': 'fixture-code',
+            'url': 'https://passport.bilibili.com/fixture',
+          }
+        : uri.path.endsWith('/confirm')
+        ? <String, Object?>{}
+        : {
+            'mid': 123,
+            'access_token': 'fixture-app',
+            'refresh_token': 'fixture-refresh',
+            'expires_in': 86400,
+          };
+    return ApiHttpResponse(
+      200,
+      Uint8List.fromList(utf8.encode(jsonEncode({'code': 0, 'data': data}))),
+      const {},
+    );
   }
 }
 
@@ -120,7 +161,10 @@ void main() {
       final expiry = DateTime.now().toUtc().add(const Duration(days: 1));
       final attempt = repository.beginWebLogin();
       expect(repository.current.status, AuthStatus.waitingWeb);
-      await repository.completeWebLogin(attempt!, [_cookie(expires: expiry)]);
+      await repository.completeWebLogin(
+        attempt!,
+        _withCsrf([_cookie(expires: expiry)]),
+      );
       expect(repository.current.isSignedIn, isTrue);
       expect(repository.accountScope, 'user:123');
       expect(transport.calls, 1);
@@ -129,7 +173,7 @@ void main() {
         ..restoreFromSecureStorage(saved['cookies'] as Map<String, Object?>);
       expect(
         jar.headerFor(Uri.https('api.live.bilibili.com', '/')),
-        'SESSDATA=fixture',
+        contains('SESSDATA=fixture'),
       );
       expect(
         jar.headerFor(Uri.https('api.bilibili.com', '/'), now: expiry),
@@ -152,9 +196,10 @@ void main() {
         final transport = _Transport();
         final credentials = _Credentials();
         final repository = _repository(transport, credentials);
-        await repository.completeWebLogin(repository.beginWebLogin()!, [
-          cookie,
-        ]);
+        await repository.completeWebLogin(
+          repository.beginWebLogin()!,
+          _withCsrf([cookie]),
+        );
         expect(transport.calls, 0);
         expect(credentials.value, isNull);
         expect(repository.current.status, AuthStatus.failed);
@@ -169,10 +214,13 @@ void main() {
     final first = repository.beginWebLogin()!;
     repository.cancelSignIn();
     final second = repository.beginWebLogin()!;
-    await repository.completeWebLogin(first, [_cookie()]);
-    await repository.completeWebLogin(WebLoginAttempt(), [_cookie()]);
+    await repository.completeWebLogin(first, _withCsrf([_cookie()]));
+    await repository.completeWebLogin(
+      WebLoginAttempt(),
+      _withCsrf([_cookie()]),
+    );
     expect(transport.calls, 0);
-    await repository.completeWebLogin(second, [_cookie()]);
+    await repository.completeWebLogin(second, _withCsrf([_cookie()]));
     expect(repository.current.isSignedIn, isTrue);
   });
 
@@ -182,9 +230,10 @@ void main() {
     transport.handler = () => response.future;
     final credentials = _Credentials();
     final repository = _repository(transport, credentials);
-    final login = repository.completeWebLogin(repository.beginWebLogin()!, [
-      _cookie(),
-    ]);
+    final login = repository.completeWebLogin(
+      repository.beginWebLogin()!,
+      _withCsrf([_cookie()]),
+    );
     await Future<void>.delayed(Duration.zero);
     repository.cancelSignIn();
     response.complete(_nav());
@@ -201,9 +250,10 @@ void main() {
           ..handler = () async => _nav(signedIn: failWrite);
         final credentials = _Credentials()..failWrite = failWrite;
         final repository = _repository(transport, credentials);
-        await repository.completeWebLogin(repository.beginWebLogin()!, [
-          _cookie(),
-        ]);
+        await repository.completeWebLogin(
+          repository.beginWebLogin()!,
+          _withCsrf([_cookie()]),
+        );
         expect(repository.current.status, AuthStatus.failed);
         expect(credentials.value, isNull);
         expect(
@@ -225,9 +275,10 @@ void main() {
       await gate.future;
     };
     final repository = _repository(_Transport(), credentials);
-    final login = repository.completeWebLogin(repository.beginWebLogin()!, [
-      _cookie(),
-    ]);
+    final login = repository.completeWebLogin(
+      repository.beginWebLogin()!,
+      _withCsrf([_cookie()]),
+    );
     await started.future;
     final logout = repository.signOut();
     gate.complete();
@@ -254,16 +305,18 @@ void main() {
             }
           },
         );
-        final first = repository.completeWebLogin(repository.beginWebLogin()!, [
-          _cookie(),
-        ]);
+        final first = repository.completeWebLogin(
+          repository.beginWebLogin()!,
+          _withCsrf([_cookie()]),
+        );
         await started.future;
         repository.cancelSignIn();
         Future<void>? next;
         if (startNext) {
-          next = repository.completeWebLogin(repository.beginWebLogin()!, [
-            _cookie(),
-          ]);
+          next = repository.completeWebLogin(
+            repository.beginWebLogin()!,
+            _withCsrf([_cookie()]),
+          );
         }
         gate.complete();
         await first;
@@ -304,7 +357,9 @@ void main() {
   ) async {
     final credentials = _Credentials();
     final repository = _repository(_Transport(), credentials, tester: tester);
-    await tester.pumpWidget(_app(repository, (_) async => [_cookie()]));
+    await tester.pumpWidget(
+      _app(repository, (_) async => _withCsrf([_cookie()])),
+    );
     await tester.tap(find.text('密码 / 短信登录'));
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNothing);
@@ -322,7 +377,7 @@ void main() {
     await tester.tap(find.text('密码 / 短信登录'));
     await tester.pump();
     await tester.pumpWidget(const MaterialApp(home: Scaffold()));
-    result.complete([_cookie()]);
+    result.complete(_withCsrf([_cookie()]));
     await tester.pumpAndSettle();
     expect(credentials.value, isNull);
     expect(repository.current.isSignedIn, isFalse);
@@ -364,7 +419,7 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    result.complete([_cookie()]);
+    result.complete(_withCsrf([_cookie()]));
     await tester.pumpAndSettle();
     expect(repository.current.isSignedIn, isTrue);
   });
@@ -377,7 +432,9 @@ void main() {
     transport.handler = () => response.future;
     final credentials = _Credentials();
     final repository = _repository(transport, credentials, tester: tester);
-    await tester.pumpWidget(_app(repository, (_) async => [_cookie()]));
+    await tester.pumpWidget(
+      _app(repository, (_) async => _withCsrf([_cookie()])),
+    );
     await tester.tap(find.text('密码 / 短信登录'));
     await tester.pump();
     expect(repository.current.status, AuthStatus.authenticating);

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:bili_api/bili_api.dart';
 
@@ -7,8 +8,10 @@ import '../../../core/network/api_requests.dart';
 import '../../../core/storage/credential_store.dart';
 import '../../../domain/app_failure.dart';
 import '../domain/auth_repository.dart';
+import '../domain/app_session_credentials.dart';
 
-class SessionRepository implements WebAuthRepository {
+class SessionRepository
+    implements WebAuthRepository, AppSessionCredentialsPort {
   SessionRepository({
     required this.api,
     required this.requests,
@@ -17,6 +20,7 @@ class SessionRepository implements WebAuthRepository {
     BiliApiClient Function()? loginClientFactory,
     DateTime Function()? clock,
     this.pollInterval = const Duration(seconds: 2),
+    this.loadAppDevice,
   }) : _loginClientFactory = loginClientFactory ?? (() => BiliApiClient()),
        _clock = clock ?? DateTime.now;
 
@@ -27,6 +31,18 @@ class SessionRepository implements WebAuthRepository {
   final BiliApiClient Function() _loginClientFactory;
   final Duration pollInterval;
   final DateTime Function() _clock;
+  final Future<String> Function()? loadAppDevice;
+  late final String _fallbackDevice =
+      'XY${List.generate(35, (_) => Random.secure().nextInt(16).toRadixString(16)).join()}';
+  AppSessionCredentials? _appCredentials;
+  @override
+  AppSessionCredentials? get appCredentials =>
+      _current.isSignedIn ? _appCredentials : null;
+  bool get _hasApp => switch (_appCredentials) {
+    final value? when !value.invalid && value.expiresAt.isAfter(_clock()) =>
+      true,
+    _ => false,
+  };
   final _changes = StreamController<AuthState>.broadcast();
   AuthState _current = const AuthState();
   String _scope = 'guest';
@@ -62,6 +78,7 @@ class SessionRepository implements WebAuthRepository {
     final generation = ++_generation;
     requests.advanceSession();
     api.cookieJar.clear();
+    _appCredentials = null;
     _scope = 'guest';
     _emit(const AuthState(status: AuthStatus.restoring));
     try {
@@ -73,7 +90,7 @@ class SessionRepository implements WebAuthRepository {
       }
       final Object? decoded = jsonDecode(saved);
       if (decoded is! Map<String, Object?> ||
-          decoded['version'] != 1 ||
+          !const {1, 2}.contains(decoded['version']) ||
           decoded['cookies'] is! Map<String, Object?> ||
           decoded['mid'] is! String) {
         throw const FormatException('Invalid secure session');
@@ -81,6 +98,35 @@ class SessionRepository implements WebAuthRepository {
       api.cookieJar.restoreFromSecureStorage(
         decoded['cookies'] as Map<String, Object?>,
       );
+      final app = decoded['app'];
+      if (app != null) {
+        if (app is! Map<String, Object?> ||
+            app['mid'] != decoded['mid'] ||
+            app['accessToken'] is! String ||
+            (app['accessToken'] as String).isEmpty ||
+            (app['accessToken'] as String).length > 4096 ||
+            app['expiresAtMillis'] is! int ||
+            (app['expiresAtMillis'] as int) < 0 ||
+            (app['expiresAtMillis'] as int) > 8640000000000000 ||
+            app['buvid'] is! String ||
+            !RegExp(r'^[A-Za-z0-9_-]{16,128}$')
+                .hasMatch(app['buvid'] as String) ||
+            (app['refreshToken'] != null &&
+                (app['refreshToken'] is! String ||
+                    (app['refreshToken'] as String).length > 4096))) {
+          throw const FormatException('Invalid App session');
+        }
+        _appCredentials = AppSessionCredentials(
+          mid: app['mid'] as String,
+          accessToken: app['accessToken'] as String,
+          expiresAt: DateTime.fromMillisecondsSinceEpoch(
+            app['expiresAtMillis'] as int,
+          ),
+          buvid: app['buvid'] as String,
+          refreshToken: app['refreshToken'] as String?,
+          invalid: app['invalid'] == true,
+        );
+      }
       final name = decoded['name'] is String
           ? decoded['name'] as String
           : '哔哩哔哩用户';
@@ -89,7 +135,7 @@ class SessionRepository implements WebAuthRepository {
           (context) => api.getNav(context: context),
         );
         if (generation != _generation) return;
-        if (!nav.isLogin || nav.mid == null) {
+        if (!nav.isLogin || nav.mid == null || nav.mid != decoded['mid']) {
           _scope = 'user:${decoded['mid']}';
           await signOut();
           return;
@@ -101,6 +147,7 @@ class SessionRepository implements WebAuthRepository {
             userName: nav.name ?? name,
             avatarUrl: nav.avatarUrl,
             mid: nav.mid,
+            appSessionAvailable: _hasApp,
           ),
         );
       } on AppFailure catch (error) {
@@ -123,6 +170,7 @@ class SessionRepository implements WebAuthRepository {
                   ? Uri.tryParse(decoded['avatarUrl'] as String)
                   : null,
               message: '已恢复本地会话，联网后将重新验证权限',
+              appSessionAvailable: _hasApp,
             ),
           );
           return;
@@ -153,7 +201,10 @@ class SessionRepository implements WebAuthRepository {
     );
     _emit(const AuthState(status: AuthStatus.creatingQr));
     try {
-      final qr = await client.generateQr(context: context);
+      final device = await loadAppDevice?.call() ?? _fallbackDevice;
+      if (generation != _generation) return;
+      final passport = AppPassportClient(client, clock: _clock);
+      final qr = await passport.generate(buvid: device, context: context);
       if (generation != _generation) return;
       _emit(AuthState(status: AuthStatus.waitingScan, qrUri: qr.url));
       while (generation == _generation && _clock().isBefore(deadline)) {
@@ -162,7 +213,11 @@ class SessionRepository implements WebAuthRepository {
           cancellation.whenCancelled,
         ]);
         if (generation != _generation || cancellation.isCancelled) return;
-        final result = await client.pollQr(qr.key, context: context);
+        final result = await passport.poll(
+          buvid: device,
+          authCode: qr.authCode,
+          context: context,
+        );
         if (generation != _generation) return;
         switch (result.status) {
           case ApiQrStatus.waitingScan:
@@ -178,7 +233,34 @@ class SessionRepository implements WebAuthRepository {
             );
             return;
           case ApiQrStatus.confirmed:
-            await _completeLogin(client, context, generation);
+            if (result.credentials == null || result.cookies.isEmpty) {
+              throw const ApiFailure(
+                ApiFailureCategory.protocol,
+                'unified_login',
+              );
+            }
+            client.cookieJar.restoreFromSecureStorage({
+              'version': 1,
+              'cookies': [
+                for (final cookie in result.cookies)
+                  {
+                    'name': cookie.name,
+                    'value': cookie.value,
+                    'domain': cookie.domain,
+                    'path': cookie.path,
+                    'hostOnly': false,
+                    'secure': cookie.secure,
+                    'expiresUtc': cookie.expires?.toUtc().toIso8601String(),
+                  },
+              ],
+            });
+            await _completeLogin(
+              client,
+              context,
+              generation,
+              app: result.credentials,
+              device: device,
+            );
             return;
         }
       }
@@ -216,8 +298,10 @@ class SessionRepository implements WebAuthRepository {
   Future<void> _completeLogin(
     BiliApiClient client,
     ApiRequestContext context,
-    int generation,
-  ) async {
+    int generation, {
+    ApiAppCredentials? app,
+    String? device,
+  }) async {
     final nav = await client.getNav(context: context);
     if (generation != _generation) return;
     if (!nav.isLogin ||
@@ -229,34 +313,69 @@ class SessionRepository implements WebAuthRepository {
         'login_validate',
       );
     }
+    device ??= await loadAppDevice?.call() ?? _fallbackDevice;
+    if (generation != _generation) return;
+    if (app == null) {
+      final result = await AppPassportClient(
+        client,
+        clock: _clock,
+      ).exchangeWebSession(buvid: device, context: context);
+      if (generation != _generation) return;
+      app = result.credentials;
+    }
+    if (app == null || app.mid != nav.mid || !app.expiresAt.isAfter(_clock())) {
+      throw const ApiFailure(
+        ApiFailureCategory.authentication,
+        'unified_login',
+      );
+    }
+    final unified = AppSessionCredentials(
+      mid: app.mid,
+      accessToken: app.accessToken,
+      refreshToken: app.refreshToken,
+      expiresAt: app.expiresAt,
+      buvid: device,
+    );
     final snapshot = client.cookieJar.exportForSecureStorage();
     // Keep secure write, account cleanup and promotion in one queue operation.
     // A cancelled cleanup must roll back before a newer login can write.
     await _credentialOperation(() async {
       if (generation != _generation) return;
+      final oldSaved = _current.isSignedIn ? await credentials.read() : null;
+      final oldScope = _scope;
+      Future<void> rollback() async {
+        if (oldSaved != null && _current.isSignedIn && _scope == oldScope) {
+          await credentials.write(oldSaved);
+        } else {
+          await credentials.delete();
+        }
+      }
+
+      if (generation != _generation) return;
       try {
         await credentials.write(
           jsonEncode({
-            'version': 1,
+            'version': 2,
             'mid': nav.mid,
             'name': nav.name,
             'avatarUrl': nav.avatarUrl?.toString(),
             'cookies': snapshot,
+            'app': _appSnapshot(unified),
           }),
         );
         if (generation != _generation) {
-          await credentials.delete();
+          await rollback();
           return;
         }
-        final oldScope = _scope;
         requests.advanceSession();
         await onSessionChanged(oldScope);
         if (generation != _generation) {
-          await credentials.delete();
+          await rollback();
           return;
         }
         api.cookieJar.restoreFromSecureStorage(snapshot);
         _scope = 'user:${nav.mid}';
+        _appCredentials = unified;
         _webAttempt = null;
         _emit(
           AuthState(
@@ -264,6 +383,7 @@ class SessionRepository implements WebAuthRepository {
             userName: nav.name ?? '哔哩哔哩用户',
             avatarUrl: nav.avatarUrl,
             mid: nav.mid,
+            appSessionAvailable: true,
           ),
         );
       } catch (_) {
@@ -272,10 +392,60 @@ class SessionRepository implements WebAuthRepository {
           requests.advanceSession();
           api.cookieJar.clear();
           _scope = 'guest';
+          _appCredentials = null;
         }
         await credentials.delete();
         rethrow;
       }
+    });
+  }
+
+  Map<String, Object?> _appSnapshot(AppSessionCredentials value) => {
+    'mid': value.mid,
+    'accessToken': value.accessToken,
+    'refreshToken': value.refreshToken,
+    'expiresAtMillis': value.expiresAt.millisecondsSinceEpoch,
+    'buvid': value.buvid,
+    'invalid': value.invalid,
+  };
+
+  @override
+  Future<void> invalidateAppCredentials(AppSessionCredentials expected) async {
+    if (!identical(_appCredentials, expected)) return;
+    final invalid = AppSessionCredentials(
+      mid: expected.mid,
+      accessToken: expected.accessToken,
+      refreshToken: expected.refreshToken,
+      expiresAt: expected.expiresAt,
+      buvid: expected.buvid,
+      invalid: true,
+    );
+    _appCredentials = invalid;
+    final generation = _generation;
+    _emit(
+      AuthState(
+        status: _current.status,
+        mid: _current.mid,
+        userName: _current.userName,
+        avatarUrl: _current.avatarUrl,
+      ),
+    );
+    await _credentialOperation(() async {
+      if (generation != _generation ||
+          !identical(_appCredentials, invalid) ||
+          !_current.isSignedIn) {
+        return;
+      }
+      await credentials.write(
+        jsonEncode({
+          'version': 2,
+          'mid': _current.mid,
+          'name': _current.userName,
+          'avatarUrl': _current.avatarUrl?.toString(),
+          'cookies': api.cookieJar.exportForSecureStorage(),
+          'app': _appSnapshot(invalid),
+        }),
+      );
     });
   }
 
@@ -394,6 +564,7 @@ class SessionRepository implements WebAuthRepository {
     requests.advanceSession();
     final oldScope = _scope;
     _scope = 'guest';
+    _appCredentials = null;
     api.cookieJar.clear();
     _emit(const AuthState());
     var cleanupFailed = false;

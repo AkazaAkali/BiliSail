@@ -2,6 +2,10 @@
 
 日期：2026-10-06。Flutter 3.47.6 / Dart 3.13.5，Windows x64 开发主机。真实账号与设备运行需要独立验收。
 
+## 2026-10-28 统一凭据调整
+
+密码/短信继续使用内嵌官网，读取隔离 Cookie 并经 nav 校验后，在同一次明确登录内执行 HD auth_code → Cookie/CSRF confirm → poll，取得 App token 后统一安全落盘。正常扫码也改用一次返回 Cookie/token 的 HD 路径，不再要求 App 推荐额外扫码。旧 Web 会话保留；缺少 App 凭据只提示重新登录，没有“更新登录”入口。以下为原实现历史，当前设计与验证以[统一登录](../unified-login-design.md)为准。
+
 ## 最终实现
 
 - 原生扫码入口保留；“密码 / 短信登录”打开应用内的 [官网登录页](https://passport.bilibili.com/login)。密码、短信发送／倒计时、极验和额外安全认证由网站处理。按用户的精简要求，移除自维护的 RSA、短信 key 和验证码表单协议及 PointyCastle 依赖。

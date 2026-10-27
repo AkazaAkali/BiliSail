@@ -54,7 +54,7 @@ final class AppPassportClient {
         _ => ApiQrStatus.waitingScan,
       });
     }
-    final token = data['token_info'];
+    final token = data['token_info'] ?? data;
     if (token is! Map<String, Object?>) {
       throw const ApiFailure(ApiFailureCategory.protocol, 'app_qr_poll');
     }
@@ -70,13 +70,92 @@ final class AppPassportClient {
         seconds > 366 * 86400) {
       throw const ApiFailure(ApiFailureCategory.protocol, 'app_qr_poll');
     }
+    final refresh = token['refresh_token'];
+    if (refresh != null &&
+        (refresh is! String || refresh.isEmpty || refresh.length > 4096)) {
+      throw const ApiFailure(ApiFailureCategory.protocol, 'app_qr_poll');
+    }
+    final cookies = <ApiLoginCookie>[];
+    final info = data['cookie_info'];
+    if (info != null) {
+      final entries = info is Map<String, Object?> ? info['cookies'] : null;
+      if (entries is! List || entries.length > 128) {
+        throw const ApiFailure(ApiFailureCategory.protocol, 'app_qr_poll');
+      }
+      for (final entry in entries) {
+        if (entry is! Map<String, Object?>) {
+          throw const ApiFailure(ApiFailureCategory.protocol, 'app_qr_poll');
+        }
+        final name = entry['name'], value = entry['value'];
+        final domain = entry['domain'] ?? '.bilibili.com';
+        final expiry = entry['expires'];
+        final path = entry['path'] ?? '/';
+        final secure = entry['secure'] ?? true;
+        if (name is! String ||
+            name.isEmpty ||
+            name.length > 256 ||
+            RegExp(r'[\x00-\x20;,=]').hasMatch(name) ||
+            value is! String ||
+            value.length > 8192 ||
+            RegExp(r'[\r\n\x00;]').hasMatch(value) ||
+            path is! String ||
+            !path.startsWith('/') ||
+            RegExp(r'[\r\n\x00;]').hasMatch(path) ||
+            !const {true, false, 0, 1}.contains(secure) ||
+            domain is! String ||
+            !const {'bilibili.com', '.bilibili.com'}.contains(domain) ||
+            (expiry != null &&
+                (expiry is! int || expiry < 0 || expiry > 8640000000000))) {
+          throw const ApiFailure(ApiFailureCategory.protocol, 'app_qr_poll');
+        }
+        cookies.add(
+          ApiLoginCookie(
+            name: name,
+            value: value,
+            domain: 'bilibili.com',
+            path: path,
+            secure: secure == true || secure == 1,
+            expires: expiry is int && expiry > 0
+                ? DateTime.fromMillisecondsSinceEpoch(
+                    expiry * 1000,
+                    isUtc: true,
+                  )
+                : null,
+          ),
+        );
+      }
+    }
     return ApiAppQrPoll(
       ApiQrStatus.confirmed,
       credentials: ApiAppCredentials(
         mid: mid,
         accessToken: access,
         expiresAt: _clock().add(Duration(seconds: seconds)),
+        refreshToken: refresh as String?,
       ),
+      cookies: List.unmodifiable(cookies),
     );
+  }
+
+  Future<ApiAppQrPoll> exchangeWebSession({
+    required String buvid,
+    required ApiRequestContext context,
+  }) async {
+    final qr = await generate(buvid: buvid, context: context);
+    await api.confirmAppLogin(qr.authCode, context: context);
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final result = await poll(
+        buvid: buvid,
+        authCode: qr.authCode,
+        context: context,
+      );
+      if (result.status == ApiQrStatus.confirmed ||
+          result.status == ApiQrStatus.expired ||
+          attempt == 2) {
+        return result;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    throw const ApiFailure(ApiFailureCategory.protocol, 'app_login_exchange');
   }
 }

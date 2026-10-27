@@ -5,7 +5,6 @@ import 'package:bilisail/domain/recommendation_settings.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/domain/video.dart';
 import 'package:bilisail/features/feed/application/app_recommendation_identity.dart';
-import 'package:bilisail/features/feed/application/app_recommendation_authorization.dart';
 import 'package:bilisail/features/feed/application/feed_controller.dart';
 import 'package:bilisail/features/feed/domain/app_recommendation_identity_repository.dart';
 import 'package:bilisail/features/feed/domain/feed_repository.dart';
@@ -137,24 +136,6 @@ void main() {
       expect(ids(), ['new-device']);
     },
   );
-  test('disposing QR authorization cancels its pending request and prevents later polling', () async {
-    final provider = appRecommendationAuthorizationProvider(Object());
-    final subscription = container.listen(provider, (_, _) {});
-    final operation = container.read(provider.notifier).start();
-    await container.pump();
-    expect(identity.authorizationCancellation?.isCancelled, isFalse);
-    subscription.close();
-    await container.pump();
-    expect(identity.authorizationCancellation?.isCancelled, isTrue);
-    identity.authorization.complete(
-      AppRecommendationAuthorization(
-        url: Uri.https('passport.bilibili.com', '/fixture'),
-        expiresAt: DateTime.now().add(const Duration(minutes: 2)),
-      ),
-    );
-    await operation;
-    expect(identity.polls, 0);
-  });
 }
 
 final class _Settings implements SettingsRepository {
@@ -216,9 +197,6 @@ final class _Feed implements FeedRepository, AppRecommendationFeedRepository {
 
 final class _Identity implements AppRecommendationIdentityRepository {
   final events = StreamController<int>.broadcast(sync: true);
-  final authorization = Completer<AppRecommendationAuthorization>();
-  RequestCancellation? authorizationCancellation;
-  int polls = 0;
   @override
   int revision = 0;
   void change() {
@@ -230,30 +208,9 @@ final class _Identity implements AppRecommendationIdentityRepository {
   Stream<int> get changes => events.stream;
   @override
   Future<AppRecommendationIdentity> load() async =>
-      const AppRecommendationIdentity(
-        buvid: 'fixture_device_0123456789',
-        canAuthorize: true,
-      );
+      const AppRecommendationIdentity(buvid: 'fixture_device_0123456789');
   @override
   Future<void> setBuvid(String value) async => change();
   @override
   Future<void> randomizeBuvid() async => change();
-  @override
-  Future<void> clearAuthorization() async => change();
-  @override
-  Future<AppRecommendationAuthorization> beginAuthorization({
-    required RequestCancellation cancellation,
-  }) {
-    authorizationCancellation = cancellation;
-    return authorization.future;
-  }
-
-  @override
-  Future<AppRecommendationAuthorizationStatus> pollAuthorization(
-    AppRecommendationAuthorization attempt, {
-    required RequestCancellation cancellation,
-  }) async {
-    polls++;
-    return AppRecommendationAuthorizationStatus.waitingScan;
-  }
 }

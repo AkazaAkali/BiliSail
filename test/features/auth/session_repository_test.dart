@@ -9,12 +9,20 @@ import 'package:bilisail/features/auth/data/session_repository.dart';
 import 'package:bilisail/features/auth/domain/auth_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-final class _FakeTransport implements ApiTransport {
+final class _FakeTransport implements ApiTransport, ApiFormTransport {
   _FakeTransport(this.handler);
   final Future<ApiHttpResponse> Function(Uri) handler;
   @override
   Future<ApiHttpResponse> get(
     Uri uri, {
+    required Map<String, String> headers,
+    required Duration timeout,
+    ApiCancellation? cancellation,
+  }) => handler(uri);
+  @override
+  Future<ApiHttpResponse> postForm(
+    Uri uri, {
+    required Map<String, String> fields,
     required Map<String, String> headers,
     required Duration timeout,
     ApiCancellation? cancellation,
@@ -69,12 +77,12 @@ String _savedSession() {
 }
 
 _FakeTransport _qrTransport() => _FakeTransport((uri) async {
-  if (uri.path.endsWith('/generate')) {
+  if (uri.path.endsWith('/auth_code')) {
     return _jsonResponse({
       'code': 0,
       'data': {
         'url': 'https://passport.bilibili.com/qr',
-        'qrcode_key': 'fake-key',
+        'auth_code': 'fake-key',
       },
     });
   }
@@ -82,7 +90,18 @@ _FakeTransport _qrTransport() => _FakeTransport((uri) async {
     return _jsonResponse(
       {
         'code': 0,
-        'data': {'code': 0},
+        'data': {
+          'mid': 123,
+          'access_token': 'fixture-app',
+          'refresh_token': 'fixture-refresh',
+          'expires_in': 86400,
+          'cookie_info': {
+            'cookies': [
+              {'name': 'SESSDATA', 'value': 'fake'},
+              {'name': 'bili_jct', 'value': 'fixture-csrf'},
+            ],
+          },
+        },
       },
       headers: {
         'set-cookie': ['SESSDATA=fake; Domain=.bilibili.com; Path=/; Secure'],
