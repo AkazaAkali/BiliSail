@@ -66,7 +66,8 @@ void main() {
         );
         await tester.pumpWidget(fixture.app);
         await tester.pumpAndSettle();
-        expect(returnToPlayback, findsNothing);
+        expect(returnToPlayback, findsOneWidget);
+        expect(tester.widget<IconButton>(returnToPlayback).onPressed, isNull);
         fixture.router.go('/video/BV1234567890');
         await tester.pumpAndSettle();
         final playback = tester.element(_page('tab-1'));
@@ -96,7 +97,8 @@ void main() {
         expect(fixture.disposedPages, isEmpty);
         window.requestClose();
         await tester.pumpAndSettle();
-        expect(returnToPlayback, findsNothing);
+        expect(returnToPlayback, findsOneWidget);
+        expect(tester.widget<IconButton>(returnToPlayback).onPressed, isNull);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
         await tester.pumpAndSettle();

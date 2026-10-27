@@ -43,7 +43,11 @@ void main() {
           addTearDown(router.dispose);
           await tester.pumpWidget(InputTestApp.router(routerConfig: router));
           await tester.pumpAndSettle();
-          expect(returnToPlayback, findsNothing);
+          expect(returnToPlayback, findsOneWidget);
+          expect(tester.widget<IconButton>(returnToPlayback).onPressed, isNull);
+          await tester.tap(returnToPlayback);
+          await tester.pumpAndSettle();
+          expect(router.routeInformationProvider.value.uri.path, '/');
           router.go('/video/BV1234567890');
           await tester.pumpAndSettle();
           final playback = tester.element(find.byType(_CounterPage));
@@ -54,6 +58,10 @@ void main() {
             await tester.tap(find.byKey(ValueKey('workspace-nav-$section')));
             await tester.pumpAndSettle();
             expect(returnToPlayback, findsOneWidget);
+            expect(
+              tester.widget<IconButton>(returnToPlayback).onPressed,
+              isNotNull,
+            );
             expect(find.byTooltip('回到播放页'), findsOneWidget);
             expect(tester.getTopLeft(returnToPlayback).dy, lessThan(44));
             expect(find.byType(FloatingActionButton), findsNothing);
@@ -160,7 +168,8 @@ void main() {
         );
         await tester.pumpAndSettle();
       }
-      expect(returnToPlayback, findsNothing);
+      expect(returnToPlayback, findsOneWidget);
+      expect(tester.widget<IconButton>(returnToPlayback).onPressed, isNull);
       expect(tester.takeException(), isNull);
     },
   );
@@ -490,9 +499,7 @@ void main() {
             );
             expect(
               returnToPlayback,
-              playbackCreated && !playback && width >= 600
-                  ? findsOneWidget
-                  : findsNothing,
+              !playback && width >= 600 ? findsOneWidget : findsNothing,
             );
             expect(
               find.byKey(const ValueKey('caption-controls')),

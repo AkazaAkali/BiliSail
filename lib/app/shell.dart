@@ -751,8 +751,11 @@ final class _BiliAppShellState extends State<BiliAppShell>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         _sidebarToggle(context),
-                        if (!tab.isPlayback && playback != null)
-                          _returnToPlaybackButton(context),
+                        if (!tab.isPlayback)
+                          _returnToPlaybackButton(
+                            context,
+                            enabled: playback != null,
+                          ),
                       ],
                     );
               final colors = Theme.of(context).colorScheme;
@@ -1229,7 +1232,10 @@ final class _BiliAppShellState extends State<BiliAppShell>
     );
   }
 
-  Widget _returnToPlaybackButton(BuildContext context) {
+  Widget _returnToPlaybackButton(
+    BuildContext context, {
+    required bool enabled,
+  }) {
     final colors = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(right: 8, top: 2, bottom: 2),
@@ -1239,14 +1245,15 @@ final class _BiliAppShellState extends State<BiliAppShell>
         style: IconButton.styleFrom(
           minimumSize: const Size(36, 28),
           padding: const EdgeInsets.symmetric(horizontal: 8),
-          foregroundColor: colors.primary,
+          foregroundColor: colors.onSurfaceVariant,
+          disabledForegroundColor: colors.onSurface.withValues(alpha: .38),
           backgroundColor: colors.surfaceContainerLow,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
             side: BorderSide(color: colors.outlineVariant),
           ),
         ),
-        onPressed: _returnToPlayback,
+        onPressed: enabled ? _returnToPlayback : null,
         icon: const Icon(Icons.play_circle_outline_rounded, size: 20),
       ),
     );
