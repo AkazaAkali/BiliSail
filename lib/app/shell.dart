@@ -9,6 +9,7 @@ import '../features/search/presentation/search_category_bar.dart';
 import '../core/presentation/workspace_activity.dart';
 import '../core/presentation/page_back_scope.dart';
 import '../core/presentation/predictive_back_region.dart';
+import '../core/presentation/trackpad_back_region.dart';
 import 'workspace_tabs.dart';
 import 'workspace_navigation.dart';
 import 'workspace_back_presentation.dart';
@@ -668,7 +669,18 @@ final class _BiliAppShellState extends State<BiliAppShell>
       ),
     );
     final windowBuilder = widget.playbackWindowBuilder;
-    final presented = _withBackPreview(context, main);
+    final presented = TrackpadBackRegion(
+      enabled: _canGoBack,
+      identity: (
+        _backIdentity(_displayTab),
+        _desktopDual
+            ? _workspace.browseId
+            : _workspace.backDestination()?.location,
+        _pageBack[_displayTab.id]?.canGoBack ?? false,
+      ),
+      onBack: _goBack,
+      child: _withBackPreview(context, main),
+    );
     if (windowBuilder == null) return presented;
     final playback = _desktopDual
         ? _workspace.tabs
@@ -680,7 +692,15 @@ final class _BiliAppShellState extends State<BiliAppShell>
       child: presented,
       playback: playback == null
           ? null
-          : _page(context, playback, active: true),
+          : TrackpadBackRegion(
+              enabled: true,
+              identity: (
+                _backIdentity(playback),
+                _pageBack[playback.id]?.canGoBack ?? false,
+              ),
+              onBack: _playbackWindowBack,
+              child: _page(context, playback, active: true),
+            ),
       activationToken: _windowActivation,
       onClose: _closePlaybackWindow,
       onBack: _playbackWindowBack,

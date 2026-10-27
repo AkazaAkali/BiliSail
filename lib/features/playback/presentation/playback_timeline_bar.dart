@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../../core/presentation/trackpad_back_region.dart';
 import '../../../shared/ui/storyboard_thumbnail.dart';
 
 import '../domain/playback_timeline.dart';
@@ -275,46 +276,50 @@ class _PlaybackTimelineBarState extends State<PlaybackTimelineBar> {
                         ),
                         overlayShape: SliderComponentShape.noOverlay,
                       ),
-                      child: Listener(
-                        onPointerCancel: (_) {
-                          _drag = null;
-                          _hide();
-                        },
-                        child: Slider(
-                          key: const ValueKey('playback-timeline-slider'),
-                          padding: EdgeInsets.zero,
-                          min: 0,
-                          max: enabled ? total : 1,
-                          value: value,
-                          semanticFormatterCallback: (value) =>
-                              formatPlaybackTime(
-                                Duration(milliseconds: value.round()),
-                              ),
-                          onChangeStart: enabled
-                              ? (value) {
-                                  _drag = value;
-                                  _show(
-                                    Duration(milliseconds: value.round()),
-                                    request: true,
-                                  );
-                                }
-                              : null,
-                          onChanged: enabled
-                              ? (value) {
-                                  _drag = value;
-                                  _show(Duration(milliseconds: value.round()));
-                                }
-                              : null,
-                          onChangeEnd: enabled
-                              ? (value) {
-                                  final position = Duration(
-                                    milliseconds: value.round(),
-                                  );
-                                  setState(() => _drag = null);
-                                  widget.onSeek(position);
-                                  if (!_hovering) _hide();
-                                }
-                              : null,
+                      child: TrackpadBackBlocker(
+                        child: Listener(
+                          onPointerCancel: (_) {
+                            _drag = null;
+                            _hide();
+                          },
+                          child: Slider(
+                            key: const ValueKey('playback-timeline-slider'),
+                            padding: EdgeInsets.zero,
+                            min: 0,
+                            max: enabled ? total : 1,
+                            value: value,
+                            semanticFormatterCallback: (value) =>
+                                formatPlaybackTime(
+                                  Duration(milliseconds: value.round()),
+                                ),
+                            onChangeStart: enabled
+                                ? (value) {
+                                    _drag = value;
+                                    _show(
+                                      Duration(milliseconds: value.round()),
+                                      request: true,
+                                    );
+                                  }
+                                : null,
+                            onChanged: enabled
+                                ? (value) {
+                                    _drag = value;
+                                    _show(
+                                      Duration(milliseconds: value.round()),
+                                    );
+                                  }
+                                : null,
+                            onChangeEnd: enabled
+                                ? (value) {
+                                    final position = Duration(
+                                      milliseconds: value.round(),
+                                    );
+                                    setState(() => _drag = null);
+                                    widget.onSeek(position);
+                                    if (!_hovering) _hide();
+                                  }
+                                : null,
+                          ),
                         ),
                       ),
                     ),

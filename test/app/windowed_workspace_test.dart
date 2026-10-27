@@ -6,6 +6,7 @@ import 'package:bilisail/core/platform/detached_playback_window.dart';
 import 'package:bilisail/core/presentation/workspace_activity.dart';
 import 'package:bilisail/features/settings/domain/app_settings.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,6 +16,45 @@ import 'package:go_router/go_router.dart';
 import '../support/detached_window_fake.dart';
 
 void main() {
+  testWidgets('macOS trackpad Back stays in its detached playback view', (
+    tester,
+  ) async {
+    final fixture = _WindowedWorkspace(tester, platform: TargetPlatform.macOS);
+    addTearDown(fixture.dispose);
+    await tester.pumpWidget(fixture.app);
+    await tester.pumpAndSettle();
+    fixture.router.go('/video/A');
+    await tester.pumpAndSettle();
+    final player = tester.element(_page('tab-1'));
+    final browser = tester.element(_page('home'));
+    fixture.router.go('/pgc/42');
+    await tester.pumpAndSettle();
+    final view = View.of(player);
+    Future<void> back({double distance = 150}) async {
+      final drag = await tester.createGesture(kind: PointerDeviceKind.trackpad);
+      final origin = tester.getCenter(_page('tab-1'));
+      await drag.panZoomStart(origin, view: view);
+      await drag.moveBy(Offset(distance, 0), view: view);
+      await drag.up(view: view);
+      await tester.pumpAndSettle();
+    }
+
+    await back(distance: 50);
+    expect(fixture.tab(tester, 'tab-1').location.path, '/pgc/42');
+    await back();
+    expect(fixture.tab(tester, 'tab-1').location.path, '/video/A');
+    expect(tester.element(_page('tab-1')), same(player));
+    expect(tester.element(_page('home')), same(browser));
+    expect(fixture.windows.creationCount, 1);
+    await back();
+    expect(_page('tab-1'), findsNothing);
+    expect(tester.element(_page('home')), same(browser));
+    expect(fixture.disposedPages, contains('tab-1'));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+  });
+
   for (final platform in [TargetPlatform.windows, TargetPlatform.macOS]) {
     testWidgets(
       'wide return raises the retained detached playback window on $platform',
@@ -494,10 +534,12 @@ class _WindowedWorkspace {
     WidgetTester tester, {
     this.customCaption = true,
     this.checkWindowSupport = false,
+    this.platform = TargetPlatform.windows,
   }) : windows = FakeDetachedWindowFactory(tester.view);
 
   final bool customCaption;
   final bool checkWindowSupport;
+  final TargetPlatform platform;
   final FakeDetachedWindowFactory windows;
   final mode = ValueNotifier(WorkspaceNavigationMode.dualTabs);
   final disposedPages = <String>[];
@@ -605,7 +647,7 @@ class _WindowedWorkspace {
 
   Widget get app => ProviderScope(
     child: MaterialApp.router(
-      theme: ThemeData(platform: TargetPlatform.windows),
+      theme: ThemeData(platform: platform),
       routerConfig: router,
     ),
   );
