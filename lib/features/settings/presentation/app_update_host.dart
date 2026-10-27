@@ -1,9 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/platform/external_links.dart';
 import '../../../shared/ui/app_dialog.dart';
+import '../../../shared/ui/app_network_image.dart';
 import '../../../shared/ui/app_notice.dart';
 import '../application/app_update_controller.dart';
 
@@ -46,6 +49,28 @@ final class _AppUpdateHostState extends ConsumerState<AppUpdateHost> {
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
+  Future<void> _openNotesLink(
+    BuildContext context,
+    Uri releaseUrl,
+    String? href,
+  ) async {
+    final target = href == null ? null : Uri.tryParse(href);
+    if (target == null) return;
+    final uri = releaseUrl.resolveUri(target);
+    if (!isAllowedWebLink(uri)) return;
+    var opened = false;
+    try {
+      opened = await ref
+          .read(webLinkOpenerProvider)(uri)
+          .timeout(const Duration(seconds: 12));
+    } on Exception {
+      opened = false;
+    }
+    if (context.mounted && !opened) {
+      showAppNotice(context, '无法打开浏览器，请稍后重试');
+    }
+  }
+
   Future<void> _showPrompt() async {
     final dialogContext = widget.navigatorKey.currentState?.overlay?.context;
     if (dialogContext == null || _showing) return;
@@ -69,11 +94,37 @@ final class _AppUpdateHostState extends ConsumerState<AppUpdateHost> {
                     const Text('这是预览版本，功能仍在完善中。'),
                     const SizedBox(height: 12),
                   ],
-                  SelectableText(
-                    release.notes.isEmpty
-                        ? '新版本已发布，可前往 Release 页面查看详情并下载。'
-                        : release.notes,
-                  ),
+                  if (release.notes.trim().isEmpty)
+                    const SelectableText('新版本已发布，可前往 Release 页面查看详情并下载。')
+                  else
+                    MarkdownBody(
+                      data: release.notes,
+                      selectable: true,
+                      fitContent: false,
+                      styleSheet:
+                          MarkdownStyleSheet.fromTheme(Theme.of(context))
+                              .copyWith(
+                                a: TextStyle(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  decoration: TextDecoration.underline,
+                                ),
+                                tableColumnWidth: const IntrinsicColumnWidth(),
+                              ),
+                      onTapLink: (_, href, _) =>
+                          unawaited(_openNotesLink(context, release.url, href)),
+                      imageBuilder: (uri, title, alt) {
+                        final url = release.url.resolveUri(uri);
+                        final fallback = Text(alt ?? title ?? '图片加载失败');
+                        // Remote notes must not read local files or app assets.
+                        if (!isAllowedWebLink(url)) return fallback;
+                        return AppNetworkImage(
+                          url: url.toString(),
+                          fit: BoxFit.contain,
+                          semanticLabel: alt ?? title,
+                          errorBuilder: (_, _, _) => fallback,
+                        );
+                      },
+                    ),
                 ],
               ),
             ),

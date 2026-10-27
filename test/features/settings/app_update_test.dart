@@ -18,6 +18,7 @@ import 'package:bilisail/features/settings/application/settings_controller.dart'
 import 'package:bilisail/features/settings/presentation/app_update_host.dart';
 import 'package:bilisail/features/settings/presentation/settings_screen.dart';
 import 'package:bilisail/shared/ui/app_notice.dart';
+import 'package:bilisail/shared/ui/app_network_image.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -73,6 +74,7 @@ Widget _app(
   List<Uri> opened, {
   Widget home = const Scaffold(body: Text('首页')),
   bool openSucceeds = true,
+  Brightness brightness = Brightness.light,
   DateTime? now,
 }) {
   final navigatorKey = GlobalKey<NavigatorState>();
@@ -86,8 +88,13 @@ Widget _app(
         opened.add(uri);
         return openSucceeds;
       }),
+      webLinkOpenerProvider.overrideWithValue((uri) async {
+        opened.add(uri);
+        return openSucceeds;
+      }),
     ],
     child: MaterialApp(
+      theme: ThemeData(brightness: brightness),
       navigatorKey: navigatorKey,
       builder: (context, child) => AppUpdateHost(
         navigatorKey: navigatorKey,
@@ -603,6 +610,160 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'Markdown release notes fit narrow windows with large text: $brightness',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(360, 640);
+        tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final repository = _UpdateRepository()
+          ..release = _release(
+            '0.2.0',
+            notes:
+                '''
+## 更新亮点
+
+改进**播放器**和更新面板。
+
+- 修复播放
+- 支持 `Markdown`
+
+1. 下载新版
+2. 覆盖安装
+
+- [x] 支持格式
+
+> 保留现有设置
+
+| 平台 | 说明 |
+| --- | --- |
+| Windows | ${'long-table-cell-' * 12} |
+
+```sh
+${'long-code-line-' * 20}
+```
+
+说明末尾
+''',
+          );
+        final opened = <Uri>[];
+        await tester.pumpWidget(
+          _app(repository, _CheckStore(), opened, brightness: brightness),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('更新亮点'), findsOneWidget);
+        expect(find.text('改进播放器和更新面板。'), findsOneWidget);
+        expect(find.text('修复播放'), findsOneWidget);
+        expect(find.text('支持 Markdown'), findsOneWidget);
+        expect(find.text('覆盖安装'), findsOneWidget);
+        expect(find.text('保留现有设置'), findsOneWidget);
+        expect(find.byIcon(Icons.check_box), findsOneWidget);
+        expect(find.byType(Table), findsOneWidget);
+        expect(find.text(repository.release!.notes), findsNothing);
+        final horizontalScrollables = find.byWidgetPredicate(
+          (widget) => widget is Scrollable && widget.axis == Axis.horizontal,
+        );
+        expect(horizontalScrollables, findsNWidgets(2));
+        for (final state in tester.stateList<ScrollableState>(
+          horizontalScrollables,
+        )) {
+          expect(state.position.maxScrollExtent, greaterThan(0));
+        }
+        await tester.ensureVisible(find.text('说明末尾'));
+        await tester.pumpAndSettle();
+        expect(find.text('说明末尾').hitTestable(), findsOneWidget);
+        await tester.tap(find.text('稍后再说'));
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(opened, isEmpty);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+  testWidgets('Markdown links open only on tap and reject local schemes', (
+    tester,
+  ) async {
+    final repository = _UpdateRepository()
+      ..release = _release(
+        '0.2.0',
+        notes: '''
+[查看提交](https://github.com/CKopoer/BiliSail/compare/v0.1.0...v0.2.0)
+
+[查看问题](/CKopoer/BiliSail/issues/123)
+
+[本地文件](file:///private.txt)
+
+[脚本链接](javascript:alert(1))
+''',
+      );
+    final opened = <Uri>[];
+    await tester.pumpWidget(_app(repository, _CheckStore(), opened));
+    await tester.pumpAndSettle();
+    expect(opened, isEmpty);
+    await tester.tap(find.text('查看提交'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('查看问题'));
+    await tester.pumpAndSettle();
+    expect(opened, [
+      Uri.parse('https://github.com/CKopoer/BiliSail/compare/v0.1.0...v0.2.0'),
+      Uri.parse('https://github.com/CKopoer/BiliSail/issues/123'),
+    ]);
+    for (final label in ['本地文件', '脚本链接']) {
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+    }
+    expect(opened, hasLength(2));
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets('Markdown browser failure shows a notice', (tester) async {
+    final repository = _UpdateRepository()
+      ..release = _release('0.2.0', notes: '[查看文档](https://docs.flutter.dev)');
+    await tester.pumpWidget(
+      _app(repository, _CheckStore(), [], openSucceeds: false),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('查看文档'));
+    await tester.pumpAndSettle();
+    expect(find.text('无法打开浏览器，请稍后重试'), findsOneWidget);
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets('Markdown images cannot load files or bundled assets', (
+    tester,
+  ) async {
+    final repository = _UpdateRepository()
+      ..release = _release(
+        '0.2.0',
+        notes: '''
+![本地图片](file:///private.png)
+
+![内置资源](resource:assets/private.png)
+''',
+      );
+    await tester.pumpWidget(_app(repository, _CheckStore(), []));
+    await tester.pumpAndSettle();
+    expect(find.text('本地图片'), findsOneWidget);
+    expect(find.text('内置资源'), findsOneWidget);
+    expect(find.byType(AppNetworkImage), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+  for (final notes in ['', ' \n ']) {
+    testWidgets('empty release notes retain the download hint: "$notes"', (
+      tester,
+    ) async {
+      final repository = _UpdateRepository()
+        ..release = _release('0.2.0', notes: notes);
+      await tester.pumpWidget(_app(repository, _CheckStore(), []));
+      await tester.pumpAndSettle();
+      expect(find.text('新版本已发布，可前往 Release 页面查看详情并下载。'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
   testWidgets(
     'about links, loading control and manual prompt fit a narrow window',
     (tester) async {

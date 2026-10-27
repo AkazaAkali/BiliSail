@@ -12,6 +12,8 @@
 
 新版本弹窗显示版本与更新说明；“稍后再说”关闭弹窗，“前往 Release”调用系统浏览器打开该版本页面。只有用户点击才打开外部页面，不自动下载、安装或打开浏览器。提示由进程级宿主管理，切换或关闭设置标签不会取消整个应用的更新检查；同一请求不产生重复弹窗。退出或请求超时会取消网络读取，迟到响应不更新状态。
 
+2026-10-27 更新说明改用 `flutter_markdown_plus` 的 `MarkdownBody` 渲染 GitHub Flavored Markdown，支持标题、粗体／斜体、列表、任务列表、引用、表格、行内与围栏代码及链接。正文仍可选择复制，沿用弹窗纵向滚动，长表格和代码行使用组件自带的横向滚动；文字、引用和链接跟随深浅主题与系统字号。空白说明保留原下载提示。“前往 Release”仍打开已校验的发布地址；正文 HTTP(S) 链接仅在点击后通过已有公开网页打开端口交给系统浏览器，相对链接以该 Release URL 解析，失败时提示且保留弹窗。Markdown 图片复用公开图片组件，不携带账号凭据；本地文件、应用资源等非 HTTP(S) 图片只显示替代文字。不解析内嵌 HTML，GitHub 的 HTML 扩展布局不在本次支持范围内。
+
 ## 协议、版本与存储
 
 - 独立无凭据 `HttpClient`，单次 GET `https://api.github.com/repos/CKopoer/BiliSail/releases?per_page=100`；`Accept: application/vnd.github+json`、`X-GitHub-Api-Version: 2026-03-10`。不附 Bilibili Cookie/token，不跟随重定向、不自动重试，保留系统 TLS 验证。
@@ -19,7 +21,8 @@
 - 2026-10-25 核对 [GitHub List releases 官方协议（API 2026-03-10）](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10#list-releases)：公开资源可匿名读取，响应为 Release 数组，分页参数只有 `per_page`（最多 100）和 `page`，不提供服务端排除预览版的查询参数，因此在客户端检查 `draft`／`prerelease`。另有 [Get the latest release](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10#get-the-latest-release) 返回单个非草稿、非预览版对象；官方说明其 latest 选择关联 `created_at`，不等同于本项目按语义版本和数字构建号取最大值，因此继续使用列表端点筛选正式版。
 - 版本先按 `major.minor.patch` 与预发布标识比较，再比较数字 Flutter `+N` 构建号，支持 `v0.1.0+2`。同一语义版本的不同数字构建仍被识别为更新，但自动弹窗按三段版本号去重，手动检查不受此限制；非数字构建元数据不改变优先级，不按字符串字典序比较。
 - `package_info_plus 10.2.2` 从已有锁定的传递依赖提升为直接依赖，BSD-3-Clause，支持 Android/Windows/macOS，未改变解析版本。常规运行读取平台包版本，[Release 脚本](../../tool/build-release.ps1) 通过 `BILISAIL_RELEASE_VERSION` 注入实际 `x.y.z+N`，避免 Android split APK 的 `versionCode +2000` 被当作 Release 构建号。自行执行 split APK 构建时应传相同 Dart define。
-- 网络总读取期限 12 秒，整个检查期限 20 秒；响应最多 2 MiB，展示说明最多 12000 字符。说明以纯文本显示；只接受本仓库的 HTTPS Release 链接，拒绝其他 host、仓库、端口、userinfo、query 或 fragment。
+- 网络总读取期限 12 秒，整个检查期限 20 秒；响应最多 2 MiB，展示说明最多 12000 字符。说明按 Markdown 显示；作为更新目标的 Release 链接只接受本仓库的 HTTPS 地址，拒绝其他 host、仓库、端口、userinfo、query 或 fragment。正文链接与图片限制为不含 userinfo 的 HTTP(S) URL；打开正文链接最多等待 12 秒。
+- 新增精确依赖 [`flutter_markdown_plus 1.0.12`](https://pub.dev/packages/flutter_markdown_plus/versions/1.0.12)，BSD-3-Clause；采用其 Flutter 组件和传递依赖 `markdown 7.3.1`，无新增原生插件或二进制资产。包声明覆盖项目目标平台，实际设备展示仍需逐平台验证。根应用锁文件同步，四个独立包不增加 Markdown 依赖。
 - 日期写入既有 `settings` 表的 `app_update.last_startup_day.v1`，最后自动提醒的三段版本号写入 `app_update.last_prompted_version.v1`，与账号无关。提醒记录在发布待显示提示前通过事务认领，读取或保存失败时自动检查保持安静；退出或超时后的存储响应不能恢复弹窗。不改表、不改变当前 SQLite schemaVersion 3、不清空设置或历史；版本查询、HTTP、日期及提醒存储与链接打开均通过应用层注入。
 
 ## 参考与采用范围
@@ -36,6 +39,8 @@
 ## 验证
 
 离线测试覆盖版本及构建号排序、预览/草稿、空列表、错误协议与链接、容量、SQLite 日期重开、跨日/失败后重启、手动合并、取消/超时与迟到结果、窄窗口、弹窗确认及浏览器打开失败。Windows 原生入口为 [windows_app_updates_test.dart](../../integration_test/windows_app_updates_test.dart)，在线读取需显式 `--dart-define=BILI_UPDATES_ONLINE=true`，正常检查不访问真实账号或外网。
+
+2026-10-27 Markdown 渲染：更新专项 40 项测试通过，新增覆盖深浅主题下 360 × 640 窄窗口与 1.5 倍字号、标题／列表／任务／引用／表格／代码、长表格和代码横向滚动、正文链接仅点击打开及相对链接解析、拒绝本地／脚本协议、浏览器打开失败、非网络图片和空白说明后备。`tool/check.ps1 -EnforceLockfile` 通过锁文件解析、格式、静态分析、打包边界和离线测试：根应用 3015、bili_api 478、bili_player 83、bili_danmaku 93、bili_mux 5 项通过，共 3674 项。根应用 13 项因 Windows 符号链接权限不足跳过，mux 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过；日志 `artifacts/app-updates-markdown-check-20261027.log`。文档 7 条本地链接和 `git diff --check` 通过。本次未构建或执行 Windows／Android／macOS 实机验收。
 
 2026-10-25 正式版筛选：更新专项 33 项测试通过，覆盖高版本预览版不遮挡正式版、只有草稿／预览版时无候选、GitHub 布尔字段校验，以及实际 Repository 到手动／自动检查控制器的行为。`tool/check.ps1 -SkipPub` 通过格式、静态分析、打包边界和离线测试：根应用 2687、bili_api 456、bili_player 81、bili_danmaku 93、bili_mux 2 项通过；mux 另有 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过，日志 `artifacts/app-updates-stable-check-20261025.log`。另通过实际 `GitHubUpdateRepository` 的匿名 HTTP 请求取得正式版 `1.1.1+7`，确认 `prerelease: false`，日志 `artifacts/app-updates-stable-online-20261025.log`。Windows 集成测试 fixture 已加入更高版本的预览版并保留正式版提示断言，但本次未执行原生集成测试、构建或三端实机验收；未发现运行中的调试实例可供热重载。
 
