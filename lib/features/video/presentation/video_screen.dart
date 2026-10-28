@@ -3,6 +3,7 @@ import 'package:bili_player/bili_player.dart';
 import '../../../domain/user.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../domain/app_failure.dart';
@@ -30,6 +31,7 @@ import '../../feed/domain/home_repository.dart';
 import '../domain/video_actions_repository.dart';
 import '../domain/video_card_interactions.dart';
 import 'video_author_header.dart';
+import 'inline_video_height.dart';
 import 'video_collection_panel.dart';
 import '../application/video_controller.dart';
 import '../application/video_extras_controller.dart';
@@ -102,6 +104,8 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
   String? _retainedQueueId;
   WatchLaterQueueRegistry? _retainedRegistry;
   PlaybackSession? _queueSession;
+  PlaybackSession? _layoutSession;
+  VideoDimensions? _videoDimensions;
   final WatchLaterQueuePlayback _queuePlayback = WatchLaterQueuePlayback();
   final ScrollController _introScroll = ScrollController();
   final GlobalKey _infoKey = GlobalKey();
@@ -110,6 +114,28 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _syncQueue();
+  }
+
+  void _bindLayoutSession() {
+    if (!mounted || !ref.exists(playbackSessionProvider)) return;
+    final session = ref.read(playbackSessionProvider);
+    if (identical(session, _layoutSession)) return;
+    _layoutSession?.snapshots.removeListener(_updateVideoDimensions);
+    _layoutSession = session;
+    session.snapshots.addListener(_updateVideoDimensions);
+    _updateVideoDimensions();
+  }
+
+  void _updateVideoDimensions() {
+    final session = _layoutSession;
+    final dimensions =
+        session?.detail?.summary.id == widget.id &&
+            session?.part?.cid == _lastCid
+        ? session?.snapshots.value.videoDimensions
+        : null;
+    if (!mounted || dimensions == _videoDimensions) return;
+    // Position, buffering, volume and danmaku ticks never rebuild this page.
+    setState(() => _videoDimensions = dimensions);
   }
 
   void _syncQueue() {
@@ -140,6 +166,7 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
     if (_retainedQueueId case final String id) {
       _retainedRegistry?.release(id);
     }
+    _layoutSession?.snapshots.removeListener(_updateVideoDimensions);
     _introScroll.dispose();
     super.dispose();
   }
@@ -147,6 +174,10 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
   @override
   void didUpdateWidget(covariant VideoScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.id != widget.id ||
+        oldWidget.initialCid != widget.initialCid) {
+      _videoDimensions = null;
+    }
     if (oldWidget.queue?.id != widget.queue?.id) {
       _queueExpanded = true;
       _queuePlayback.reset();
@@ -215,6 +246,9 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
         icon: Icons.videocam_off_outlined,
       );
     }
+    // The player child initializes the scoped session. Do not manufacture a
+    // session for standalone screens which intentionally use a custom player.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _bindLayoutSession());
     final selected =
         video.parts
             .where(
@@ -487,14 +521,31 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                     );
                     return LayoutBuilder(
                       builder: (context, constraints) {
+                        final platform = defaultTargetPlatform;
+                        final display = View.of(context).display;
+                        final portraitPhone =
+                            (platform == TargetPlatform.android ||
+                                platform == TargetPlatform.iOS) &&
+                            display.size.shortestSide /
+                                    display.devicePixelRatio <
+                                600 &&
+                            MediaQuery.orientationOf(context) ==
+                                Orientation.portrait &&
+                            MediaQuery.of(context).displayFeatures.isEmpty;
+                        final playerHeight = wide || !showInfo
+                            ? constraints.maxHeight
+                            : inlineVideoHeight(
+                                width: constraints.maxWidth,
+                                availableHeight: constraints.maxHeight,
+                                portraitPhone: portraitPhone,
+                                dimensions: _videoDimensions,
+                              );
                         final player = Column(
                           key: _playerKey,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             SizedBox(
-                              height: wide || !showInfo
-                                  ? constraints.maxHeight
-                                  : constraints.maxWidth * 9 / 16,
+                              height: playerHeight,
                               width: double.infinity,
                               child: playerContent,
                             ),
@@ -506,10 +557,7 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                             Positioned(
                               right: 0,
                               top:
-                                  (wide || !showInfo
-                                          ? constraints.maxHeight
-                                          : constraints.maxWidth * 9 / 16) /
-                                      2 -
+                                  playerHeight / 2 -
                                   PlaybackSidebarToggle.size.height / 2,
                               child: PlaybackSidebarToggle(
                                 tooltip: showInfo ? '收起视频信息' : '展开视频信息',
@@ -556,8 +604,7 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                                   offstage: !showInfo,
                                   child: SizedBox(
                                     height: constraints.maxHeight.isFinite
-                                        ? (constraints.maxHeight -
-                                                  constraints.maxWidth * 9 / 16)
+                                        ? (constraints.maxHeight - playerHeight)
                                               .clamp(480.0, double.infinity)
                                         : 600,
                                     child: info,

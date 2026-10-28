@@ -8,6 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/window_service.dart';
+import '../../../core/platform/device_rotation.dart';
+import '../../../core/platform/device_rotation_service.dart';
+import '../domain/fullscreen_rotation.dart';
 import '../../../core/presentation/workspace_activity.dart';
 import '../../../shared/ui/playback_page_commands.dart';
 import '../../../shared/ui/playback_navigation.dart';
@@ -70,6 +73,11 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
   int? _handledCompletionGeneration;
   // Inline and fullscreen views are recreated, but share the page's intent.
   final _controlsVisible = ValueNotifier(true);
+  final _rotation = FullscreenRotation();
+  StreamSubscription<DeviceRotation>? _rotationSubscription;
+  bool _resumed = true;
+  Object? _portraitRequest;
+  bool _rotationScheduled = false;
   bool _fullScreen = false;
   bool _active = false;
   bool _surfaceReady = false;
@@ -85,6 +93,8 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
   @override
   void initState() {
     super.initState();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _resumed = lifecycle == null || lifecycle == AppLifecycleState.resumed;
     _settings = ValueNotifier(widget.settings);
     _session = ref.read(playbackSessionProvider)..attach(this);
     _session.snapshots.addListener(_updateFullScreenOrientation);
@@ -120,9 +130,11 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
         _navigation.value = navigation;
       }
     });
+    _scheduleRotation();
     final active = WorkspaceActivity.isActive(context);
     if (_active == active) return;
     _active = active;
+    _syncRotationSubscription();
     _surfaceReady = false;
     final activityRequest = Object();
     _activityRequest = activityRequest;
@@ -151,6 +163,7 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
             _active &&
             identical(_activityRequest, activityRequest)) {
           setState(() => _surfaceReady = true);
+          _scheduleRotation();
         }
       } else {
         unawaited(_session.deactivate(this));
@@ -228,6 +241,8 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _resumed = state == AppLifecycleState.resumed;
+    _syncRotationSubscription();
     if (state != AppLifecycleState.resumed) _shortcuts.cancel();
     // A video can keep playing behind another workspace tab. System lifecycle
     // still applies to its owner even when the page has no visible surface.
@@ -241,6 +256,8 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
 
   @override
   void dispose() {
+    unawaited(_rotationSubscription?.cancel());
+    _rotationSubscription = null;
     WidgetsBinding.instance.removeObserver(this);
     _session.snapshots.removeListener(_updateFullScreenOrientation);
     _session.snapshots.removeListener(_onPlaybackCompleted);
@@ -256,6 +273,12 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
 
   void _dismissFullScreen() {
     _shortcuts.cancel();
+    final portraitRequest = _portraitRequest;
+    _portraitRequest = null;
+    _rotation.reset();
+    if (portraitRequest != null) {
+      unawaited(_setWindowFullScreen(portraitRequest, false));
+    }
     final request = _fullScreenRequest;
     _fullScreenRequest = null;
     // A disposed Navigator may never complete push(). Release platform state
@@ -300,13 +323,31 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
           return;
         }
         _windowState.owner = request;
+        _portraitRequest = null;
         await widget.window.setFullScreen(
           true,
           orientation: _fullScreenOrientation,
         );
       } else if (identical(_windowState.owner, request)) {
-        await widget.window.setFullScreen(false);
-        if (identical(_windowState.owner, request)) _windowState.owner = null;
+        final keepPortrait =
+            mounted && _active && _resumed && _rotation.returnToPortrait;
+        await widget.window.setFullScreen(
+          false,
+          orientation: keepPortrait ? FullScreenOrientation.portrait : null,
+        );
+        if (keepPortrait &&
+            mounted &&
+            _rotationEligible &&
+            _rotation.returnToPortrait &&
+            !_rotation.canReleasePortrait) {
+          _portraitRequest = request;
+          _scheduleRotation();
+        } else if (identical(_windowState.owner, request)) {
+          // A platform reply may arrive after disposal, suspension or a physical
+          // turn. Never let that late reply strand a portrait restriction.
+          if (keepPortrait) await widget.window.setFullScreen(false);
+          _windowState.owner = null;
+        }
       }
     });
     _windowState.commands = operation.then(
@@ -327,7 +368,10 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
   }
 
   FullScreenOrientation? get _preferredFullScreenOrientation {
-    if (widget.window.hasDesktopWindow) return null;
+    if (widget.window.hasDesktopWindow ||
+        _rotation.rotation?.supported == false) {
+      return null;
+    }
     final display = View.of(context).display;
     // Orientation locks can letterbox tablets. Use the physical display rather
     // than the app viewport, which can already be narrowed by compatibility mode
@@ -343,9 +387,92 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
   }
 
   @override
-  void didChangeMetrics() => _updateFullScreenOrientation();
+  void didChangeMetrics() {
+    _updateFullScreenOrientation();
+    _scheduleRotation();
+  }
+
+  bool get _rotationEligible {
+    if (widget.window.hasDesktopWindow ||
+        !_active ||
+        !_resumed ||
+        !_surfaceReady ||
+        !_session.ownsPlayback(this) ||
+        _session.isResolving ||
+        _rotation.rotation?.supported == false) {
+      return false;
+    }
+    final view = View.of(context);
+    return view.display.size.shortestSide / view.display.devicePixelRatio <
+            600 &&
+        MediaQuery.of(context).displayFeatures.isEmpty &&
+        _videoOrientation == FullScreenOrientation.landscape;
+  }
+
+  void _syncRotationSubscription() {
+    if (_active && _resumed && !widget.window.hasDesktopWindow) {
+      _rotationSubscription ??= ref
+          .read(deviceRotationProvider)
+          .listen(
+            (rotation) {
+              _rotation.update(rotation);
+              _updateFullScreenOrientation();
+            },
+            // Unavailable hardware/channel disables automatic rotation only. Manual
+            // fullscreen remains usable (including unsupported desktop test hosts).
+            onError: (Object error, StackTrace stack) => _rotationUnavailable(),
+            onDone: _rotationUnavailable,
+          );
+    } else {
+      unawaited(_rotationSubscription?.cancel());
+      _rotationSubscription = null;
+      if (_active) {
+        _rotation.suspend();
+      } else {
+        _rotation.reset();
+      }
+      final request = _portraitRequest;
+      _portraitRequest = null;
+      if (request != null) unawaited(_setWindowFullScreen(request, false));
+    }
+  }
+
+  void _rotationUnavailable() {
+    _rotation.reset();
+    final request = _portraitRequest;
+    _portraitRequest = null;
+    if (request != null) unawaited(_setWindowFullScreen(request, false));
+  }
+
+  void _scheduleRotation() {
+    if (_rotationScheduled) return;
+    _rotationScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _rotationScheduled = false;
+      if (!mounted) return;
+      final request = _portraitRequest;
+      if (request != null &&
+          (_rotation.canReleasePortrait || !_rotationEligible)) {
+        _portraitRequest = null;
+        _rotation.returnToPortrait = false;
+        unawaited(_setWindowFullScreen(request, false));
+      }
+      if (!_rotationEligible) return;
+      if (_fullScreen) {
+        if (_rotation.shouldExit) unawaited(_exitFullScreen());
+      } else if (_rotation.shouldEnter(
+            viewportLandscape:
+                MediaQuery.orientationOf(context) == Orientation.landscape,
+          ) &&
+          ModalRoute.of(context)?.isCurrent == true) {
+        unawaited(_enterFullScreen());
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
 
   void _updateFullScreenOrientation() {
+    _scheduleRotation();
     final request = _fullScreenRequest;
     if (request == null ||
         !_fullScreen ||
@@ -365,6 +492,7 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
     _shortcuts.cancel();
     final request = Object();
     final providerContainer = ProviderScope.containerOf(context);
+    _rotation.entered();
     _fullScreenOrientation = _preferredFullScreenOrientation;
     _fullScreenRequest = request;
     setState(() => _fullScreen = true);
@@ -428,9 +556,13 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
       _fullScreenRoute = null;
       _fullScreenNavigator = null;
       await WidgetsBinding.instance.endOfFrame;
+      if (mounted && _rotationEligible) _rotation.exited();
       await _setWindowFullScreen(request, false);
       _fullScreenOrientation = null;
-      if (mounted) setState(() => _fullScreen = false);
+      if (mounted) {
+        setState(() => _fullScreen = false);
+        _scheduleRotation();
+      }
     }
   }
 

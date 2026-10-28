@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:bili_player/bili_player.dart';
 import 'package:bilisail/app/theme.dart';
 import 'package:bilisail/core/platform/external_links.dart';
 import 'package:bilisail/features/video/application/video_extras_controller.dart';
@@ -50,6 +51,72 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../support/video_card_fake_engine.dart';
 
 void main() {
+  testWidgets('portrait layout reacts to dimensions, not position ticks', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 800);
+    tester.view.display.size = const Size(390, 800);
+    tester.view.display.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.display.reset);
+    const id = VideoId('BV1abc123456');
+    final video = await const _VideoRepository().loadDetail(
+      id,
+      cancellation: RequestCancellation(),
+    );
+    final session = _LayoutSession(video);
+    addTearDown(session.snapshots.dispose);
+    var builds = 0;
+    final container = ProviderContainer(
+      overrides: [
+        playbackSessionProvider.overrideWithValue(session),
+        authControllerProvider.overrideWith(_GuestAuthController.new),
+        videoRepositoryProvider.overrideWithValue(const _VideoRepository()),
+        videoExtrasRepositoryProvider.overrideWithValue(_ExtrasRepository()),
+      ],
+    );
+    addTearDown(container.dispose);
+    container.read(playbackSessionProvider);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: InputTestApp(
+          home: Scaffold(
+            body: VideoScreen(
+              id: id,
+              playerBuilder: (_, _, _) {
+                builds++;
+                return const SizedBox(key: ValueKey('portrait-layout-player'));
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final player = find.byKey(const ValueKey('portrait-layout-player'));
+    expect(tester.getSize(player).height, 390 * 9 / 16);
+    session.snapshots.value = session.snapshots.value.copyWith(
+      videoDimensions: const VideoDimensions(1080, 1920),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getSize(player).height, 520);
+    final buildsAfterDimensions = builds;
+    session.snapshots.value = session.snapshots.value.copyWith(
+      position: const Duration(seconds: 2),
+    );
+    await tester.pump();
+    expect(builds, buildsAfterDimensions);
+    session.snapshots.value = session.snapshots.value.copyWith(
+      videoDimensions: const VideoDimensions(1920, 1080),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getSize(player).height, 390 * 9 / 16);
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
   for (final (cached, comments, width) in [
     for (final cached in [false, true])
       for (final comments in [false, true])
@@ -2294,3 +2361,18 @@ List<VideoSummary> _manyRelated() => [
       previewCid: '${i + 100}',
     ),
 ];
+
+class _LayoutSession extends Fake implements PlaybackSession {
+  _LayoutSession(this.detail);
+
+  @override
+  final VideoDetail detail;
+
+  @override
+  VideoPart get part => detail.parts.first;
+
+  @override
+  final snapshots = ValueNotifier(
+    const PlaybackSnapshot(phase: PlaybackPhase.playing, generation: 1),
+  );
+}

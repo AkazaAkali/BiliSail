@@ -347,7 +347,9 @@ class WindowService {
     } else if (hasDesktopWindow) {
       await windowManager.setFullScreen(value);
     } else {
-      final requestedOrientation = value ? orientation : null;
+      // An explicit mobile exit can briefly retain portrait until physical
+      // posture catches up; a subsequent null request releases our lock.
+      final requestedOrientation = orientation;
       if (requestedOrientation != null || _mobileOrientationLocked) {
         await SystemChrome.setPreferredOrientations(
           switch (requestedOrientation) {

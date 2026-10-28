@@ -802,6 +802,55 @@ void main() {
     },
   );
 
+  test(
+    'mobile explicit exit holds portrait then releases only its own lock',
+    () async {
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+            calls.add(call);
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform, null);
+      });
+      final window = _MobileWindowService();
+      await window.setFullScreen(
+        true,
+        orientation: FullScreenOrientation.landscape,
+      );
+      expect(window.isFullScreen, isTrue);
+      await window.setFullScreen(
+        false,
+        orientation: FullScreenOrientation.portrait,
+      );
+      expect(window.isFullScreen, isFalse);
+      expect(calls.map((call) => call.method), [
+        'SystemChrome.setPreferredOrientations',
+        'SystemChrome.setEnabledSystemUIMode',
+        'SystemChrome.setPreferredOrientations',
+        'SystemChrome.setEnabledSystemUIMode',
+      ]);
+      expect(calls.map((call) => call.arguments), [
+        ['DeviceOrientation.landscapeLeft', 'DeviceOrientation.landscapeRight'],
+        'SystemUiMode.immersiveSticky',
+        ['DeviceOrientation.portraitUp'],
+        'SystemUiMode.edgeToEdge',
+      ]);
+      await window.setFullScreen(false);
+      expect(window.isFullScreen, isFalse);
+      expect(calls[4].method, 'SystemChrome.setPreferredOrientations');
+      expect(calls[4].arguments, isEmpty);
+      expect(calls[5].method, 'SystemChrome.setEnabledSystemUIMode');
+      expect(calls[5].arguments, 'SystemUiMode.edgeToEdge');
+      await window.setFullScreen(false);
+      expect(calls, hasLength(7));
+      expect(calls.last.method, 'SystemChrome.setEnabledSystemUIMode');
+      expect(calls.last.arguments, 'SystemUiMode.edgeToEdge');
+    },
+  );
+
   for (final orientation in FullScreenOrientation.values) {
     test(
       'mobile fullscreen applies $orientation and restores system policy',

@@ -20,6 +20,8 @@ import 'package:bilisail/shared/ui/playback_page_commands.dart';
 import 'package:bilisail/shared/ui/playback_navigation.dart';
 import 'package:bilisail/features/playback/application/playback_viewers_controller.dart';
 import 'package:bilisail/core/platform/window_service.dart';
+import 'package:bilisail/core/platform/device_rotation.dart';
+import 'package:bilisail/core/platform/device_rotation_service.dart';
 import 'package:bilisail/domain/request_cancellation.dart';
 import 'package:bilisail/domain/video.dart';
 import 'package:bilisail/features/playback/application/playback_session.dart';
@@ -1106,6 +1108,436 @@ void main() {
       );
     }
   }
+
+  for (final exclusion in [
+    'portrait video',
+    'square video',
+    'unknown dimensions',
+    'tablet',
+    'desktop',
+    'hidden page',
+    'system rotation lock',
+    'portrait viewport',
+  ]) {
+    testWidgets('automatic rotation excludes $exclusion', (tester) async {
+      tester.view.devicePixelRatio = 1;
+      _usePhoneDisplay(tester);
+      tester.view.physicalSize = exclusion == 'portrait viewport'
+          ? const Size(400, 800)
+          : const Size(800, 400);
+      if (exclusion == 'tablet') {
+        tester.view.display.size = const Size(1200, 800);
+      }
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final rotations = StreamController<DeviceRotation>.broadcast();
+      addTearDown(rotations.close);
+      final engine = _FakeEngine();
+      final session = _session(engine);
+      addTearDown(session.close);
+      final window = _FakeWindowService(desktop: exclusion == 'desktop');
+      await tester.pumpWidget(
+        _app(
+          session,
+          window,
+          const AppSettings.defaults(),
+          active: exclusion != 'hidden page',
+          deviceRotations: rotations.stream,
+        ),
+      );
+      await _pumpFrames(tester);
+      if (exclusion != 'unknown dimensions') {
+        engine._emit(
+          engine.currentSnapshot.copyWith(
+            videoDimensions: switch (exclusion) {
+              'portrait video' => const VideoDimensions(1080, 1920),
+              'square video' => const VideoDimensions(1080, 1080),
+              _ => const VideoDimensions(1920, 1080),
+            },
+          ),
+        );
+      }
+      rotations.add(
+        DeviceRotation(
+          DevicePosture.landscape,
+          autoRotate: exclusion != 'system rotation lock',
+        ),
+      );
+      await _pumpFrames(tester);
+      expect(window.fullScreen, isFalse);
+      expect(window.orientations, isEmpty);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+    });
+  }
+
+  testWidgets(
+    'physical phone rotation enters and exits without reopening playback',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      _usePhoneDisplay(tester);
+      tester.view.physicalSize = const Size(800, 400);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final rotations = StreamController<DeviceRotation>.broadcast();
+      addTearDown(rotations.close);
+      final engine = _FakeEngine();
+      final session = _session(engine);
+      addTearDown(session.close);
+      final window = _FakeWindowService(desktop: false);
+      await tester.pumpWidget(
+        _app(
+          session,
+          window,
+          const AppSettings.defaults(),
+          deviceRotations: rotations.stream,
+        ),
+      );
+      await _pumpFrames(tester);
+      engine._emit(
+        engine.currentSnapshot.copyWith(
+          videoDimensions: const VideoDimensions(1920, 1080),
+        ),
+      );
+      await session.seek(const Duration(seconds: 42));
+      final opens = engine.opens;
+      rotations.add(
+        const DeviceRotation(DevicePosture.landscape, autoRotate: true),
+      );
+      await _pumpFrames(tester);
+      expect(window.fullScreen, isTrue);
+      expect(window.orientations.last, FullScreenOrientation.landscape);
+      // Forced landscape viewport remains unchanged: only physical posture exits.
+      rotations.add(
+        const DeviceRotation(DevicePosture.portrait, autoRotate: true),
+      );
+      await _pumpFrames(tester);
+      expect(window.fullScreen, isFalse);
+      expect(window.orientations.last, isNull);
+      expect(engine.opens, opens);
+      expect(engine.currentSnapshot.position, const Duration(seconds: 42));
+      expect(engine.maxSurfaces, 1);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+    },
+  );
+
+  testWidgets(
+    'manual portrait fullscreen waits for an actual landscape to portrait turn',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      _usePhoneDisplay(tester);
+      tester.view.physicalSize = const Size(400, 800);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final rotations = StreamController<DeviceRotation>.broadcast();
+      addTearDown(rotations.close);
+      final engine = _FakeEngine();
+      final session = _session(engine);
+      addTearDown(session.close);
+      final window = _FakeWindowService(desktop: false);
+      await tester.pumpWidget(
+        _app(
+          session,
+          window,
+          const AppSettings.defaults(),
+          deviceRotations: rotations.stream,
+        ),
+      );
+      await _pumpFrames(tester);
+      engine._emit(
+        engine.currentSnapshot.copyWith(
+          videoDimensions: const VideoDimensions(1920, 1080),
+        ),
+      );
+      rotations.add(
+        const DeviceRotation(DevicePosture.portrait, autoRotate: true),
+      );
+      await _pumpFrames(tester);
+      await tester.tap(find.byTooltip('全屏（F）'));
+      await _pumpFrames(tester);
+      expect(window.fullScreen, isTrue);
+      expect(window.orientations.last, FullScreenOrientation.landscape);
+      tester.view.physicalSize = const Size(800, 400);
+      rotations.add(
+        const DeviceRotation(DevicePosture.portrait, autoRotate: true),
+      );
+      await _pumpFrames(tester);
+      expect(window.fullScreen, isTrue);
+      rotations.add(
+        const DeviceRotation(DevicePosture.landscape, autoRotate: true),
+      );
+      await _pumpFrames(tester);
+      rotations.add(
+        const DeviceRotation(DevicePosture.portrait, autoRotate: true),
+      );
+      await _pumpFrames(tester);
+      expect(window.fullScreen, isFalse);
+      expect(engine.opens, 1);
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+    },
+  );
+
+  for (final hide in [false, true]) {
+    testWidgets(
+      'explicit landscape exit releases portrait on ${hide ? 'hide' : 'physical portrait'}',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        _usePhoneDisplay(tester);
+        tester.view.physicalSize = const Size(800, 400);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final rotations = StreamController<DeviceRotation>.broadcast();
+        addTearDown(rotations.close);
+        final engine = _FakeEngine();
+        final session = _session(engine);
+        addTearDown(session.close);
+        final window = _FakeWindowService(desktop: false);
+        await tester.pumpWidget(
+          _app(
+            session,
+            window,
+            const AppSettings.defaults(),
+            deviceRotations: rotations.stream,
+          ),
+        );
+        await _pumpFrames(tester);
+        engine._emit(
+          engine.currentSnapshot.copyWith(
+            videoDimensions: const VideoDimensions(1920, 1080),
+          ),
+        );
+        rotations.add(
+          const DeviceRotation(DevicePosture.landscape, autoRotate: true),
+        );
+        await _pumpFrames(tester);
+        await tester.tap(find.byTooltip('退出全屏（Esc）'));
+        await _pumpFrames(tester);
+        expect(window.fullScreen, isFalse);
+        expect(window.orientations.last, FullScreenOrientation.portrait);
+        await _pumpFrames(tester);
+        expect(window.fullScreen, isFalse);
+        if (hide) {
+          await tester.pumpWidget(
+            _app(
+              session,
+              window,
+              const AppSettings.defaults(),
+              active: false,
+              deviceRotations: rotations.stream,
+            ),
+          );
+        } else {
+          rotations.add(
+            const DeviceRotation(DevicePosture.portrait, autoRotate: true),
+          );
+        }
+        await _pumpFrames(tester);
+        expect(window.orientations.last, isNull);
+        expect(window.fullScreen, isFalse);
+        await tester.pumpWidget(const SizedBox());
+        await _pumpFrames(tester);
+      },
+    );
+  }
+
+  testWidgets(
+    'hiding during delayed portrait exit cannot leave an orientation lock',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      _usePhoneDisplay(tester);
+      tester.view.physicalSize = const Size(800, 400);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final rotations = StreamController<DeviceRotation>.broadcast();
+      addTearDown(rotations.close);
+      final engine = _FakeEngine();
+      final session = _session(engine);
+      addTearDown(session.close);
+      final window = _DelayedPortraitExitWindow();
+      await tester.pumpWidget(
+        _app(
+          session,
+          window,
+          const AppSettings.defaults(),
+          deviceRotations: rotations.stream,
+        ),
+      );
+      await _pumpFrames(tester);
+      engine._emit(
+        engine.currentSnapshot.copyWith(
+          videoDimensions: const VideoDimensions(1920, 1080),
+        ),
+      );
+      rotations.add(
+        const DeviceRotation(DevicePosture.landscape, autoRotate: true),
+      );
+      await _pumpFrames(tester);
+      expect(window.fullScreen, isTrue);
+      await tester.tap(find.byTooltip('退出全屏（Esc）'));
+      await _pumpFrames(tester);
+      expect(window.portraitRequested, isTrue);
+      await tester.pumpWidget(
+        _app(
+          session,
+          window,
+          const AppSettings.defaults(),
+          active: false,
+          deviceRotations: rotations.stream,
+        ),
+      );
+      await _pumpFrames(tester);
+      window.gate.complete();
+      await _pumpFrames(tester);
+      expect(window.fullScreen, isFalse);
+      expect(window.orientations.last, isNull);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+    },
+  );
+
+  for (final scenario in [
+    'unsupported window',
+    'stream error',
+    'background turn',
+  ]) {
+    testWidgets(
+      'mobile rotation handles $scenario without leaking orientation',
+      (tester) async {
+        _resumeApp(tester);
+        addTearDown(() => _resumeApp(tester));
+        tester.view.devicePixelRatio = 1;
+        _usePhoneDisplay(tester);
+        tester.view.physicalSize = const Size(800, 400);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final rotations = StreamController<DeviceRotation>.broadcast();
+        addTearDown(rotations.close);
+        final engine = _FakeEngine();
+        final session = _session(engine);
+        addTearDown(session.close);
+        final window = _FakeWindowService(desktop: false);
+        await tester.pumpWidget(
+          _app(
+            session,
+            window,
+            const AppSettings.defaults(),
+            deviceRotations: rotations.stream,
+          ),
+        );
+        await _pumpFrames(tester);
+        engine._emit(
+          engine.currentSnapshot.copyWith(
+            videoDimensions: const VideoDimensions(1920, 1080),
+          ),
+        );
+        rotations.add(
+          const DeviceRotation(DevicePosture.landscape, autoRotate: true),
+        );
+        await _pumpFrames(tester);
+        expect(window.fullScreen, isTrue);
+        if (scenario == 'unsupported window') {
+          rotations.add(
+            const DeviceRotation(
+              DevicePosture.unknown,
+              autoRotate: true,
+              supported: false,
+            ),
+          );
+          await _pumpFrames(tester);
+          expect(window.fullScreen, isTrue);
+          expect(window.orientations.last, isNull);
+        } else if (scenario == 'stream error') {
+          await tester.tap(find.byTooltip('退出全屏（Esc）'));
+          await _pumpFrames(tester);
+          expect(window.orientations.last, FullScreenOrientation.portrait);
+          rotations.addError(StateError('sensor unavailable'));
+          await _pumpFrames(tester);
+          expect(window.fullScreen, isFalse);
+          expect(window.orientations.last, isNull);
+        } else {
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.inactive,
+          );
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.hidden,
+          );
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.paused,
+          );
+          await _pumpFrames(tester);
+          expect(rotations.hasListener, isFalse);
+          _resumeApp(tester);
+          await _pumpFrames(tester);
+          rotations.add(
+            const DeviceRotation(DevicePosture.portrait, autoRotate: true),
+          );
+          await _pumpFrames(tester);
+          expect(window.fullScreen, isFalse);
+          expect(window.orientations.last, isNull);
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        await _pumpFrames(tester);
+      },
+    );
+  }
+
+  testWidgets(
+    'portrait video manual fullscreen remains portrait through physical turns',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      _usePhoneDisplay(tester);
+      tester.view.physicalSize = const Size(400, 800);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final rotations = StreamController<DeviceRotation>.broadcast();
+      addTearDown(rotations.close);
+      final engine = _FakeEngine();
+      final session = _session(engine);
+      addTearDown(session.close);
+      final window = _FakeWindowService(desktop: false);
+      await tester.pumpWidget(
+        _app(
+          session,
+          window,
+          const AppSettings.defaults(),
+          deviceRotations: rotations.stream,
+        ),
+      );
+      await _pumpFrames(tester);
+      engine._emit(
+        engine.currentSnapshot.copyWith(
+          videoDimensions: const VideoDimensions(1080, 1920),
+        ),
+      );
+      await tester.tap(find.byTooltip('全屏（F）'));
+      await _pumpFrames(tester);
+      expect(window.fullScreen, isTrue);
+      expect(window.orientations, [FullScreenOrientation.portrait]);
+      for (final posture in [
+        DevicePosture.portrait,
+        DevicePosture.landscape,
+        DevicePosture.portrait,
+      ]) {
+        rotations.add(DeviceRotation(posture, autoRotate: true));
+        await _pumpFrames(tester);
+        expect(window.fullScreen, isTrue);
+        expect(window.orientations, [FullScreenOrientation.portrait]);
+      }
+      await tester.tap(find.byTooltip('退出全屏（Esc）'));
+      await _pumpFrames(tester);
+      expect(window.fullScreen, isFalse);
+      expect(window.orientations.last, isNull);
+      expect(engine.opens, 1);
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+    },
+  );
 
   testWidgets('fullscreen releases the phone lock when its display unfolds', (
     tester,
@@ -5635,9 +6067,12 @@ Widget _app(
   VoidCallback? onHome,
   PlaybackViewerRepository? viewers,
   bool showNavigationInPlayer = false,
+  Stream<DeviceRotation>? deviceRotations,
 }) => ProviderScope(
   overrides: [
     playbackSessionProvider.overrideWithValue(session),
+    if (deviceRotations != null)
+      deviceRotationProvider.overrideWithValue(deviceRotations),
     settingsRepositoryProvider.overrideWithValue(_Settings()),
     playbackViewerRepositoryProvider.overrideWithValue(viewers),
   ],
@@ -5801,7 +6236,7 @@ final class _FakeWindowService extends WindowService {
     FullScreenOrientation? orientation,
   }) async {
     fullScreen = value;
-    orientations.add(value ? orientation : null);
+    orientations.add(orientation);
   }
 }
 
@@ -6223,5 +6658,28 @@ class _ViewerRepository implements PlaybackViewerRepository {
   }) async {
     reads.add(cid);
     return '92';
+  }
+}
+
+final class _DelayedPortraitExitWindow extends WindowService {
+  final gate = Completer<void>();
+  bool fullScreen = false;
+  bool portraitRequested = false;
+  final orientations = <FullScreenOrientation?>[];
+
+  @override
+  bool get hasDesktopWindow => false;
+
+  @override
+  Future<void> setFullScreen(
+    bool value, {
+    FullScreenOrientation? orientation,
+  }) async {
+    if (!value && orientation == FullScreenOrientation.portrait) {
+      portraitRequested = true;
+      await gate.future;
+    }
+    fullScreen = value;
+    orientations.add(orientation);
   }
 }
