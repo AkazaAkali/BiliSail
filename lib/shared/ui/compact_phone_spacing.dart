@@ -1,3 +1,5 @@
+import 'dart:ui' show DisplayFeatureType;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
@@ -12,7 +14,11 @@ bool isCompactPhoneLayout(BuildContext context) {
   final media = MediaQuery.of(context);
   return display.size.shortestSide / display.devicePixelRatio < 600 &&
       media.size.width < 600 &&
-      media.displayFeatures.isEmpty;
+      !media.displayFeatures.any(
+        (feature) =>
+            feature.type == DisplayFeatureType.fold ||
+            feature.type == DisplayFeatureType.hinge,
+      );
 }
 
 /// Tighten decorative gaps only when accessibility text has room to breathe.

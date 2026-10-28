@@ -1,3 +1,5 @@
+import 'dart:ui' show DisplayFeature, DisplayFeatureState, DisplayFeatureType;
+
 import 'package:flutter/foundation.dart';
 import 'package:bilisail/shared/ui/compact_phone_spacing.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +17,7 @@ void main() {
       Future<bool> compact({
         double displayWidth = 390,
         double scale = 1,
+        List<DisplayFeature> features = const [],
       }) async {
         tester.view.display.size = Size(displayWidth, 844);
         var result = false;
@@ -24,6 +27,7 @@ void main() {
               data: MediaQueryData(
                 size: const Size(390, 844),
                 textScaler: TextScaler.linear(scale),
+                displayFeatures: features,
               ),
               child: Builder(
                 builder: (context) {
@@ -43,6 +47,25 @@ void main() {
       expect(await compact(), mobile);
       expect(await compact(displayWidth: 800), isFalse);
       expect(await compact(scale: 2), isFalse);
+      for (final type in [
+        DisplayFeatureType.cutout,
+        DisplayFeatureType.fold,
+        DisplayFeatureType.hinge,
+      ]) {
+        expect(
+          await compact(
+            features: [
+              DisplayFeature(
+                bounds: const Rect.fromLTWH(180, 0, 30, 24),
+                type: type,
+                state: DisplayFeatureState.unknown,
+              ),
+            ],
+          ),
+          type == DisplayFeatureType.cutout && mobile,
+          reason: 'A camera cutout is not a fold or hinge: $type',
+        );
+      }
     },
     variant: TargetPlatformVariant({
       TargetPlatform.android,
