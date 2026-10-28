@@ -15,7 +15,7 @@ import '../../../shared/ui/video_card.dart';
 import '../application/library_controller.dart';
 import '../domain/library_repository.dart';
 
-final class HistoryScreen extends ConsumerWidget {
+final class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key, this.showHeading = true});
 
   final bool showHeading;
@@ -104,7 +104,14 @@ final class HistoryScreen extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+final class _HistoryScreenState extends ConsumerState<HistoryScreen> {
+  bool _searchExpanded = false;
+
+  @override
+  Widget build(BuildContext context) {
     final history = ref.watch(historyProvider);
     final controller = ref.read(historyProvider.notifier);
     return PagedScrollViewport(
@@ -128,7 +135,7 @@ final class HistoryScreen extends ConsumerWidget {
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverCardGridPadding(
-              top: showHeading ? 16 : 8,
+              top: widget.showHeading ? 16 : 8,
               bottom: 84,
               sliver: SliverMainAxisGroup(
                 slivers: [
@@ -150,6 +157,7 @@ final class HistoryScreen extends ConsumerWidget {
                               repository.accountScope.startsWith('user:') &&
                               history.items.asData != null &&
                               !history.writeBusy &&
+                              !history.preview &&
                               !history.writeUncertain;
                           final icon = history.writeBusy
                               ? const SizedBox.square(
@@ -160,7 +168,7 @@ final class HistoryScreen extends ConsumerWidget {
                                 )
                               : const Icon(Icons.delete_sweep_outlined);
                           final action = enabled
-                              ? () => _confirmClear(context, ref)
+                              ? () => HistoryScreen._confirmClear(context, ref)
                               : null;
                           return Row(
                             crossAxisAlignment: CrossAxisAlignment.center,
@@ -170,7 +178,7 @@ final class HistoryScreen extends ConsumerWidget {
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
                                   children: [
-                                    if (showHeading) ...[
+                                    if (widget.showHeading) ...[
                                       Text(
                                         '观看历史',
                                         style: Theme.of(context)
@@ -194,7 +202,29 @@ final class HistoryScreen extends ConsumerWidget {
                                   ],
                                 ),
                               ),
-                              const SizedBox(width: 12),
+                              IconButton(
+                                key: const ValueKey('history-search-toggle'),
+                                tooltip: _searchExpanded ? '取消历史搜索' : '搜索观看历史',
+                                isSelected: history.query.isNotEmpty,
+                                onPressed: history.writeBusy
+                                    ? null
+                                    : () {
+                                        setState(
+                                          () => _searchExpanded =
+                                              !_searchExpanded,
+                                        );
+                                        if (!_searchExpanded &&
+                                            history.query.isNotEmpty) {
+                                          controller.search('');
+                                        }
+                                      },
+                                icon: const Icon(Icons.search),
+                                selectedIcon: const Icon(Icons.search),
+                                constraints: const BoxConstraints(
+                                  minWidth: 48,
+                                  minHeight: 48,
+                                ),
+                              ),
                               if (showClearLabel)
                                 TextButton.icon(
                                   key: const ValueKey('history-clear'),
@@ -228,7 +258,40 @@ final class HistoryScreen extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  const SliverToBoxAdapter(child: _HistorySearchField()),
+                  if (_searchExpanded || history.query.isNotEmpty)
+                    const SliverToBoxAdapter(child: _HistorySearchField()),
+                  if (history.preview)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                history.refreshError != null
+                                    ? '仅显示已获取记录的本地预览，云端查询失败'
+                                    : history.refreshing
+                                    ? '已获取记录的本地预览，正在查询云端…'
+                                    : '已获取记录的本地预览，请刷新确认云端记录',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ),
+                            if (history.refreshing)
+                              const SizedBox.square(
+                                dimension: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            if (!history.refreshing && !history.writeBusy)
+                              TextButton(
+                                onPressed: controller.refresh,
+                                child: const Text('重试'),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
                   const _HistoryEntriesSliver(),
                   SliverToBoxAdapter(
                     child: Column(
@@ -279,9 +342,10 @@ final class _HistoryEntriesSliver extends ConsumerWidget {
     final items = ref.watch(historyProvider.select((state) => state.items));
     final controller = ref.read(historyProvider.notifier);
     final query = ref.watch(historyProvider.select((state) => state.query));
+    final preview = ref.watch(historyProvider.select((state) => state.preview));
     final writeBlocked = ref.watch(
       historyProvider.select(
-        (state) => state.writeBusy || state.writeUncertain,
+        (state) => state.writeBusy || state.writeUncertain || state.preview,
       ),
     );
     return items.when(
@@ -302,7 +366,11 @@ final class _HistoryEntriesSliver extends ConsumerWidget {
               child: SizedBox(
                 height: 280,
                 child: StateView.empty(
-                  message: query.isEmpty ? '还没有云端观看记录' : '没有找到相关的云端观看记录',
+                  message: preview
+                      ? '已获取的记录中暂无匹配；云端结果尚未确认'
+                      : query.isEmpty
+                      ? '还没有云端观看记录'
+                      : '没有找到相关的云端观看记录',
                 ),
               ),
             )
@@ -412,7 +480,7 @@ final class _HistorySearchFieldState
           if (history.query.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
-              '“${history.query}” 的云端搜索结果（视频与影视）；范围以服务器保留的记录为准。',
+              '搜索：${history.query}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],

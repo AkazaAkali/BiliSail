@@ -18,6 +18,9 @@ final historyProvider =
 final class HistoryState {
   const HistoryState({
     this.query = '',
+    this.preview = false,
+    this.refreshing = false,
+    this.refreshError,
     this.items = const AsyncLoading(),
     this.hasMore = false,
     this.loadingMore = false,
@@ -27,6 +30,8 @@ final class HistoryState {
     this.writeUncertain = false,
   });
   final String query;
+  final bool preview, refreshing;
+  final Object? refreshError;
   final AsyncValue<List<WatchHistoryEntry>> items;
   final bool hasMore, loadingMore, limitReached;
   final Object? pageError;
@@ -34,6 +39,8 @@ final class HistoryState {
 
   HistoryState withWrite({required bool busy, bool? uncertain}) => HistoryState(
     query: query,
+    preview: preview,
+    refreshError: refreshError,
     items: items,
     hasMore: hasMore,
     pageError: pageError,
@@ -52,10 +59,12 @@ final class HistoryController extends Notifier<HistoryState> {
   int _emptyPages = 0;
   String _scope = '';
   int _epoch = 0;
+  List<WatchHistoryEntry> _cachedEntries = const [];
 
   @override
   HistoryState build() {
     ref.watch(libraryRepositoryProvider);
+    _cachedEntries = const [];
     ref.onDispose(() {
       _generation++;
       _cancellation?.cancel();
@@ -80,8 +89,9 @@ final class HistoryController extends Notifier<HistoryState> {
 
   List<WatchHistoryEntry> _merge(
     List<WatchHistoryEntry> before,
-    List<WatchHistoryEntry> incoming,
-  ) {
+    List<WatchHistoryEntry> incoming, {
+    bool newestFirst = false,
+  }) {
     final entries = <(String, String, String?), WatchHistoryEntry>{};
     for (final entry in [...before, ...incoming]) {
       final key = (entry.video.id.value, entry.part.cid, entry.episodeId);
@@ -90,7 +100,9 @@ final class HistoryController extends Notifier<HistoryState> {
         entries[key] = entry;
       }
     }
-    return List.unmodifiable(entries.values.take(maxEntries));
+    final ordered = entries.values.toList();
+    if (newestFirst) ordered.sort((a, b) => b.watchedAt.compareTo(a.watchedAt));
+    return List.unmodifiable(ordered.take(maxEntries));
   }
 
   void _accept(
@@ -98,6 +110,8 @@ final class HistoryController extends Notifier<HistoryState> {
     List<WatchHistoryEntry> items,
     int beforeCount,
   ) {
+    // Memory-only, bounded to records already fetched for this account.
+    _cachedEntries = _merge(page.items, _cachedEntries, newestFirst: true);
     _cursor = page.nextCursor;
     if (_cursor case final cursor?) _seenCursors.add(cursor);
     _emptyPages = items.length == beforeCount ? _emptyPages + 1 : 0;
@@ -145,9 +159,29 @@ final class HistoryController extends Notifier<HistoryState> {
     _cursor = null;
     _seenCursors.clear();
     _emptyPages = 0;
-    _scope = ref.read(libraryRepositoryProvider).accountScope;
-    _epoch = ref.read(sessionEpochProvider)();
-    state = HistoryState(query: query, writeUncertain: uncertain);
+    final scope = ref.read(libraryRepositoryProvider).accountScope;
+    final epoch = ref.read(sessionEpochProvider)();
+    if (_scope != scope || _epoch != epoch) _cachedEntries = const [];
+    _scope = scope;
+    _epoch = epoch;
+    final needle = query.toLowerCase();
+    final preview = _cachedEntries
+        .where(
+          (entry) =>
+              needle.isEmpty ||
+              entry.video.title.toLowerCase().contains(needle) ||
+              entry.video.author.toLowerCase().contains(needle) ||
+              entry.part.title.toLowerCase().contains(needle),
+        )
+        .toList(growable: false);
+    final showPreview = query.isNotEmpty || _cachedEntries.isNotEmpty;
+    state = HistoryState(
+      query: query,
+      items: showPreview ? AsyncData(preview) : const AsyncLoading(),
+      preview: showPreview,
+      refreshing: showPreview,
+      writeUncertain: uncertain,
+    );
     try {
       final page = await _loadPage(cancellation: cancellation);
       if (!_current(generation, cancellation)) return;
@@ -160,7 +194,9 @@ final class HistoryController extends Notifier<HistoryState> {
       }
       state = HistoryState(
         query: state.query,
-        items: AsyncError(error, stack),
+        items: showPreview ? AsyncData(preview) : AsyncError(error, stack),
+        preview: showPreview,
+        refreshError: showPreview ? error : null,
         writeUncertain: uncertain,
       );
     }
@@ -216,7 +252,10 @@ final class HistoryController extends Notifier<HistoryState> {
   Future<bool> clear() => _write(null);
 
   Future<bool> _write(String? deletionKey) async {
-    if (!ref.mounted || state.writeBusy || state.items.asData == null) {
+    if (!ref.mounted ||
+        state.writeBusy ||
+        state.preview ||
+        state.items.asData == null) {
       return false;
     }
     if (state.writeUncertain) throw const HistoryWriteUncertain();
@@ -240,6 +279,11 @@ final class HistoryController extends Notifier<HistoryState> {
         await mutations.deleteHistory(deletionKey, cancellation: cancellation);
       }
       if (!_current(generation, cancellation)) return false;
+      _cachedEntries = deletionKey == null
+          ? const []
+          : _cachedEntries
+                .where((entry) => entry.deletionKey != deletionKey)
+                .toList(growable: false);
       if (deletionKey == null) {
         _cursor = null;
         _seenCursors.clear();
@@ -265,6 +309,8 @@ final class HistoryController extends Notifier<HistoryState> {
       return true;
     } on HistoryWriteUncertain {
       if (!_current(generation, cancellation)) return false;
+      // Unknown writes must not seed a later optimistic preview.
+      _cachedEntries = const [];
       state = state.withWrite(busy: false, uncertain: true);
       rethrow;
     } on AppFailure catch (failure) {

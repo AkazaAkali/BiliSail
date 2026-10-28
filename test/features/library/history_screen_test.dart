@@ -23,6 +23,9 @@ void main() {
       final repository = _HistoryRepository(_entries());
       await _pump(tester, repository);
       final field = find.byKey(const ValueKey('history-search'));
+      expect(field, findsNothing);
+      await tester.tap(find.byKey(const ValueKey('history-search-toggle')));
+      await tester.pumpAndSettle();
       await tester.enterText(field, '  没有的视频  ');
       await tester.pump();
       expect(repository.searches, isEmpty);
@@ -30,7 +33,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(repository.searches, ['没有的视频']);
       expect(find.text('没有找到相关的云端观看记录'), findsOneWidget);
-      expect(find.textContaining('范围以服务器保留的记录为准'), findsOneWidget);
+      expect(find.text('搜索：没有的视频'), findsOneWidget);
       await tester.tap(find.byTooltip('清除历史搜索'));
       await tester.pumpAndSettle();
       expect(find.byType(VideoCard), findsNWidgets(2));
@@ -39,6 +42,10 @@ void main() {
       await tester.tap(find.byTooltip('搜索观看历史'));
       await tester.pumpAndSettle();
       expect(repository.searches, ['没有的视频', '按钮提交']);
+      await tester.tap(find.byTooltip('取消历史搜索'));
+      await tester.pumpAndSettle();
+      expect(field, findsNothing);
+      expect(find.byType(VideoCard), findsNWidgets(2));
       expect(tester.takeException(), isNull);
     },
   );
@@ -110,6 +117,13 @@ void main() {
         await tester.pumpAndSettle();
         expect(repository.clears, 1);
         expect(find.text('还没有云端观看记录'), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('history-search-toggle')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('history-search')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byTooltip('取消历史搜索'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('history-search')), findsNothing);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
       },
@@ -148,19 +162,25 @@ void main() {
           (tester.getCenter(caption).dy - tester.getCenter(clear).dy).abs(),
           lessThan(1),
         );
+        final search = find.byKey(const ValueKey('history-search-toggle'));
         expect(
-          tester.getRect(find.byKey(const ValueKey('history-search'))).top -
+          tester.getCenter(search).dy,
+          closeTo(tester.getCenter(clear).dy, 1),
+        );
+        expect(find.byKey(const ValueKey('history-search')), findsNothing);
+        expect(
+          tester.getRect(find.byType(VideoCard).first).top -
               tester.getRect(clear).bottom,
           closeTo(8, 1),
         );
-        expect(
-          tester.getRect(find.byType(VideoCard).first).top -
-              tester
-                  .getRect(find.byKey(const ValueKey('history-search')))
-                  .bottom,
-          closeTo(16, 1),
-        );
         if (config.scale == 1) expect(find.text('清空历史'), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('history-search-toggle')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('history-search')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byTooltip('取消历史搜索'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('history-search')), findsNothing);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
       },

@@ -90,7 +90,7 @@ void main() {
       final search = controller.search('  视频  ');
       expect(repository.calls.last.query, '视频');
       expect(repository.calls.last.cursor, isNull);
-      expect(container.read(historyProvider).items.isLoading, true);
+      expect(container.read(historyProvider).preview, true);
       repository.calls.last.result.complete(
         WatchHistoryPage([entry('2')], hasMore: true, nextCursor: '2'),
       );
@@ -189,6 +189,148 @@ void main() {
     },
   );
 
+  test(
+    'cached matches appear synchronously and cloud results correct them',
+    () async {
+      final controller = container.read(historyProvider.notifier);
+      final search = controller.search('视频');
+      expect(container.read(historyProvider).preview, true);
+      expect(container.read(historyProvider).refreshing, true);
+      expect(
+        container.read(historyProvider).items.requireValue.single.part.cid,
+        '1',
+      );
+      repository.calls.last.result.complete(
+        WatchHistoryPage([entry('2'), entry('2')], hasMore: false),
+      );
+      await search;
+      expect(container.read(historyProvider).preview, false);
+      expect(
+        container.read(historyProvider).items.requireValue.single.part.cid,
+        '2',
+      );
+    },
+  );
+
+  test(
+    'cloud failure keeps local matches and retry can confirm no results',
+    () async {
+      final controller = container.read(historyProvider.notifier);
+      final search = controller.search('作者');
+      repository.calls.last.result.completeError(StateError('offline'));
+      await search;
+      final failed = container.read(historyProvider);
+      expect(failed.items.requireValue.single.part.cid, '1');
+      expect(failed.preview, true);
+      expect(failed.refreshing, false);
+      expect(failed.refreshError, isA<StateError>());
+      final retry = controller.refresh();
+      repository.calls.last.result.complete(
+        const WatchHistoryPage([], hasMore: false),
+      );
+      await retry;
+      expect(container.read(historyProvider).preview, false);
+      expect(container.read(historyProvider).items.requireValue, isEmpty);
+    },
+  );
+
+  test(
+    'preview cache is bounded and retains watch-date order across pages',
+    () async {
+      final controller = container.read(historyProvider.notifier);
+      final more = controller.loadMore();
+      repository.calls.last.result.complete(
+        WatchHistoryPage([
+          for (var i = 2; i <= 501; i++) entry('$i', day: 4),
+        ], hasMore: false),
+      );
+      await more;
+      final search = controller.search('视频');
+      final preview = container.read(historyProvider).items.requireValue;
+      expect(preview, hasLength(500));
+      expect(preview.first.watchedAt.isAfter(preview.last.watchedAt), true);
+      repository.calls.last.result.complete(
+        const WatchHistoryPage([], hasMore: false),
+      );
+      await search;
+    },
+  );
+
+  test(
+    'preview records cannot cancel the confirming cloud read with a write',
+    () async {
+      final controller = container.read(historyProvider.notifier);
+      final search = controller.search('视频');
+      final pending = repository.calls.last;
+      expect(
+        await controller.delete(
+          container.read(historyProvider).items.requireValue.single,
+        ),
+        false,
+      );
+      expect(await controller.clear(), false);
+      expect(pending.token.isCancelled, false);
+      pending.result.complete(WatchHistoryPage([entry('1')], hasMore: false));
+      await search;
+      final restore = controller.search('');
+      expect(
+        await controller.delete(
+          container.read(historyProvider).items.requireValue.single,
+        ),
+        false,
+      );
+      expect(repository.calls.last.token.isCancelled, false);
+      repository.calls.last.result.complete(
+        WatchHistoryPage([entry('1')], hasMore: true, nextCursor: 'restored'),
+      );
+      await restore;
+      expect(container.read(historyProvider).preview, false);
+      expect(container.read(historyProvider).hasMore, true);
+    },
+  );
+
+  test('empty local match remains unconfirmed until cloud completes', () async {
+    final controller = container.read(historyProvider.notifier);
+    final search = controller.search('not fetched');
+    expect(container.read(historyProvider).items.requireValue, isEmpty);
+    expect(container.read(historyProvider).preview, true);
+    repository.calls.last.result.complete(
+      WatchHistoryPage([entry('3')], hasMore: false),
+    );
+    await search;
+    expect(
+      container.read(historyProvider).items.requireValue.single.part.cid,
+      '3',
+    );
+  });
+
+  test(
+    'delete and clear invalidate preview records without fetching extra pages',
+    () async {
+      final controller = container.read(historyProvider.notifier);
+      expect(
+        await controller.delete(
+          container.read(historyProvider).items.requireValue.single,
+        ),
+        true,
+      );
+      final search = controller.search('视频');
+      expect(container.read(historyProvider).items.requireValue, isEmpty);
+      expect(repository.calls, hasLength(2));
+      repository.calls.last.result.complete(
+        WatchHistoryPage([entry('2')], hasMore: false),
+      );
+      await search;
+      expect(await controller.clear(), true);
+      final again = controller.search('视频');
+      expect(container.read(historyProvider).items.requireValue, isEmpty);
+      repository.calls.last.result.complete(
+        const WatchHistoryPage([], hasMore: false),
+      );
+      await again;
+    },
+  );
+
   for (final changeAccount in [true, false]) {
     test(
       'search rejects stale ${changeAccount ? 'account' : 'epoch'} response',
@@ -204,8 +346,9 @@ void main() {
           WatchHistoryPage([entry('9')], hasMore: false),
         );
         await search;
-        expect(container.read(historyProvider).items.isLoading, true);
-        final next = controller.search('new');
+        expect(container.read(historyProvider).preview, true);
+        final next = controller.search('视频');
+        expect(container.read(historyProvider).items.requireValue, isEmpty);
         repository.calls.last.result.complete(
           const WatchHistoryPage([], hasMore: false),
         );
