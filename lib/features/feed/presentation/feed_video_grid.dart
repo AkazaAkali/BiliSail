@@ -129,6 +129,7 @@ final class _FeedVideoCardState extends ConsumerState<_FeedVideoCard> {
     // only for unchanged immutable data; cache lifetime is the mounted tile,
     // not the entire loaded feed. Inherited theme/activity still reach it.
     return _card ??= VideoCard(
+      groupPhoneContent: true,
       key: ValueKey(widget.video.id),
       video: widget.video,
       onTap: () => context.go('/video/${widget.video.id.value}'),

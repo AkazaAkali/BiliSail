@@ -7,6 +7,7 @@ import 'video_card_cover.dart';
 import 'video_card_interaction_scope.dart';
 import 'scroll_aware_hover_region.dart';
 import 'video_card_feedback.dart';
+import 'compact_phone_spacing.dart';
 export 'video_card_feedback.dart' show VideoCardFeedback;
 import '../../features/video/domain/video_card_interactions.dart';
 import '../../core/presentation/workspace_activity.dart';
@@ -97,6 +98,7 @@ final class VideoCard extends StatefulWidget {
     this.menu,
     this.feedback,
     this.showWatchLaterButton = true,
+    this.groupPhoneContent = false,
   });
 
   final ValueChanged<UserId>? onOpenUser;
@@ -114,6 +116,9 @@ final class VideoCard extends StatefulWidget {
   final VideoCardMenu? menu;
   final VideoCardFeedback? feedback;
   final bool showWatchLaterButton;
+
+  /// Opt-in for home feed grouping; other lists retain their existing surface.
+  final bool groupPhoneContent;
 
   // Home/history mappings may recreate a summary without changing its content.
   // Compare everything consumed by this card and its preview, not callbacks:
@@ -144,6 +149,7 @@ final class VideoCard extends StatefulWidget {
     publishText,
     publishTooltip,
     showWatchLaterButton,
+    groupPhoneContent,
     menu != null,
     menu?.busy,
     menu?.onSelected != null,
@@ -209,6 +215,7 @@ final class _VideoCardState extends State<VideoCard> {
   Widget _buildCard(BuildContext context, double cardWidth) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final grouped = widget.groupPhoneContent && isCompactPhoneLayout(context);
     final video = widget.video;
     final playLabel = compactCountLabel(video.playCount, widget.playCountText);
     final danmakuLabel = compactCountLabel(
@@ -230,11 +237,15 @@ final class _VideoCardState extends State<VideoCard> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: _focused ? scheme.primary : Colors.transparent,
+            color: _focused
+                ? scheme.primary
+                : grouped
+                ? scheme.outlineVariant.withValues(alpha: .55)
+                : Colors.transparent,
           ),
         ),
         child: Material(
-          color: Colors.transparent,
+          color: grouped ? scheme.surfaceContainerLow : Colors.transparent,
           borderRadius: BorderRadius.circular(7),
           clipBehavior: Clip.none,
           child: InkWell(
@@ -339,7 +350,9 @@ final class _VideoCardState extends State<VideoCard> {
                   },
                 ),
                 Padding(
-                  padding: const EdgeInsets.only(top: 9, bottom: 1),
+                  padding: grouped
+                      ? const EdgeInsets.fromLTRB(8, 9, 8, 8)
+                      : const EdgeInsets.only(top: 9, bottom: 1),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
