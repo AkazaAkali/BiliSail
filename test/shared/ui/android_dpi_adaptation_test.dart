@@ -202,6 +202,7 @@ void main() {
 }
 
 void _resetView(WidgetTester tester) {
+  addTearDown(tester.view.display.reset);
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetPadding);
@@ -218,6 +219,10 @@ void _configure(
 ) {
   tester.view.devicePixelRatio = ratio;
   tester.view.physicalSize = logicalSize * ratio;
+  // These cases model a full-screen phone, not a small viewport on the test
+  // runner's default tablet display. Keep both coordinate systems consistent.
+  tester.view.display.devicePixelRatio = ratio;
+  tester.view.display.size = logicalSize * ratio;
   final insets = FakeViewPadding(top: 24 * ratio, bottom: 24 * ratio);
   tester.view.padding = insets;
   tester.view.viewPadding = insets;

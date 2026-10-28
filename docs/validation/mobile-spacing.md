@@ -16,6 +16,7 @@
 - 本次 6 个 Dart 文件格式检查与静态分析（No issues found）。
 - `flutter test --no-pub test/shared/ui/compact_phone_spacing_test.dart test/app/shell_layout_test.dart test/features/video/video_screen_test.dart`：113 项通过。
 - `git diff --check`。
+- 整合回归发现旧 Android DPI fixture 只设置窗口尺寸，未同步物理显示尺寸。补齐 `TestDisplay` 尺寸/DPR 和 teardown 后，上述测试与 `android_dpi_adaptation_test.dart` 共 242 项通过；最终 DPI 文件单独重跑 129 项通过。不改产品逻辑或几何断言。
 
 覆盖手机首页工具栏、搜索框尺寸、频道按钮尺寸、视频详情分隔与作者区域尺寸，以及 Android/iOS/Windows、平板显示和大字条件的 widget 测试。相关既有首页布局与视频页面测试一起回归。
 
