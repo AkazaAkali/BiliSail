@@ -30,6 +30,7 @@ import '../shared/ui/playback_navigation.dart';
 import '../shared/ui/app_dialog.dart';
 import '../shared/ui/paging_tab_strip.dart';
 import '../shared/ui/page_tab_style.dart';
+import '../shared/ui/compact_phone_spacing.dart';
 import '../shared/ui/retained_tab_view.dart';
 import '../shared/ui/primary_navigation_transition.dart';
 
@@ -1943,7 +1944,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
     final tabs = channelsForSection(section, compact: _compactChannels);
     final equalWidthTabs = compact && section == WorkspaceSection.dynamic;
     return SizedBox(
-      height: PageTabStyle.barHeight,
+      height: useCompactPhoneSpacing(context) ? 50 : PageTabStyle.barHeight,
       child: LayoutBuilder(
         builder: (context, constraints) => _horizontalTabs(
           key: const ValueKey('home-channel-strip'),
@@ -2076,7 +2077,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
 
   Widget _tools(BuildContext context) => SizedBox(
     key: const ValueKey('workspace-common-tools'),
-    height: 52,
+    height: useCompactPhoneSpacing(context) ? 48 : 52,
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(

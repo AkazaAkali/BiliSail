@@ -8,6 +8,46 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('phone header reduces gaps without shrinking search or tabs', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.display.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    addTearDown(tester.view.display.reset);
+    Future<void> show(double displayWidth) async {
+      tester.view.display.size = Size(displayWidth, 844);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BiliAppShell(
+            location: '/',
+            navigationMode: WorkspaceNavigationMode.singlePage,
+            child: const SizedBox.expand(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    await show(390);
+    final tools = find.byKey(const ValueKey('workspace-common-tools'));
+    final search = find.byKey(const ValueKey('workspace-search'));
+    expect(tester.getSize(tools).height, 48);
+    final searchSize = tester.getSize(search);
+    final channel = find.byKey(const ValueKey('channel-recommended'));
+    final channelSize = tester.getSize(channel);
+    await show(800);
+    expect(tester.getSize(tools).height, 52);
+    expect(tester.getSize(search), searchSize);
+    expect(
+      tester.getSize(channel).height,
+      greaterThanOrEqualTo(channelSize.height),
+    );
+    expect(channelSize.height, greaterThanOrEqualTo(42));
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
   for (final dark in [false, true]) {
     testWidgets(
       'messages and downloads match normal bottom navigation in dark=$dark',

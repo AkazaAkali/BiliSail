@@ -108,6 +108,7 @@
 | [视频编解码设置](validation/video-codec-settings.md) | H.264/HEVC/AV1 偏好、自动/软件解码、SDK 差异与验证边界 |
 | [视频 CDN 与悬停恢复](validation/video-cdn.md) | 自动／运营商优先、旧设置兼容、备用地址／超时和前台恢复 |
 | [悬停预览加载延迟](validation/video-preview-loading.md) | 官网无音轨预览、cid 直传、CDN 顺序、启动预算、静止窗口与首帧切换 |
+| [手机首页与详情间距](validation/mobile-spacing.md) | 手机装饰留白收紧、桌面/平板/大字边界与测试 |
 | [播放控件与小窗布局](validation/responsive-player.md) | 单行工具栏、弹幕输入自适应、窄窗口布局和播放状态保留 |
 | [播放器顶部导航与人数](validation/player-top-navigation.md) | 返回／回主页的三种模式、全屏动作、UGC 正在观看人数与取消隔离 |
 | [移动端弹幕输入与键盘布局](validation/mobile-danmaku-keyboard-performance.md) | 高度变化局部布局、控件测量复用、直播弹幕缓存保留及结构对比 |

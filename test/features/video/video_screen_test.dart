@@ -50,6 +50,49 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../support/video_card_fake_engine.dart';
 
 void main() {
+  testWidgets('phone video information trims only decorative gaps', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.display.devicePixelRatio = 1;
+    tester.view.display.size = const Size(390, 844);
+    addTearDown(tester.view.reset);
+    addTearDown(tester.view.display.reset);
+    Future<void> show() async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            authControllerProvider.overrideWith(_GuestAuthController.new),
+            videoRepositoryProvider.overrideWithValue(const _VideoRepository()),
+            videoExtrasRepositoryProvider.overrideWithValue(
+              _ExtrasRepository(),
+            ),
+          ],
+          child: InputTestApp(
+            home: Scaffold(
+              body: VideoScreen(
+                id: const VideoId('BV1abc123456'),
+                playerBuilder: (_, _, _) => const SizedBox(),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    await show();
+    final separator = find.byKey(const ValueKey('video-info-separator-intro'));
+    expect(tester.widget<Divider>(separator).height, 20);
+    final author = tester.getSize(find.byType(VideoAuthorHeader));
+    tester.view.display.size = const Size(800, 844);
+    await show();
+    expect(tester.widget<Divider>(separator).height, 36);
+    expect(tester.getSize(find.byType(VideoAuthorHeader)), author);
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
   for (final (cached, comments, width) in [
     for (final cached in [false, true])
       for (final comments in [false, true])

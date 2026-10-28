@@ -11,6 +11,7 @@ import '../../../core/network/api_requests.dart';
 
 import '../../../shared/ui/playback_page_commands.dart';
 import '../../../shared/ui/width_layout_builder.dart';
+import '../../../shared/ui/compact_phone_spacing.dart';
 import '../../../domain/video.dart';
 import '../../../shared/ui/state_view.dart';
 import '../../../shared/ui/app_cover_image.dart';
@@ -254,7 +255,12 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                       child: widget.playerBuilder(context, video, selected),
                     );
                     final content = Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 16, 12, 0),
+                      padding: EdgeInsets.fromLTRB(
+                        12,
+                        useCompactPhoneSpacing(context) ? 12 : 16,
+                        12,
+                        0,
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -263,7 +269,9 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                             onLogin: widget.onLogin,
                             onOpenUser: widget.onOpenUser,
                           ),
-                          const SizedBox(height: 18),
+                          SizedBox(
+                            height: useCompactPhoneSpacing(context) ? 12 : 18,
+                          ),
                           Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -753,7 +761,7 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
 
   Widget _separator(String section) => Divider(
     key: ValueKey('video-info-separator-$section'),
-    height: 36,
+    height: useCompactPhoneSpacing(context) ? 20 : 36,
     thickness: 0.7,
     color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.55),
   );
