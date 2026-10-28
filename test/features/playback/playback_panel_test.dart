@@ -10,7 +10,13 @@ import 'package:bilisail/core/input/input_stroke.dart';
 import 'package:bilisail/core/input/shortcut_dispatcher.dart';
 
 import 'dart:async';
-import 'dart:ui' show PointerDeviceKind, Tristate;
+import 'dart:ui'
+    show
+        DisplayFeature,
+        DisplayFeatureType,
+        DisplayFeatureState,
+        PointerDeviceKind,
+        Tristate;
 
 import 'package:bili_danmaku/bili_danmaku.dart';
 import 'package:bilisail/app/router.dart';
@@ -1118,6 +1124,8 @@ void main() {
     'hidden page',
     'system rotation lock',
     'portrait viewport',
+    'fold',
+    'hinge',
   ]) {
     testWidgets('automatic rotation excludes $exclusion', (tester) async {
       tester.view.devicePixelRatio = 1;
@@ -1130,6 +1138,18 @@ void main() {
       }
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
+      if (exclusion == 'fold' || exclusion == 'hinge') {
+        tester.view.displayFeatures = [
+          DisplayFeature(
+            bounds: const Rect.fromLTWH(399, 0, 2, 400),
+            type: exclusion == 'fold'
+                ? DisplayFeatureType.fold
+                : DisplayFeatureType.hinge,
+            state: DisplayFeatureState.unknown,
+          ),
+        ];
+        addTearDown(tester.view.resetDisplayFeatures);
+      }
       final rotations = StreamController<DeviceRotation>.broadcast();
       addTearDown(rotations.close);
       final engine = _FakeEngine();
@@ -1172,57 +1192,69 @@ void main() {
     });
   }
 
-  testWidgets(
-    'physical phone rotation enters and exits without reopening playback',
-    (tester) async {
-      tester.view.devicePixelRatio = 1;
-      _usePhoneDisplay(tester);
-      tester.view.physicalSize = const Size(800, 400);
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final rotations = StreamController<DeviceRotation>.broadcast();
-      addTearDown(rotations.close);
-      final engine = _FakeEngine();
-      final session = _session(engine);
-      addTearDown(session.close);
-      final window = _FakeWindowService(desktop: false);
-      await tester.pumpWidget(
-        _app(
-          session,
-          window,
-          const AppSettings.defaults(),
-          deviceRotations: rotations.stream,
-        ),
-      );
-      await _pumpFrames(tester);
-      engine._emit(
-        engine.currentSnapshot.copyWith(
-          videoDimensions: const VideoDimensions(1920, 1080),
-        ),
-      );
-      await session.seek(const Duration(seconds: 42));
-      final opens = engine.opens;
-      rotations.add(
-        const DeviceRotation(DevicePosture.landscape, autoRotate: true),
-      );
-      await _pumpFrames(tester);
-      expect(window.fullScreen, isTrue);
-      expect(window.orientations.last, FullScreenOrientation.landscape);
-      // Forced landscape viewport remains unchanged: only physical posture exits.
-      rotations.add(
-        const DeviceRotation(DevicePosture.portrait, autoRotate: true),
-      );
-      await _pumpFrames(tester);
-      expect(window.fullScreen, isFalse);
-      expect(window.orientations.last, isNull);
-      expect(engine.opens, opens);
-      expect(engine.currentSnapshot.position, const Duration(seconds: 42));
-      expect(engine.maxSurfaces, 1);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-      await _pumpFrames(tester);
-    },
-  );
+  for (final cutout in [false, true]) {
+    testWidgets(
+      'physical phone rotation enters and exits without reopening playback cutout=$cutout',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        _usePhoneDisplay(tester);
+        tester.view.physicalSize = const Size(800, 400);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        if (cutout) {
+          tester.view.displayFeatures = const [
+            DisplayFeature(
+              bounds: Rect.fromLTWH(0, 180, 24, 40),
+              type: DisplayFeatureType.cutout,
+              state: DisplayFeatureState.unknown,
+            ),
+          ];
+          addTearDown(tester.view.resetDisplayFeatures);
+        }
+        final rotations = StreamController<DeviceRotation>.broadcast();
+        addTearDown(rotations.close);
+        final engine = _FakeEngine();
+        final session = _session(engine);
+        addTearDown(session.close);
+        final window = _FakeWindowService(desktop: false);
+        await tester.pumpWidget(
+          _app(
+            session,
+            window,
+            const AppSettings.defaults(),
+            deviceRotations: rotations.stream,
+          ),
+        );
+        await _pumpFrames(tester);
+        engine._emit(
+          engine.currentSnapshot.copyWith(
+            videoDimensions: const VideoDimensions(1920, 1080),
+          ),
+        );
+        await session.seek(const Duration(seconds: 42));
+        final opens = engine.opens;
+        rotations.add(
+          const DeviceRotation(DevicePosture.landscape, autoRotate: true),
+        );
+        await _pumpFrames(tester);
+        expect(window.fullScreen, isTrue);
+        expect(window.orientations.last, FullScreenOrientation.landscape);
+        // Forced landscape viewport remains unchanged: only physical posture exits.
+        rotations.add(
+          const DeviceRotation(DevicePosture.portrait, autoRotate: true),
+        );
+        await _pumpFrames(tester);
+        expect(window.fullScreen, isFalse);
+        expect(window.orientations.last, isNull);
+        expect(engine.opens, opens);
+        expect(engine.currentSnapshot.position, const Duration(seconds: 42));
+        expect(engine.maxSurfaces, 1);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        await _pumpFrames(tester);
+      },
+    );
+  }
 
   testWidgets(
     'paused fullscreen defers physical portrait exit until its modal closes',

@@ -1,3 +1,4 @@
+import 'dart:ui' show DisplayFeatureType;
 import 'dart:async';
 
 import 'package:bili_danmaku/bili_danmaku.dart';
@@ -408,7 +409,11 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
     final view = View.of(context);
     return view.display.size.shortestSide / view.display.devicePixelRatio <
             600 &&
-        MediaQuery.of(context).displayFeatures.isEmpty &&
+        !MediaQuery.of(context).displayFeatures.any(
+          (feature) =>
+              feature.type == DisplayFeatureType.fold ||
+              feature.type == DisplayFeatureType.hinge,
+        ) &&
         _videoOrientation == FullScreenOrientation.landscape;
   }
 

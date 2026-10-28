@@ -1,3 +1,5 @@
+import 'dart:ui' show DisplayFeatureType;
+
 import 'package:bili_player/bili_player.dart';
 
 import '../../../domain/user.dart';
@@ -531,7 +533,11 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                                 600 &&
                             MediaQuery.orientationOf(context) ==
                                 Orientation.portrait &&
-                            MediaQuery.of(context).displayFeatures.isEmpty;
+                            !MediaQuery.of(context).displayFeatures.any(
+                              (feature) =>
+                                  feature.type == DisplayFeatureType.fold ||
+                                  feature.type == DisplayFeatureType.hinge,
+                            );
                         final playerHeight = wide || !showInfo
                             ? constraints.maxHeight
                             : inlineVideoHeight(

@@ -51,71 +51,100 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../support/video_card_fake_engine.dart';
 
 void main() {
-  testWidgets('portrait layout reacts to dimensions, not position ticks', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(390, 800);
-    tester.view.display.size = const Size(390, 800);
-    tester.view.display.devicePixelRatio = 1;
-    addTearDown(tester.view.resetDevicePixelRatio);
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.display.reset);
-    const id = VideoId('BV1abc123456');
-    final video = await const _VideoRepository().loadDetail(
-      id,
-      cancellation: RequestCancellation(),
-    );
-    final session = _LayoutSession(video);
-    addTearDown(session.snapshots.dispose);
-    var builds = 0;
-    final container = ProviderContainer(
-      overrides: [
-        playbackSessionProvider.overrideWithValue(session),
-        authControllerProvider.overrideWith(_GuestAuthController.new),
-        videoRepositoryProvider.overrideWithValue(const _VideoRepository()),
-        videoExtrasRepositoryProvider.overrideWithValue(_ExtrasRepository()),
-      ],
-    );
-    addTearDown(container.dispose);
-    container.read(playbackSessionProvider);
-    await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: InputTestApp(
-          home: Scaffold(
-            body: VideoScreen(
-              id: id,
-              playerBuilder: (_, _, _) {
-                builds++;
-                return const SizedBox(key: ValueKey('portrait-layout-player'));
-              },
+  for (final feature in [
+    null,
+    ui.DisplayFeatureType.cutout,
+    ui.DisplayFeatureType.fold,
+    ui.DisplayFeatureType.hinge,
+  ]) {
+    testWidgets(
+      'portrait layout reacts to dimensions, not position ticks feature=$feature',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(390, 800);
+        tester.view.display.size = const Size(390, 800);
+        tester.view.display.devicePixelRatio = 1;
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.display.reset);
+        if (feature != null) {
+          tester.view.displayFeatures = [
+            ui.DisplayFeature(
+              bounds: const Rect.fromLTWH(180, 0, 30, 24),
+              type: feature,
+              state: ui.DisplayFeatureState.unknown,
+            ),
+          ];
+          addTearDown(tester.view.resetDisplayFeatures);
+        }
+        const id = VideoId('BV1abc123456');
+        final video = await const _VideoRepository().loadDetail(
+          id,
+          cancellation: RequestCancellation(),
+        );
+        final session = _LayoutSession(video);
+        addTearDown(session.snapshots.dispose);
+        var builds = 0;
+        final container = ProviderContainer(
+          overrides: [
+            playbackSessionProvider.overrideWithValue(session),
+            authControllerProvider.overrideWith(_GuestAuthController.new),
+            videoRepositoryProvider.overrideWithValue(const _VideoRepository()),
+            videoExtrasRepositoryProvider.overrideWithValue(
+              _ExtrasRepository(),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(playbackSessionProvider);
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: InputTestApp(
+              home: Scaffold(
+                body: VideoScreen(
+                  id: id,
+                  playerBuilder: (_, _, _) {
+                    builds++;
+                    return const SizedBox(
+                      key: ValueKey('portrait-layout-player'),
+                    );
+                  },
+                ),
+              ),
             ),
           ),
-        ),
-      ),
+        );
+        await tester.pumpAndSettle();
+        final player = find.byKey(const ValueKey('portrait-layout-player'));
+        expect(tester.getSize(player).height, 390 * 9 / 16);
+        session.snapshots.value = session.snapshots.value.copyWith(
+          videoDimensions: const VideoDimensions(1080, 1920),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester.getSize(player).height,
+          feature == ui.DisplayFeatureType.fold ||
+                  feature == ui.DisplayFeatureType.hinge
+              ? 390 * 9 / 16
+              : 520,
+        );
+        final buildsAfterDimensions = builds;
+        session.snapshots.value = session.snapshots.value.copyWith(
+          position: const Duration(seconds: 2),
+        );
+        await tester.pump();
+        expect(builds, buildsAfterDimensions);
+        session.snapshots.value = session.snapshots.value.copyWith(
+          videoDimensions: const VideoDimensions(1920, 1080),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.getSize(player).height, 390 * 9 / 16);
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
     );
-    await tester.pumpAndSettle();
-    final player = find.byKey(const ValueKey('portrait-layout-player'));
-    expect(tester.getSize(player).height, 390 * 9 / 16);
-    session.snapshots.value = session.snapshots.value.copyWith(
-      videoDimensions: const VideoDimensions(1080, 1920),
-    );
-    await tester.pumpAndSettle();
-    expect(tester.getSize(player).height, 520);
-    final buildsAfterDimensions = builds;
-    session.snapshots.value = session.snapshots.value.copyWith(
-      position: const Duration(seconds: 2),
-    );
-    await tester.pump();
-    expect(builds, buildsAfterDimensions);
-    session.snapshots.value = session.snapshots.value.copyWith(
-      videoDimensions: const VideoDimensions(1920, 1080),
-    );
-    await tester.pumpAndSettle();
-    expect(tester.getSize(player).height, 390 * 9 / 16);
-    expect(tester.takeException(), isNull);
-  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+  }
 
   for (final (cached, comments, width) in [
     for (final cached in [false, true])
