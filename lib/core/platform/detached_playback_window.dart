@@ -119,6 +119,7 @@ class DesktopPlaybackWindow extends StatefulWidget {
     this.title = 'BiliSail 播放',
     this.windowFactory,
     this.controller,
+    this.keepPlaybackMounted = false,
   });
 
   final Widget child;
@@ -129,6 +130,11 @@ class DesktopPlaybackWindow extends StatefulWidget {
   final String title;
   final DetachedPlaybackWindowFactory? windowFactory;
   final DesktopPlaybackWindowController? controller;
+
+  /// Keep an existing page alive when changing navigation modes. A new page
+  /// can mount directly in its prepared view instead of building and laying
+  /// out once under the browser and again after its inherited view changes.
+  final bool keepPlaybackMounted;
 
   @override
   State<DesktopPlaybackWindow> createState() => _DesktopPlaybackWindowState();
@@ -448,10 +454,9 @@ class _DesktopPlaybackWindowState extends State<DesktopPlaybackWindow> {
         fit: StackFit.passthrough,
         children: [
           widget.child,
-          // Mode changes move retained GlobalKey pages into this host in the
-          // current frame. Keep them mounted while native creation is pending,
-          // then reparent the same subtree into the new view on the next frame.
-          if (!windowReady && content != null)
+          // Only mode changes need this temporary home for retained pages.
+          // New pages wait for their actual view before starting page work.
+          if (!windowReady && content != null && widget.keepPlaybackMounted)
             Offstage(child: ExcludeFocus(child: content)),
         ],
       ),
@@ -466,15 +471,30 @@ class _FlutterDetachedPlaybackWindow extends DetachedPlaybackWindow {
     required Size size,
     required BoxConstraints constraints,
   }) {
-    _controller = flutter_window.RegularWindowController(
-      size: size,
-      constraints: constraints,
-      title: title,
-      delegate: _PlaybackWindowDelegate(
-        onCloseRequested: onCloseRequested,
-        onDestroyed: _destroyed,
-      ),
+    final delegate = _PlaybackWindowDelegate(
+      onCloseRequested: onCloseRequested,
+      onDestroyed: _destroyed,
     );
+    // Fixed-size Windows views synchronously wait up to 100 ms for a frame on
+    // each initial native resize, before this view has any Flutter content.
+    // The SDK's resizable content-sized mode avoids that wait and switches to
+    // normal user sizing automatically after its first frame. Native geometry
+    // preparation keeps our custom caption from altering the saved outer size.
+    if (Platform.isWindows) {
+      _controller = flutter_window.RegularWindowController.sizedToContent(
+        resizable: true,
+        constraints: constraints,
+        title: title,
+        delegate: delegate,
+      )..setSize(size);
+    } else {
+      _controller = flutter_window.RegularWindowController(
+        size: size,
+        constraints: constraints,
+        title: title,
+        delegate: delegate,
+      );
+    }
     windowService = WindowService.forView(
       viewId: viewId,
       nativeWindowHandle: _nativeWindowHandle,
@@ -527,8 +547,20 @@ class _FlutterDetachedPlaybackWindow extends DetachedPlaybackWindow {
   Future<void> saveGeometry() => windowService.savePlaybackGeometry();
 
   @override
-  Widget buildView(Widget child) =>
-      flutter_window.RegularWindow(controller: _controller, child: child);
+  Widget buildView(Widget child) {
+    final view = _controller.rootView;
+    return flutter_window.RegularWindow(
+      controller: _controller,
+      // Use the prepared native client size for the initially loose Windows
+      // constraints. Later fixed view constraints override this preferred size.
+      child: Platform.isWindows
+          ? SizedBox.fromSize(
+              size: view.physicalSize / view.devicePixelRatio,
+              child: child,
+            )
+          : child,
+    );
+  }
 
   @override
   void activate() {

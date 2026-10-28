@@ -76,6 +76,7 @@
 | [评论与直播表情选择](validation/emoticon-picker-tabs.md) | 居中弹窗、系列子标签、草稿插入与权限验证 |
 | [播放器与标签保留](validation/player-workspace.md) | UWP 播放页、只读子标签和未关闭页面的生命周期修正 |
 | [多标签并发播放](validation/multi-tab-playback.md) | 标签独立播放器、互斥播放、模式切换与资源释放 |
+| [Windows 播放窗打开性能](validation/dual-playback-open-performance-2026-10-28.md) | 首帧前同步等帧热点、窗口初始尺寸、Profile 前后对照与验收 |
 | [云端进度与续播](validation/cloud-playback-progress.md) | 播放进度上报、本地优先/云端补充、账号和源隔离、Windows 验证边界 |
 | [点播打开优化](validation/playback-startup.md) | CDN 对照、共享准备预算、可取消外部音轨加载和 Windows 竞态验证 |
 | [云端观看历史](validation/cloud-watch-history.md) | 当前账号云列表、游标分页、统计补齐与观看日期、离线验证边界 |

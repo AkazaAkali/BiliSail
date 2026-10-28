@@ -530,12 +530,14 @@ void main() {
                   context, {
                   required child,
                   required playback,
+                  required keepPlaybackMounted,
                   required activationToken,
                   required onClose,
                   required onBack,
                   required onHome,
                   required onError,
                 }) => DesktopPlaybackWindow(
+                  keepPlaybackMounted: keepPlaybackMounted,
                   windowFactory: windows.call,
                   onError: (error) => fail('$error'),
                   onCloseRequested: onClose,

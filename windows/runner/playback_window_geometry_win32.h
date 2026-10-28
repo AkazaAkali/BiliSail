@@ -73,6 +73,66 @@ inline bool RestoreNormalBounds(HWND window, const GeometrySession& session) {
                       SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER) != FALSE;
 }
 
+// The SDK's initial content sizing uses the system caption's insets. Our
+// custom caption has a larger client area inside the same outer rectangle.
+// Keep the prepared outer size until first show so the SDK cannot add that
+// caption height a second time. All later user resizing passes through.
+class InitialWindowSize {
+ public:
+  explicit InitialWindowSize(HWND window) : window_(window) {}
+  ~InitialWindowSize() { Cancel(); }
+  InitialWindowSize(const InitialWindowSize&) = delete;
+  InitialWindowSize& operator=(const InitialWindowSize&) = delete;
+
+  bool Prepare() {
+    if (IsWindowVisible(window_)) return true;
+    RECT bounds{};
+    if (!GetWindowRect(window_, &bounds)) return false;
+    const auto width = static_cast<DWORD>(bounds.right - bounds.left);
+    const auto height = static_cast<DWORD>(bounds.bottom - bounds.top);
+    static_assert(sizeof(DWORD_PTR) == 8, "Playback windows require Windows x64.");
+    const DWORD_PTR size = (static_cast<DWORD_PTR>(width) << 32) | height;
+    // Store dimensions by value; a nested close can destroy the owning session
+    // while DefSubclassProc is on the stack, without leaving an object pointer.
+    return SetWindowSubclass(window_, WindowProc, SubclassId(), size) != FALSE;
+  }
+
+ private:
+  static UINT_PTR SubclassId() {
+    return reinterpret_cast<UINT_PTR>(&WindowProc);
+  }
+
+  void Cancel() {
+    DWORD_PTR size = 0;
+    if (IsWindow(window_) &&
+        GetWindowSubclass(window_, WindowProc, SubclassId(), &size) &&
+        !RemoveWindowSubclass(window_, WindowProc, SubclassId())) {
+      SetWindowSubclass(window_, WindowProc, SubclassId(), 0);
+    }
+  }
+
+  static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam,
+                                     LPARAM lparam, UINT_PTR subclass_id,
+                                     DWORD_PTR size) {
+    if (message == WM_NCDESTROY) {
+      RemoveWindowSubclass(window, WindowProc, subclass_id);
+    } else if (message == WM_WINDOWPOSCHANGING && size != 0) {
+      auto& position = *reinterpret_cast<WINDOWPOS*>(lparam);
+      if (IsWindowVisible(window) || IsZoomed(window) || IsIconic(window) ||
+          (position.flags & SWP_SHOWWINDOW) != 0 ||
+          (GetWindowLongPtr(window, GWL_STYLE) & WS_CAPTION) != WS_CAPTION) {
+        RemoveWindowSubclass(window, WindowProc, subclass_id);
+      } else if ((position.flags & SWP_NOSIZE) == 0) {
+        position.cx = static_cast<int>(size >> 32);
+        position.cy = static_cast<int>(size & 0xffffffff);
+      }
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
+  }
+
+  HWND window_;
+};
+
 // Flutter 3.47.6 HostWindow captures SW_SHOWNORMAL at creation and executes it
 // after the first rendered frame. Maximizing during prepare would show a blank
 // window early, then that SDK callback would unmaximize it. Consume only the
@@ -171,10 +231,14 @@ class WindowGeometrySession {
   bool Restore(HWND window, int64_t view, int64_t owner) {
     const bool maximized = geometry_.maximized();
     initial_show_.reset();
+    initial_size_.reset();
     if (!RestoreNormalBounds(window, geometry_)) return false;
+    auto initial_size = std::make_unique<InitialWindowSize>(window);
+    if (!initial_size->Prepare()) return false;
     auto initial_show = std::make_unique<InitialShowMaximizer>(window);
     if (!initial_show->Prepare(maximized)) return false;
     geometry_.Begin(view, owner);
+    initial_size_ = std::move(initial_size);
     initial_show_ = std::move(initial_show);
     return Capture(window, view, owner);
   }
@@ -206,6 +270,7 @@ class WindowGeometrySession {
   void Retire(int64_t view, int64_t owner) {
     if (!Owns(view, owner)) return;
     initial_show_.reset();
+    initial_size_.reset();
     geometry_.Retire(view, owner);
   }
 
@@ -213,6 +278,7 @@ class WindowGeometrySession {
 
  private:
   GeometrySession geometry_;
+  std::unique_ptr<InitialWindowSize> initial_size_;
   std::unique_ptr<InitialShowMaximizer> initial_show_;
 };
 

@@ -49,6 +49,7 @@ typedef WorkspaceWindowBuilder = Widget Function(
   BuildContext context, {
   required Widget child,
   required Widget? playback,
+  required bool keepPlaybackMounted,
   required Object? activationToken,
   required VoidCallback onClose,
   required VoidCallback onBack,
@@ -691,6 +692,8 @@ final class _BiliAppShellState extends State<BiliAppShell>
     return windowBuilder(
       context,
       child: presented,
+      keepPlaybackMounted:
+          playback != null && _pageKeys[playback.id]?.currentContext != null,
       playback: playback == null
           ? null
           : TrackpadBackRegion(

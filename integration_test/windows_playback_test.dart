@@ -1088,12 +1088,14 @@ void main() {
                       context, {
                       required child,
                       required playback,
+                      required keepPlaybackMounted,
                       required activationToken,
                       required onClose,
                       required onBack,
                       required onHome,
                       required onError,
                     }) => DesktopPlaybackWindow(
+                      keepPlaybackMounted: keepPlaybackMounted,
                       activationToken: activationToken,
                       onCloseRequested: onClose,
                       onError: onError,

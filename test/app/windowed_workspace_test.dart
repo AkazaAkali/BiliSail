@@ -580,12 +580,14 @@ class _WindowedWorkspace {
                     context, {
                     required child,
                     required playback,
+                    required keepPlaybackMounted,
                     required activationToken,
                     required onClose,
                     required onBack,
                     required onHome,
                     required onError,
                   }) => DesktopPlaybackWindow(
+                    keepPlaybackMounted: keepPlaybackMounted,
                     windowFactory: windows.call,
                     activationToken: activationToken,
                     onCloseRequested: onClose,

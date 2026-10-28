@@ -9,6 +9,73 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('new playback mounts only in its prepared view', (tester) async {
+    final prepared = Completer<void>();
+    final views = <int>[];
+    late _FakeWindow window;
+    await tester.pumpWidget(
+      DesktopPlaybackWindow(
+        playback: Builder(
+          builder: (context) {
+            views.add(View.of(context).viewId);
+            return const SizedBox();
+          },
+        ),
+        onCloseRequested: () {},
+        onError: (error) => fail('$error'),
+        windowFactory: ({required title, required onCloseRequested}) =>
+            window = _FakeWindow(
+              tester.view,
+              onCloseRequested,
+              onPrepare: () => prepared.future,
+            ),
+        child: const SizedBox(),
+      ),
+    );
+    await tester.pump(Duration.zero);
+    expect(views, isEmpty);
+    prepared.complete();
+    await tester.pumpAndSettle();
+    expect(views, [window.viewId]);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    expect(window.disposed, isTrue);
+  });
+
+  testWidgets('cancelled new playback never starts its page work', (
+    tester,
+  ) async {
+    final prepared = Completer<void>();
+    var builds = 0;
+    late _FakeWindow window;
+    Widget build(bool open) => DesktopPlaybackWindow(
+      playback: open
+          ? Builder(
+              builder: (_) {
+                builds++;
+                return const SizedBox();
+              },
+            )
+          : null,
+      onCloseRequested: () {},
+      onError: (error) => fail('$error'),
+      windowFactory: ({required title, required onCloseRequested}) =>
+          window = _FakeWindow(
+            tester.view,
+            onCloseRequested,
+            onPrepare: () => prepared.future,
+          ),
+      child: const SizedBox(),
+    );
+    await tester.pumpWidget(build(true));
+    await tester.pump(Duration.zero);
+    await tester.pumpWidget(build(false));
+    prepared.complete();
+    await tester.pumpAndSettle();
+    expect(builds, 0);
+    expect(window.disposed, isTrue);
+  });
+
   testWidgets(
     'application exit waits for unmount, geometry and native destroy',
     (tester) async {
@@ -242,6 +309,7 @@ void main() {
     final probe = _DisposeProbe(onDispose: () => disposals++);
     await tester.pumpWidget(
       DesktopPlaybackWindow(
+        keepPlaybackMounted: true,
         playback: probe,
         onCloseRequested: () {},
         onError: (error) => fail('$error'),
@@ -527,10 +595,10 @@ void main() {
       );
       await tester.pumpWidget(build('first', 'video'));
       await tester.pump(Duration.zero);
-      final pending = tester.element(
+      expect(
         find.byKey(const ValueKey('player'), skipOffstage: false),
+        findsNothing,
       );
-      expect(View.of(pending).viewId, tester.view.viewId);
       await tester.pumpWidget(build('latest', 'live'));
       await tester.pump(Duration.zero);
       expect(creations, 1);

@@ -425,12 +425,14 @@ class _Harness {
                 context, {
                 required child,
                 required playback,
+                required keepPlaybackMounted,
                 required activationToken,
                 required onClose,
                 required onBack,
                 required onHome,
                 required onError,
               }) => DesktopPlaybackWindow(
+                keepPlaybackMounted: keepPlaybackMounted,
                 windowFactory: createWindow,
                 activationToken: activationToken,
                 onCloseRequested: onClose,

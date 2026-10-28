@@ -220,6 +220,43 @@ void RunFrameTests() {
           "Detaching the custom frame did not restore the native caption.");
 }
 
+void RunInitialSizeTests() {
+  playback_window::WindowGeometrySession session;
+  const TestWindow first;
+  const HWND window = first.get();
+  const playback_window::PlaybackWindowFrame caption(window);
+  Require(session.Restore(window, 90, 90), "Initial size preparation failed.");
+  const auto prepared = *session.saved().normal();
+  // Reproduce the SDK adding standard caption insets during content sizing.
+  SetWindowPos(window, nullptr, 0, 0,
+               static_cast<int>(prepared.width),
+               static_cast<int>(prepared.height) + 31,
+               SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+  RequireBounds(window, prepared);
+  ShowWindow(window, SW_SHOWNORMAL);
+  RequireBounds(window, prepared);
+  SetWindowPos(window, nullptr, 0, 0,
+               static_cast<int>(prepared.width) + 80,
+               static_cast<int>(prepared.height) + 60,
+               SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+  Require(session.Capture(window, 90, 90), "User resize capture failed.");
+  const auto resized = *session.saved().normal();
+  Require(resized.width == prepared.width + 80 &&
+              resized.height == prepared.height + 60,
+          "Initial sizing hook blocked a later user resize.");
+  session.Retire(90, 90);
+
+  const TestWindow cancelled;
+  Require(session.Restore(cancelled.get(), 91, 91), "Cancelled size restore failed.");
+  session.Retire(91, 91);
+  SetWindowPos(cancelled.get(), nullptr, 0, 0, 700, 500,
+               SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+  RECT bounds{};
+  GetWindowRect(cancelled.get(), &bounds);
+  Require(bounds.right - bounds.left == 700 && bounds.bottom - bounds.top == 500,
+          "Retired owner retained its initial size constraint.");
+}
+
 void RunTests() {
   {
     playback_window::WindowGeometrySession closing;
@@ -368,6 +405,7 @@ int main() {
     Require(RegisterClassW(&window_class) != 0, "Cannot register test window class.");
     RunTests();
     RunFrameTests();
+    RunInitialSizeTests();
     UnregisterClassW(window_class.lpszClassName, window_class.hInstance);
     std::cout << "PASS native first show and caption: SDK restore reproduction, directly visible maximized reopen, user Restore, normal bounds, minimize, pending close, reentrant cancellation, stale owner, fullscreen, custom client frame, app brightness and detach\n";
     return 0;
