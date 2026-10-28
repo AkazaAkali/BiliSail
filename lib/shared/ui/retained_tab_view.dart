@@ -119,6 +119,9 @@ final class _RetainedTabViewState<T extends Object>
   bool _dragging = false;
   bool _active = true;
   int _generation = 0;
+  (RetainedTabView<T>, ScrollBehavior, PageStorageBucket, Object)?
+  _pagesConfiguration;
+  List<Widget> _pages = const [];
 
   Duration get _duration => MediaQuery.disableAnimationsOf(context)
       ? Duration.zero
@@ -283,6 +286,30 @@ final class _RetainedTabViewState<T extends Object>
       }
       return element.widget is! PageStorage;
     });
+    final scrollBehavior = ScrollConfiguration.of(context);
+    final configuration = (widget, scrollBehavior, pageStorage, storageScope);
+    if (_pagesConfiguration != configuration) {
+      _pagesConfiguration = configuration;
+      // Activity changes only gate input and visibility. Reuse the children so
+      // returning to another primary section does not rebuild hidden content.
+      // Include the whole widget: an unchanged builder tear-off can still read
+      // new configuration from its parent's State on a normal parent update.
+      _pages = [
+        for (final tab in widget.tabs)
+          PageStorage(
+            key: PageStorageKey((storageScope, tab)),
+            bucket: pageStorage,
+            child: _RetainedTabPage<T>(
+              key: ValueKey(tab),
+              tab: tab,
+              selection: _selection,
+              pageBuilder: widget.pageBuilder,
+              preload: widget.preloadPages,
+              scrollBehavior: scrollBehavior,
+            ),
+          ),
+      ];
+    }
     return IgnorePointer(
       ignoring: !_active,
       child: Listener(
@@ -290,7 +317,7 @@ final class _RetainedTabViewState<T extends Object>
         child: NotificationListener<ScrollNotification>(
           onNotification: _onScroll,
           child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(
+            behavior: scrollBehavior.copyWith(
               dragDevices: const {
                 PointerDeviceKind.touch,
                 PointerDeviceKind.stylus,
@@ -313,22 +340,7 @@ final class _RetainedTabViewState<T extends Object>
                     ? TabPagingMotion.physics
                     : const NeverScrollableScrollPhysics(),
                 dragStartBehavior: DragStartBehavior.down,
-                children: [
-                  for (final tab in widget.tabs)
-                    // Descendant lists still use the workspace's scroll storage.
-                    PageStorage(
-                      key: PageStorageKey((storageScope, tab)),
-                      bucket: pageStorage,
-                      child: _RetainedTabPage<T>(
-                        key: ValueKey(tab),
-                        tab: tab,
-                        selection: _selection,
-                        pageBuilder: widget.pageBuilder,
-                        preload: widget.preloadPages,
-                        scrollBehavior: ScrollConfiguration.of(context),
-                      ),
-                    ),
-                ],
+                children: _pages,
               ),
             ),
           ),
@@ -392,12 +404,8 @@ final class _RetainedTabPageState<T extends Object>
             _visited = true;
             updateKeepAlive();
           }
-          return WorkspaceActivity(
-            active: active && WorkspaceActivity.isActive(context),
-            previewing:
-                active &&
-                WorkspaceActivity.isVisible(context) &&
-                !WorkspaceActivity.isActive(context),
+          return _RetainedTabActivity(
+            selected: active,
             child: ExcludeFocus(
               excluding: !active,
               child: IgnorePointer(
@@ -420,4 +428,23 @@ final class _RetainedTabPageState<T extends Object>
       ),
     );
   }
+}
+
+/// Keep the inherited visibility subscription outside the content factory.
+/// Descendants still receive activity/provider updates while hidden.
+class _RetainedTabActivity extends StatelessWidget {
+  const _RetainedTabActivity({required this.selected, required this.child});
+
+  final bool selected;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => WorkspaceActivity(
+    active: selected && WorkspaceActivity.isActive(context),
+    previewing:
+        selected &&
+        WorkspaceActivity.isVisible(context) &&
+        !WorkspaceActivity.isActive(context),
+    child: child,
+  );
 }

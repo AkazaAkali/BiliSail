@@ -74,6 +74,45 @@ void main() {
   }
 
   testWidgets(
+    'retained settings form skips navigation rebuilds but stays live',
+    (tester) async {
+      await mount(tester);
+      final themeChoice = find.widgetWithText(ChoiceChip, '深色');
+      final original = tester.widget<ChoiceChip>(themeChoice);
+      active.value = false;
+      await tester.pumpAndSettle();
+      active.value = true;
+      await tester.pumpAndSettle();
+      expect(tester.widget<ChoiceChip>(themeChoice), same(original));
+      await tester.ensureVisible(themeChoice);
+      await tester.pumpAndSettle();
+      await tester.tap(themeChoice);
+      await tester.pumpAndSettle();
+      expect(tester.widget<ChoiceChip>(themeChoice).selected, isTrue);
+      expect(repository.writes, 1);
+      category.value = SettingsCategory.playback;
+      await tester.pumpAndSettle();
+      category.value = SettingsCategory.appearance;
+      await tester.pumpAndSettle();
+      expect(tester.widget<ChoiceChip>(themeChoice).selected, isTrue);
+      expect(repository.loads, 1);
+      active.value = false;
+      await tester.pumpAndSettle();
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(SettingsScreen)),
+      );
+      await container
+          .read(settingsControllerProvider.notifier)
+          .setTheme(AppThemePreference.light);
+      await tester.pumpAndSettle();
+      active.value = true;
+      await tester.pumpAndSettle();
+      expect(tester.widget<ChoiceChip>(themeChoice).selected, isFalse);
+      expect(repository.writes, 2);
+    },
+  );
+
+  testWidgets(
     'touch visits all categories in both directions without saving settings',
     (tester) async {
       await mount(tester);

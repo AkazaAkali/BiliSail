@@ -33,6 +33,7 @@ void main() {
       await bottom('mine');
       await tester.tap(find.byKey(const ValueKey('account-tab-watchLater')));
       await tester.pumpAndSettle();
+      await bottom('settings');
       await bottom('home');
       final sizes = {
         for (final element
@@ -52,9 +53,11 @@ void main() {
       for (final name in [
         'dynamic',
         'mine',
+        'settings',
         'home',
         'mine',
         'dynamic',
+        'settings',
         'home',
       ]) {
         await bottom(name);
@@ -76,7 +79,7 @@ void main() {
         tester.view.physicalSize = Size(width, 900);
         await tester.pumpAndSettle();
         if (width < 600) {
-          for (final name in ['mine', 'dynamic', 'home']) {
+          for (final name in ['mine', 'dynamic', 'settings', 'home']) {
             await bottom(name);
             for (final element in find.byType(Viewport).evaluate()) {
               final viewport = element.renderObject! as RenderViewport;

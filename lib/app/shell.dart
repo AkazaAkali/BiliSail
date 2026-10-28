@@ -210,11 +210,6 @@ final class _BiliAppShellState extends State<BiliAppShell>
         NavigationBarMode.bottom => true,
         NavigationBarMode.sidebar => false,
       };
-  bool get _animatePrimaryNavigation =>
-      _compactChannels &&
-      (Theme.of(context).platform == TargetPlatform.android ||
-          Theme.of(context).platform == TargetPlatform.iOS);
-
   bool get _canReturnFromMessages =>
       _android && _workspace.canReturnFromMessages;
 
@@ -840,7 +835,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
                                   key: const ValueKey(
                                     'workspace-primary-transition',
                                   ),
-                                  enabled: _animatePrimaryNavigation,
+                                  enabled: compact,
                                   index: tab.isRoot
                                       ? sectionForLocation(
                                           tab.location,

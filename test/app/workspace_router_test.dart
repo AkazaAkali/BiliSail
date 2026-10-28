@@ -737,7 +737,7 @@ void main() {
           );
           final surface = find.byKey(const ValueKey('home-channel-swipe'));
           final compact = width < 600;
-          final animatePrimary = compact && platform == TargetPlatform.android;
+          final animatePrimary = compact;
           expect(
             tester
                 .widget<FeedScreen>(find.byType(FeedScreen))

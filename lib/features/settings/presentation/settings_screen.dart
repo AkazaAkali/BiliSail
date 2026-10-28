@@ -45,6 +45,7 @@ final class SettingsScreen extends ConsumerStatefulWidget {
 
 final class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late SettingsCategory _category = widget.category;
+  final _categoryPages = <SettingsCategory, Widget>{};
   bool _resetting = false;
   // The retained settings page must not own the home channel strip's progress.
   late final _progress = TabPagingProgress(widget.category.index.toDouble());
@@ -163,8 +164,13 @@ final class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             viewKey: const ValueKey('settings-category-swipe'),
             progress: _progress,
             onChanged: _selectCategory,
+            // Categories read settings through their own Consumer. Navigation
+            // changes the selection, not the retained form's configuration.
             pageBuilder: (context, category, active) =>
-                _SettingsCategoryPage(category: category),
+                _categoryPages.putIfAbsent(
+                  category,
+                  () => _SettingsCategoryPage(category: category),
+                ),
           ),
         ),
       ],
