@@ -24,7 +24,8 @@ final class _DanmakuOverlayState extends State<DanmakuOverlay>
   late final Ticker _ticker;
   final ValueNotifier<int> _repaint = ValueNotifier(0);
   Timer? _arrivalWake;
-  bool _paintedContent = false;
+  int _paintedRevision = -1;
+  bool _tickerEnabled = true;
 
   @override
   void initState() {
@@ -43,16 +44,19 @@ final class _DanmakuOverlayState extends State<DanmakuOverlay>
 
   void _onControllerChanged() {
     _arrivalWake?.cancel();
-    if (widget.controller.needsFrame) {
+    if (!_tickerEnabled) {
+      _ticker.stop();
+      return;
+    }
+    final needsFrame = widget.controller.needsFrame;
+    if (needsFrame) {
       if (!_ticker.isActive) _ticker.start();
     } else {
       _ticker.stop();
     }
-    // Clock confirmations can retime the one-shot arrival without repainting
-    // an empty layer. Keep the clearing frame after visible content is removed.
-    if (widget.controller.needsFrame ||
-        widget.controller.visibleCount > 0 ||
-        _paintedContent) {
+    // Clock confirmations retime the wake without repainting stationary text.
+    // Content revisions also preserve the clearing frame after removal.
+    if (needsFrame || widget.controller.visualRevision != _paintedRevision) {
       _repaint.value++;
     }
     _scheduleArrival();
@@ -60,12 +64,25 @@ final class _DanmakuOverlayState extends State<DanmakuOverlay>
 
   void _scheduleArrival() {
     _arrivalWake?.cancel();
+    if (!_tickerEnabled || _ticker.isActive) return;
     final delay = widget.controller.nextFrameDelay;
     if (delay != null) {
       _arrivalWake = Timer(delay, () {
         if (mounted) _onControllerChanged();
       });
+    } else if (widget.controller.needsFrame) {
+      // The clock can cross a deadline after the caller's idle check. Drain
+      // bounded admission even if no later clock/message notification arrives.
+      _ticker.start();
+      _repaint.value++;
     }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
+    _onControllerChanged();
   }
 
   @override
@@ -73,6 +90,7 @@ final class _DanmakuOverlayState extends State<DanmakuOverlay>
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.controller, widget.controller)) {
       oldWidget.controller.removeListener(_onControllerChanged);
+      _paintedRevision = -1;
       widget.controller.addListener(_onControllerChanged);
       _onControllerChanged();
     }
@@ -109,7 +127,7 @@ final class _DanmakuOverlayState extends State<DanmakuOverlay>
               _repaint,
               MediaQuery.maybeDevicePixelRatioOf(context) ??
                   View.of(context).devicePixelRatio,
-              (visible) => _paintedContent = visible,
+              () => _paintedRevision = widget.controller.visualRevision,
             ),
             size: Size.infinite,
           ),
@@ -128,7 +146,7 @@ final class _DanmakuPainter extends CustomPainter {
   ) : super(repaint: repaint);
   final DanmakuController controller;
   final double pixelRatio;
-  final void Function(bool visible) onPainted;
+  final VoidCallback onPainted;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -142,7 +160,7 @@ final class _DanmakuPainter extends CustomPainter {
         pixelRatio: pixelRatio,
       );
     }
-    onPainted(placements.isNotEmpty);
+    onPainted();
   }
 
   @override

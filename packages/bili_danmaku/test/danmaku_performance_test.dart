@@ -415,6 +415,92 @@ void main() {
   });
 
   test(
+    'cached pixels match fresh rasters through fractional DPR and release',
+    () async {
+      final layouts = DanmakuTextLayouts(8);
+      addTearDown(layouts.clear);
+      const offset = Offset(10.25, 11.75);
+      Future<List<int>> pixels(DanmakuTextLayouts cache, double ratio) async {
+        final recorder = ui.PictureRecorder();
+        final canvas = Canvas(recorder)..scale(2);
+        cache.paint(
+          'Text',
+          const Color(0xffaaffcc),
+          24,
+          canvas,
+          offset,
+          pixelRatio: ratio,
+        );
+        final picture = recorder.endRecording();
+        final bitmap = await picture.toImage(320, 120);
+        final data = await bitmap.toByteData();
+        final result = data?.buffer.asUint8List().toList() ?? [];
+        bitmap.dispose();
+        picture.dispose();
+        return result;
+      }
+
+      for (final effect in DanmakuTextEffect.values) {
+        layouts.style = DanmakuTextStyle(effect: effect);
+        for (final ratio in [1.0, 1.25, 2.75, 1.0]) {
+          final fresh = DanmakuTextLayouts(8)..style = layouts.style;
+          try {
+            final expected = await pixels(fresh, ratio);
+            expect(expected, isNotEmpty);
+            for (var draw = 0; draw < 2; draw++) {
+              expect(
+                await pixels(layouts, ratio),
+                expected,
+                reason: '$effect at DPR $ratio, draw $draw',
+              );
+            }
+            layouts.releaseRasters();
+            expect(layouts.rasterBytes, 0);
+            expect(await pixels(layouts, ratio), expected);
+          } finally {
+            fresh.clear();
+          }
+        }
+      }
+      expect(layouts.rasterBuildCount, 24);
+      expect(layouts.rasterStatistics.cacheHits, 12);
+      final reference = await pixels(layouts, 1);
+      for (final invalid in [double.nan, double.infinity, 0.0, -1.0]) {
+        expect(await pixels(layouts, invalid), reference);
+      }
+      expect(layouts.rasterBuildCount, 24);
+    },
+  );
+
+  test('raster cache hits keep recently drawn images resident', () {
+    final layouts = DanmakuTextLayouts(8, maxRasterBytes: 30000);
+    addTearDown(layouts.clear);
+    void paint(String text) {
+      final recorder = ui.PictureRecorder();
+      layouts.paint(
+        text,
+        const Color(0xffffffff),
+        24,
+        Canvas(recorder),
+        Offset.zero,
+      );
+      recorder.endRecording().dispose();
+      expect(layouts.rasterBytes, lessThanOrEqualTo(30000));
+    }
+
+    paint('one');
+    paint('two');
+    paint('one');
+    paint('six');
+    paint('one');
+    expect(layouts.rasterBuildCount, 3);
+    paint('two');
+    expect(layouts.rasterBuildCount, 4);
+    expect(layouts.rasterStatistics.imagePaints, 6);
+    expect(layouts.rasterStatistics.directPaints, 0);
+  });
+
+  test(
     'text cache reuses images and releases pixels on LRU/style/DPR changes',
     () {
       final layouts = DanmakuTextLayouts(8, maxRasterBytes: 65536);

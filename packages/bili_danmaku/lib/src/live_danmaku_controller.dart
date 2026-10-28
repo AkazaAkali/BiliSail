@@ -67,6 +67,10 @@ final class LiveDanmakuController extends ChangeNotifier {
   bool _rasterProtectionDirty = false;
   int _laneIndexBuildCount = 0;
   int _rasterProtectionUpdateCount = 0;
+  int _visualRevision = 0;
+
+  /// Changes to visible content or layout, separate from message notifications.
+  int get visualRevision => _visualRevision;
   late final _layouts = DanmakuTextLayouts(maxTextLayouts);
   final Map<String, Duration> _recentIds = {};
   bool _enabled = true;
@@ -97,6 +101,34 @@ final class LiveDanmakuController extends ChangeNotifier {
 
   bool get isAnimating =>
       _enabled && (_pending.isNotEmpty || _visible.isNotEmpty);
+
+  /// Only moving, due or expired items require a frame immediately.
+  bool get needsFrame => _needsFrameAt(_now());
+
+  bool _needsFrameAt(Duration now) {
+    if (!_enabled || _width <= 0 || _height <= 0) return false;
+    if (_pending.isNotEmpty && _pending.first.at <= now) return true;
+    return _visible.any(
+      (item) =>
+          item.event.mode == DanmakuMode.scroll ||
+          now - item.at >= fixedDuration,
+    );
+  }
+
+  /// A delayed arrival or stationary expiry needs one wake, not a running ticker.
+  Duration? get nextFrameDelay {
+    final now = _now();
+    if (!_enabled || _width <= 0 || _height <= 0 || _needsFrameAt(now)) {
+      return null;
+    }
+    Duration? delay = _pending.isEmpty ? null : _pending.first.at - now;
+    for (final item in _visible) {
+      final untilExpiry = item.at + fixedDuration - now;
+      if (delay == null || untilExpiry < delay) delay = untilExpiry;
+    }
+    return delay;
+  }
+
   Duration get _scrollLifetime =>
       Duration(microseconds: (scrollDuration.inMicroseconds / _speed).round());
 
@@ -155,6 +187,7 @@ final class LiveDanmakuController extends ChangeNotifier {
   void clear() {
     _pending.clear();
     _visible.clear();
+    _visualRevision++;
     _rasterProtectionDirty = true;
     _recentIds.clear();
     _windowCount = 0;
@@ -218,6 +251,7 @@ final class LiveDanmakuController extends ChangeNotifier {
     _width = nextWidth;
     _height = nextHeight;
     _bottomInset = nextBottomInset;
+    _visualRevision++;
     if (_width > 0 && _height > 0) {
       // Text shaping and rasters do not depend on viewport size. Keep arrival
       // times and project scroll progress onto the new width in frame().
@@ -249,7 +283,10 @@ final class LiveDanmakuController extends ChangeNotifier {
   void _removeVisibleWhere(bool Function(_Visible) test) {
     final previousLength = _visible.length;
     _visible.removeWhere(test);
-    if (_visible.length != previousLength) _rasterProtectionDirty = true;
+    if (_visible.length != previousLength) {
+      _rasterProtectionDirty = true;
+      _visualRevision++;
+    }
   }
 
   List<LiveDanmakuPlacement> frame() {
@@ -354,6 +391,7 @@ final class LiveDanmakuController extends ChangeNotifier {
       }
       final item = _Visible(event, now, width, height, lane);
       _visible.add(item);
+      _visualRevision++;
       _rasterProtectionDirty = true;
       lanes[event.mode.index][lane].add(item);
     }

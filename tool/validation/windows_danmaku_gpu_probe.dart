@@ -86,6 +86,8 @@ Future<void> main() async {
       ),
     ),
   );
+  // Hidden windows can suppress presentation and invalidate the comparison.
+  await windowManager.show();
   Timer? windowRefresh;
   void refreshWindow() {
     final at = engine.currentSnapshot.position.inMicroseconds;

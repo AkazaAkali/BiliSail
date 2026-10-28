@@ -133,6 +133,10 @@ final class DanmakuController extends ChangeNotifier {
   bool _rasterProtectionDirty = false;
   int _laneIndexBuildCount = 0;
   int _rasterProtectionUpdateCount = 0;
+  int _visualRevision = 0;
+
+  /// Changes to visible content or layout, separate from clock confirmations.
+  int get visualRevision => _visualRevision;
   List<DanmakuEvent> _events = const [];
   int _next = 0;
   Duration _anchorPosition = Duration.zero;
@@ -179,41 +183,65 @@ final class DanmakuController extends ChangeNotifier {
     return history;
   }
 
-  bool get isAnimating =>
+  bool get isAnimating => _isAnimatingAt(_now());
+
+  bool _isAnimatingAt(Duration now) =>
       _playing &&
       !_buffering &&
       !_seeking &&
-      _now() - _anchorTime < maxInterpolation;
+      now - _anchorTime < maxInterpolation;
 
   /// Finish bounded admission after a paused seek without advancing either clock.
-  bool get needsFrame => (isAnimating && _active.isNotEmpty) || _hasDueEvents;
+  bool get needsFrame => _needsFrameAt(_now());
 
-  bool get _hasDueEvents =>
-      (_width > 0 &&
-      _height > 0 &&
-      _next < _events.length &&
-      _events[_next].at <= _displayPosition);
+  bool _needsFrameAt(Duration now) {
+    if (_width <= 0 || _height <= 0) return false;
+    if (_next < _events.length &&
+        _events[_next].at <= _estimate(now) - _offset) {
+      return true;
+    }
+    final at = _animationAt(now);
+    final animating = _isAnimatingAt(now);
+    for (final item in _active) {
+      final scrolling = item.event.mode == DanmakuMode.scroll;
+      if (at - item.start >= (scrolling ? _scrollLifetime : fixedDuration) ||
+          (scrolling && animating)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
-  /// Wake an idle overlay once at the next arrival between confirmed samples.
+  /// Wake at the next arrival or fixed-text expiry between confirmed samples.
   /// Never extrapolate beyond the existing bounded interpolation window.
   Duration? get nextFrameDelay {
-    if (!isAnimating ||
-        _active.isNotEmpty ||
-        _hasDueEvents ||
+    final now = _now();
+    if (!_isAnimatingAt(now) ||
+        _needsFrameAt(now) ||
         _width <= 0 ||
-        _height <= 0 ||
-        _next >= _events.length) {
+        _height <= 0) {
       return null;
     }
-    final delayMicros =
-        (_events[_next].at - _displayPosition).inMicroseconds / _rate;
-    final remaining = maxInterpolation - (_now() - _anchorTime);
-    if (!delayMicros.isFinite ||
-        delayMicros <= 0 ||
-        delayMicros >= remaining.inMicroseconds) {
-      return null;
+    final remaining = maxInterpolation - (now - _anchorTime);
+    Duration? delay;
+    if (_next < _events.length) {
+      final micros =
+          (_events[_next].at - (_estimate(now) - _offset)).inMicroseconds /
+          _rate;
+      if (micros.isFinite && micros > 0 && micros <= remaining.inMicroseconds) {
+        delay = Duration(microseconds: micros.ceil());
+      }
     }
-    return Duration(microseconds: delayMicros.ceil());
+    final at = _animationAt(now);
+    for (final item in _active) {
+      final untilExpiry = item.start + fixedDuration - at;
+      if (untilExpiry > Duration.zero &&
+          untilExpiry <= remaining &&
+          (delay == null || untilExpiry < delay)) {
+        delay = untilExpiry;
+      }
+    }
+    return delay;
   }
 
   Duration _elapsed(Duration now) {
@@ -247,6 +275,7 @@ final class DanmakuController extends ChangeNotifier {
     _width = nextWidth;
     _height = nextHeight;
     _bottomInset = nextBottomInset;
+    _visualRevision++;
     if (_width > 0 && _height > 0) {
       // Fullscreen and control visibility are layout changes, not seeks.
       // Keep arrival times, lanes and the cursor: replaying dropped history
@@ -340,7 +369,13 @@ final class DanmakuController extends ChangeNotifier {
     final previousPosition = _estimate(now);
     // Settle the previous phase before changing its anchor or rate. Existing
     // comments retain their visual age across media corrections/rate changes.
-    _anchorAnimation = _animationAt(now);
+    final animation = _animationAt(now);
+    if (animation != _anchorAnimation &&
+        _active.any((item) => item.event.mode == DanmakuMode.scroll)) {
+      // Also paint the last settled position when pausing between ticker frames.
+      _visualRevision++;
+    }
+    _anchorAnimation = animation;
     _anchorPosition = confirmedPosition < Duration.zero
         ? Duration.zero
         : confirmedPosition;
@@ -352,6 +387,7 @@ final class DanmakuController extends ChangeNotifier {
     if ((_anchorPosition - previousPosition).abs() >
         const Duration(seconds: 2)) {
       _active.clear();
+      _visualRevision++;
       _rasterProtectionDirty = true;
       _consumedIds.clear();
       _rewindTo(_anchorPosition - _offset);
@@ -369,6 +405,7 @@ final class DanmakuController extends ChangeNotifier {
     _anchorTime = now;
     _seeking = false;
     _active.clear();
+    _visualRevision++;
     _rasterProtectionDirty = true;
     _consumedIds.clear();
     _rewindTo(_anchorPosition - _offset);
@@ -419,7 +456,10 @@ final class DanmakuController extends ChangeNotifier {
   void _removeActiveWhere(bool Function(_Active) test) {
     final previousLength = _active.length;
     _active.removeWhere(test);
-    if (_active.length != previousLength) _rasterProtectionDirty = true;
+    if (_active.length != previousLength) {
+      _rasterProtectionDirty = true;
+      _visualRevision++;
+    }
   }
 
   List<DanmakuPlacement> frame() {
@@ -536,6 +576,7 @@ final class DanmakuController extends ChangeNotifier {
       }
       final item = _Active(event, start, width, height, lane);
       _active.add(item);
+      _visualRevision++;
       _rasterProtectionDirty = true;
       lanes[event.mode.index][lane].add(item);
     }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -19,14 +21,18 @@ final class _LiveDanmakuOverlayState extends State<LiveDanmakuOverlay>
     with SingleTickerProviderStateMixin {
   late final Ticker _ticker;
   final ValueNotifier<int> _repaint = ValueNotifier(0);
+  Timer? _arrivalWake;
+  int _paintedRevision = -1;
+  bool _tickerEnabled = true;
   @override
   void initState() {
     super.initState();
     _ticker = createTicker((_) {
-      if (widget.controller.isAnimating) {
+      if (widget.controller.needsFrame) {
         _repaint.value++;
       } else {
         _ticker.stop();
+        _scheduleArrival();
       }
     });
     widget.controller.addListener(_changed);
@@ -34,12 +40,43 @@ final class _LiveDanmakuOverlayState extends State<LiveDanmakuOverlay>
   }
 
   void _changed() {
-    if (widget.controller.isAnimating) {
+    _arrivalWake?.cancel();
+    if (!_tickerEnabled) {
+      _ticker.stop();
+      return;
+    }
+    final needsFrame = widget.controller.needsFrame;
+    if (needsFrame) {
       if (!_ticker.isActive) _ticker.start();
     } else {
       _ticker.stop();
     }
-    _repaint.value++;
+    if (needsFrame || widget.controller.visualRevision != _paintedRevision) {
+      _repaint.value++;
+    }
+    _scheduleArrival();
+  }
+
+  void _scheduleArrival() {
+    _arrivalWake?.cancel();
+    if (!_tickerEnabled || _ticker.isActive) return;
+    final delay = widget.controller.nextFrameDelay;
+    if (delay != null) {
+      _arrivalWake = Timer(delay, () {
+        if (mounted) _changed();
+      });
+    } else if (widget.controller.needsFrame) {
+      // Catch deadlines crossed between the idle check and wake calculation.
+      _ticker.start();
+      _repaint.value++;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
+    _changed();
   }
 
   @override
@@ -47,6 +84,7 @@ final class _LiveDanmakuOverlayState extends State<LiveDanmakuOverlay>
     super.didUpdateWidget(oldWidget);
     if (!identical(widget.controller, oldWidget.controller)) {
       oldWidget.controller.removeListener(_changed);
+      _paintedRevision = -1;
       widget.controller.addListener(_changed);
       _changed();
     }
@@ -54,6 +92,7 @@ final class _LiveDanmakuOverlayState extends State<LiveDanmakuOverlay>
 
   @override
   void dispose() {
+    _arrivalWake?.cancel();
     widget.controller.removeListener(_changed);
     _ticker.dispose();
     _repaint.dispose();
@@ -79,9 +118,10 @@ final class _LiveDanmakuOverlayState extends State<LiveDanmakuOverlay>
           child: CustomPaint(
             painter: _LivePainter(
               widget.controller,
-              Listenable.merge([widget.controller, _repaint]),
+              _repaint,
               MediaQuery.maybeDevicePixelRatioOf(context) ??
                   View.of(context).devicePixelRatio,
+              () => _paintedRevision = widget.controller.visualRevision,
             ),
             size: Size.infinite,
           ),
@@ -92,10 +132,15 @@ final class _LiveDanmakuOverlayState extends State<LiveDanmakuOverlay>
 }
 
 final class _LivePainter extends CustomPainter {
-  _LivePainter(this.controller, Listenable repaint, this.pixelRatio)
-    : super(repaint: repaint);
+  _LivePainter(
+    this.controller,
+    Listenable repaint,
+    this.pixelRatio,
+    this.onPainted,
+  ) : super(repaint: repaint);
   final LiveDanmakuController controller;
   final double pixelRatio;
+  final VoidCallback onPainted;
   @override
   void paint(Canvas canvas, Size size) {
     canvas.clipRect(Offset.zero & size);
@@ -107,6 +152,7 @@ final class _LivePainter extends CustomPainter {
         pixelRatio: pixelRatio,
       );
     }
+    onPainted();
   }
 
   @override

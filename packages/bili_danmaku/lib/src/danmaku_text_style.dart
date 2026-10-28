@@ -74,6 +74,9 @@ final class DanmakuTextLayouts {
   final _cache = <(double, int, String), _TextLayout>{};
   final _rasters = <_TextLayout, int>{};
   final _protectedKeys = <(double, int, String)>{};
+  final _imagePaint = Paint()..filterQuality = FilterQuality.low;
+  // Blur and glyph overhang in logical pixels.
+  static const _rasterPadding = 6.0;
   int _rasterBytes = 0;
   int get rasterBytes => _rasterBytes;
   int buildCount = 0;
@@ -178,19 +181,21 @@ final class DanmakuTextLayouts {
     // The native paragraphs remain available for pixel-budget overflow.
     if (cacheRaster) {
       final ratio = pixelRatio.isFinite && pixelRatio > 0 ? pixelRatio : 1.0;
-      if (entry.image != null && entry.pixelRatio != ratio) {
+      final cached = entry.raster;
+      if (cached != null && cached.pixelRatio == ratio) {
+        _cacheHits++;
+        _paintRaster(entry, cached, canvas, offset);
+        return;
+      }
+      if (cached != null) {
         _releaseRaster(entry);
       }
-      if (entry.image != null) _cacheHits++;
-      const padding = 6.0; // Covers the 2px blur plus glyph overhang.
-      final width = ((entry.fill.width + padding * 2) * ratio).ceil();
-      final height = ((entry.fill.height + padding * 2) * ratio).ceil();
+      // Dimensions and budget checks are needed only when preparing an image.
+      final width = ((entry.fill.width + _rasterPadding * 2) * ratio).ceil();
+      final height = ((entry.fill.height + _rasterPadding * 2) * ratio).ceil();
       final bytes = width * height * 4;
       // Extremely long/high-DPI lines keep their original paragraph drawing.
-      if (entry.image == null &&
-          width <= 4096 &&
-          height <= 4096 &&
-          bytes <= maxRasterBytes) {
+      if (width <= 4096 && height <= 4096 && bytes <= maxRasterBytes) {
         while (_rasterBytes + bytes > maxRasterBytes && _rasters.isNotEmpty) {
           _TextLayout? victim;
           for (final candidate in _rasters.keys) {
@@ -205,33 +210,22 @@ final class DanmakuTextLayouts {
         if (_rasterBytes + bytes <= maxRasterBytes) {
           final recorder = ui.PictureRecorder();
           final rasterCanvas = Canvas(recorder)..scale(ratio);
-          entry.paint(rasterCanvas, const Offset(padding, padding));
+          entry.paint(
+            rasterCanvas,
+            const Offset(_rasterPadding, _rasterPadding),
+          );
           final picture = recorder.endRecording();
-          entry.image = picture.toImageSync(width, height);
+          entry.raster = _TextRaster(picture.toImageSync(width, height), ratio);
           picture.dispose();
-          entry.pixelRatio = ratio;
           _rasters[entry] = bytes;
           _rasterBytes += bytes;
           if (_rasterBytes > _peakRasterBytes) _peakRasterBytes = _rasterBytes;
           rasterBuildCount++;
         }
       }
-      final image = entry.image;
-      if (image != null) {
-        _imagePaints++;
-        final cost = _rasters.remove(entry);
-        if (cost != null) _rasters[entry] = cost;
-        canvas.drawImageRect(
-          image,
-          Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
-          Rect.fromLTWH(
-            offset.dx - padding,
-            offset.dy - padding,
-            image.width / ratio,
-            image.height / ratio,
-          ),
-          Paint()..filterQuality = FilterQuality.low,
-        );
+      final raster = entry.raster;
+      if (raster != null) {
+        _paintRaster(entry, raster, canvas, offset);
         return;
       }
       if (width > 4096 || height > 4096) {
@@ -247,10 +241,32 @@ final class DanmakuTextLayouts {
     entry.paint(canvas, offset);
   }
 
+  void _paintRaster(
+    _TextLayout entry,
+    _TextRaster raster,
+    Canvas canvas,
+    Offset offset,
+  ) {
+    _imagePaints++;
+    final cost = _rasters.remove(entry);
+    if (cost != null) _rasters[entry] = cost;
+    canvas.drawImageRect(
+      raster.image,
+      raster.source,
+      Rect.fromLTWH(
+        offset.dx - _rasterPadding,
+        offset.dy - _rasterPadding,
+        raster.logicalWidth,
+        raster.logicalHeight,
+      ),
+      _imagePaint,
+    );
+  }
+
   void _releaseRaster(_TextLayout entry) {
     _rasterBytes -= _rasters.remove(entry) ?? 0;
-    entry.image?.dispose();
-    entry.image = null;
+    entry.raster?.image.dispose();
+    entry.raster = null;
   }
 
   void releaseRasters() {
@@ -276,8 +292,7 @@ final class _TextLayout {
   final TextPainter fill;
   final TextPainter Function()? _makeOutline;
   TextPainter? _outline;
-  ui.Image? image;
-  double pixelRatio = 1;
+  _TextRaster? raster;
   void paint(Canvas canvas, Offset offset) {
     final makeOutline = _makeOutline;
     if (makeOutline != null) {
@@ -290,4 +305,23 @@ final class _TextLayout {
     fill.dispose();
     _outline?.dispose();
   }
+}
+
+/// Geometry shares the image lifetime so cached draws never remeasure text or
+/// query native image dimensions. Replacing the DPR replaces both together.
+final class _TextRaster {
+  _TextRaster(this.image, this.pixelRatio)
+    : source = Rect.fromLTWH(
+        0,
+        0,
+        image.width.toDouble(),
+        image.height.toDouble(),
+      ),
+      logicalWidth = image.width / pixelRatio,
+      logicalHeight = image.height / pixelRatio;
+
+  final ui.Image image;
+  final double pixelRatio;
+  final Rect source;
+  final double logicalWidth, logicalHeight;
 }
