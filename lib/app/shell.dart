@@ -1211,22 +1211,24 @@ final class _BiliAppShellState extends State<BiliAppShell>
   Widget _sidebarToggle(BuildContext context, {bool caption = false}) {
     final colors = Theme.of(context).colorScheme;
     return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 8, vertical: caption ? 4 : 2),
+      padding: caption
+          ? EdgeInsets.zero
+          : const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       child: IconButton(
         key: const ValueKey('workspace-sidebar-toggle'),
         tooltip: _sidebarCollapsed ? '展开侧栏' : '收起侧栏',
-        style: IconButton.styleFrom(
-          minimumSize: const Size(36, 28),
-          fixedSize: caption ? const Size(36, 36) : null,
-          tapTargetSize: caption ? MaterialTapTargetSize.shrinkWrap : null,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          foregroundColor: colors.onSurfaceVariant,
-          backgroundColor: colors.surfaceContainerLow,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(color: colors.outlineVariant),
-          ),
-        ),
+        style: caption
+            ? desktopCaptionButtonStyle
+            : IconButton.styleFrom(
+                minimumSize: const Size(36, 28),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                foregroundColor: colors.onSurfaceVariant,
+                backgroundColor: colors.surfaceContainerLow,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  side: BorderSide(color: colors.outlineVariant),
+                ),
+              ),
         onPressed: () {
           final collapsed = !_sidebarCollapsed;
           if (widget.sidebarCollapsed == null) {
@@ -1253,27 +1255,27 @@ final class _BiliAppShellState extends State<BiliAppShell>
   }) {
     final colors = Theme.of(context).colorScheme;
     return Padding(
-      padding: EdgeInsets.only(
-        right: 8,
-        top: caption ? 4 : 2,
-        bottom: caption ? 4 : 2,
-      ),
+      padding: caption
+          ? EdgeInsets.zero
+          : const EdgeInsets.only(right: 8, top: 2, bottom: 2),
       child: IconButton(
         key: const ValueKey('workspace-return-to-playback'),
         tooltip: '回到播放页',
-        style: IconButton.styleFrom(
-          minimumSize: const Size(36, 28),
-          fixedSize: caption ? const Size(36, 36) : null,
-          tapTargetSize: caption ? MaterialTapTargetSize.shrinkWrap : null,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          foregroundColor: colors.onSurfaceVariant,
-          disabledForegroundColor: colors.onSurface.withValues(alpha: .38),
-          backgroundColor: colors.surfaceContainerLow,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(color: colors.outlineVariant),
-          ),
-        ),
+        style: caption
+            ? desktopCaptionButtonStyle
+            : IconButton.styleFrom(
+                minimumSize: const Size(36, 28),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                foregroundColor: colors.onSurfaceVariant,
+                disabledForegroundColor: colors.onSurface.withValues(
+                  alpha: .38,
+                ),
+                backgroundColor: colors.surfaceContainerLow,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  side: BorderSide(color: colors.outlineVariant),
+                ),
+              ),
         onPressed: enabled ? _returnToPlayback : null,
         icon: Icon(Icons.play_circle_outline_rounded, size: caption ? 18 : 20),
       ),

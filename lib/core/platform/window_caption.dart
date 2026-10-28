@@ -2,6 +2,13 @@ import 'package:flutter/material.dart';
 
 const desktopCaptionHeight = 44.0;
 const desktopCaptionTextStyle = TextStyle(fontSize: 13);
+const desktopCaptionButtonStyle = ButtonStyle(
+  fixedSize: WidgetStatePropertyAll(Size(46, desktopCaptionHeight)),
+  padding: WidgetStatePropertyAll(EdgeInsets.zero),
+  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  visualDensity: VisualDensity.standard,
+  shape: WidgetStatePropertyAll(RoundedRectangleBorder()),
+);
 
 class DesktopCaptionButton extends StatelessWidget {
   const DesktopCaptionButton({
@@ -22,25 +29,18 @@ class DesktopCaptionButton extends StatelessWidget {
     tooltip: tooltip,
     onPressed: onPressed,
     icon: Icon(icon, size: 18),
-    style: ButtonStyle(
-      fixedSize: const WidgetStatePropertyAll(Size(46, desktopCaptionHeight)),
-      padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      visualDensity: VisualDensity.standard,
-      shape: const WidgetStatePropertyAll(RoundedRectangleBorder()),
-      backgroundColor: close
-          ? WidgetStateProperty.resolveWith(
+    style: close
+        ? desktopCaptionButtonStyle.copyWith(
+            backgroundColor: WidgetStateProperty.resolveWith(
               (states) => states.contains(WidgetState.hovered)
                   ? const Color(0xffc42b1c)
                   : null,
-            )
-          : null,
-      foregroundColor: close
-          ? WidgetStateProperty.resolveWith(
+            ),
+            foregroundColor: WidgetStateProperty.resolveWith(
               (states) =>
                   states.contains(WidgetState.hovered) ? Colors.white : null,
-            )
-          : null,
-    ),
+            ),
+          )
+        : desktopCaptionButtonStyle,
   );
 }

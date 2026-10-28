@@ -113,7 +113,7 @@ void main() {
                 'workspace-return-to-playback',
               ]) {
                 final button = find.byKey(ValueKey(key));
-                expect(tester.getSize(button), const Size(36, 36));
+                expect(tester.getSize(button), const Size(46, 44));
                 expect(tester.getCenter(button).dy, tester.getCenter(main).dy);
               }
             }
