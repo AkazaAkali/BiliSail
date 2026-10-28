@@ -750,8 +750,9 @@ final class _BiliAppShellState extends State<BiliAppShell>
               };
               final playback = _workspace.latestPlayback;
               final captionTools =
-                  !_android &&
-                  widget.windowControlsBuilder != null &&
+                  workspaceHeaderVisibleForPlatform(
+                    Theme.of(context).platform,
+                  ) &&
                   (_dualTabs || _singlePage);
               final navigationTools = compact
                   ? null
@@ -781,7 +782,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
                     else if (navigationTools != null)
                       SizedBox(
                         key: const ValueKey('workspace-sidebar-toolbar'),
-                        height: 40,
+                        height: captionTools ? desktopCaptionHeight : 40,
                         child: Row(children: [navigationTools]),
                       ),
                   ] else

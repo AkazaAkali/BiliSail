@@ -54,3 +54,10 @@
 - 根检查首次在同期弹幕文件的两条 `TickerMode.of` 弃用提示处停止；随后这些文件更新后，`tool/check.ps1 -SkipPub` 的 Lint、RootTests、PackageTests 三阶段均通过，根应用 3183 项、四包 682 项测试通过。13 项根测试因 Windows 符号链接权限跳过，10 项 mux 原生测试因未配置 `BILI_MUX_LIBRARY` 跳过。日志为 `build/window-caption-check.log`、`build/window-caption-lint.log`、`build/window-caption-root-tests.log`、`build/window-caption-package-tests.log`；本任务七个 Dart 文件的定向分析和文档相对链接、`git diff --check` 同样通过。
 - 后续将两个导航按钮改为平面样式后，185 项相关回归、三个 Dart 文件定向分析及完整 `tool/check.ps1 -SkipPub` 通过：根应用 3184 项、四包 692 项通过，仍有 13 项符号链接权限用例和 10 项未配置 `BILI_MUX_LIBRARY` 的 mux 原生用例跳过。日志为 `build/window-caption-flat-buttons-targeted.log`、`build/window-caption-flat-buttons-analysis.log`、`build/window-caption-flat-buttons-check.log`；文档相对链接及 `git diff --check` 通过。
 - 本轮未进行平台构建、原生窗口目视验收或性能测量；组件测试不代表实际窗口视觉确认。
+
+## macOS 宽屏按钮统一（2026-10-28）
+
+- 单／双标签模式的桌面导航按钮按平台选择共用样式，不再依赖是否注入自绘窗口控制。macOS 主窗口的侧栏开关和“回到播放页”与 Windows 一样使用扁平按钮、46 × 44 点击区域和 18 号图标，移除常驻底色、圆角描边与额外间距，保留提示、禁用态和侧栏图标旋转。
+- macOS 原生标题栏下的独立导航工具行同步使用 44 逻辑像素高度，避免压缩共用按钮。原生窗口控制、侧栏收起状态与返回播放行为沿用既有实现；多标签栏及移动平台的按钮样式不变。
+- `tool/check.ps1 -SkipPub` 通过：格式、静态分析、平台打包边界检查、根应用 3188 项及四包 699 项离线测试通过；13 项根测试因 Windows 符号链接权限跳过，10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。日志为 `build/macos-navigation-buttons-check.log`。文档的 11 个相对链接检查通过。
+- 当前 Windows 主机没有运行中的 Flutter 调试实例，热重载因无 DTD 连接未执行成功。本轮未进行平台构建、macOS 原生窗口视觉确认或性能测量。
