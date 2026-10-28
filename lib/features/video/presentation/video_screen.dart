@@ -417,6 +417,7 @@ final class _VideoScreenState extends ConsumerState<VideoScreen> {
                         },
                         enabled: tab == 1,
                         builder: (context, detailOpen) => PlaybackInfoTabs(
+                          compactPhoneNavigation: true,
                           key: ValueKey(video.summary.id),
                           showNavigation: !detailOpen,
                           value: tab,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'paging_tab_strip.dart';
+import 'compact_phone_spacing.dart';
 import 'retained_tab_view.dart';
 
 /// Shared sidebar navigation; the player stays outside the retained pager.
@@ -15,6 +16,7 @@ final class PlaybackInfoTabs extends StatefulWidget {
     this.itemKey,
     this.trailing,
     this.compact = false,
+    this.compactPhoneNavigation = false,
     this.preloadPages = false,
     this.showNavigation = true,
   });
@@ -27,6 +29,9 @@ final class PlaybackInfoTabs extends StatefulWidget {
   final Key Function(int)? itemKey;
   final Widget? trailing;
   final bool compact;
+
+  /// Video details can trim phone tab padding without changing label typography.
+  final bool compactPhoneNavigation;
   final bool preloadPages;
   final bool showNavigation;
 
@@ -40,6 +45,8 @@ final class _PlaybackInfoTabsState extends State<PlaybackInfoTabs> {
   @override
   Widget build(BuildContext context) {
     final tabs = List<int>.generate(widget.labels.length, (index) => index);
+    final phoneNavigation =
+        widget.compactPhoneNavigation && isCompactPhoneLayout(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -63,10 +70,17 @@ final class _PlaybackInfoTabsState extends State<PlaybackInfoTabs> {
                         .colorScheme
                         .onSurfaceVariant,
                     buttonStyle: TextButton.styleFrom(
-                      padding: widget.compact
+                      padding: phoneNavigation
+                          ? const EdgeInsets.symmetric(
+                              horizontal: 17,
+                              vertical: 8,
+                            )
+                          : widget.compact
                           ? const EdgeInsets.fromLTRB(16, 11, 16, 9)
                           : const EdgeInsets.fromLTRB(17, 15, 17, 12),
-                      minimumSize: Size.zero,
+                      minimumSize: phoneNavigation
+                          ? const Size(48, 48)
+                          : Size.zero,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       shape: const RoundedRectangleBorder(),
                       textStyle: widget.compact
@@ -76,7 +90,13 @@ final class _PlaybackInfoTabsState extends State<PlaybackInfoTabs> {
                   ),
                 ),
               ),
-              ?widget.trailing,
+              if (widget.trailing case final trailing?)
+                phoneNavigation
+                    ? ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 48),
+                        child: trailing,
+                      )
+                    : trailing,
             ],
           ),
         if (widget.showNavigation) const Divider(height: 1),

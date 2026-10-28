@@ -1,4 +1,6 @@
 import 'package:bilisail/core/presentation/workspace_activity.dart';
+import 'package:bilisail/app/theme.dart';
+import 'package:flutter/foundation.dart';
 import 'package:bilisail/shared/ui/paging_tab_strip.dart';
 import 'package:bilisail/shared/ui/playback_info_tabs.dart';
 import 'package:flutter/gestures.dart';
@@ -6,6 +8,111 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets(
+    'video phone tabs trim padding but retain typography and 48dp targets',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 700);
+      tester.view.display.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.view.display.reset);
+      var value = 0;
+      var menuTaps = 0;
+      Future<void> show({
+        bool compact = true,
+        double displayWidth = 390,
+        double scale = 1,
+      }) async {
+        tester.view.display.size = Size(displayWidth, 700);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: BiliTheme.light(),
+            home: MediaQuery(
+              data: MediaQueryData(
+                size: const Size(390, 700),
+                textScaler: TextScaler.linear(scale),
+              ),
+              child: Scaffold(
+                body: StatefulBuilder(
+                  builder: (context, update) => PlaybackInfoTabs(
+                    compactPhoneNavigation: compact,
+                    labels: const [Text('简介'), Text('评论')],
+                    value: value,
+                    onChanged: (tab) => update(() => value = tab),
+                    viewKey: const ValueKey('compact-info-pager'),
+                    itemKey: (tab) => ValueKey('compact-info-tab-$tab'),
+                    trailing: IconButton(
+                      key: const ValueKey('compact-info-menu'),
+                      onPressed: () => menuTaps++,
+                      icon: const Icon(Icons.more_vert),
+                    ),
+                    pageBuilder: (_, tab, _) => Text('信息页$tab'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      final first = find.byKey(const ValueKey('compact-info-tab-0'));
+      final second = find.byKey(const ValueKey('compact-info-tab-1'));
+      final menu = find.byKey(const ValueKey('compact-info-menu'));
+      await show(compact: false);
+      final regularHeight = tester.getSize(first).height;
+      final regularMenuHeight = tester.getSize(menu).height;
+      final regularFont = tester
+          .widget<RichText>(
+            find.descendant(
+              of: find.text('简介'),
+              matching: find.byType(RichText),
+            ),
+          )
+          .text
+          .style
+          ?.fontSize;
+      await show();
+      final phone =
+          defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS;
+      expect(tester.getSize(first).height, phone ? 48 : regularHeight);
+      expect(
+        tester.getSize(menu).height,
+        phone ? greaterThanOrEqualTo(48) : regularMenuHeight,
+      );
+      expect(
+        tester
+            .widget<RichText>(
+              find.descendant(
+                of: find.text('简介'),
+                matching: find.byType(RichText),
+              ),
+            )
+            .text
+            .style
+            ?.fontSize,
+        regularFont,
+      );
+      await tester.tap(second);
+      await tester.pumpAndSettle();
+      expect(value, 1);
+      expect(find.text('信息页1').hitTestable(), findsOneWidget);
+      await tester.tap(menu);
+      expect(menuTaps, 1);
+      await show(displayWidth: 800);
+      expect(tester.getSize(first).height, regularHeight);
+      await show(scale: 2);
+      expect(tester.getSize(first).height, greaterThanOrEqualTo(48));
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+      TargetPlatform.windows,
+    }),
+  );
+
   final pager = find.byKey(const ValueKey('playback-test-pager'));
   late StateSetter update;
   var value = 0;
