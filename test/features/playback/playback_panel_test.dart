@@ -1225,6 +1225,71 @@ void main() {
   );
 
   testWidgets(
+    'paused fullscreen defers physical portrait exit until its modal closes',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      _usePhoneDisplay(tester);
+      tester.view.physicalSize = const Size(800, 400);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final rotations = StreamController<DeviceRotation>.broadcast();
+      addTearDown(rotations.close);
+      final engine = _FakeEngine();
+      final session = _session(engine);
+      addTearDown(session.close);
+      final window = _FakeWindowService(desktop: false);
+      await tester.pumpWidget(
+        _app(
+          session,
+          window,
+          const AppSettings.defaults(),
+          deviceRotations: rotations.stream,
+        ),
+      );
+      await _pumpFrames(tester);
+      await session.pause();
+      engine._emit(
+        engine.currentSnapshot.copyWith(
+          videoDimensions: const VideoDimensions(1920, 1080),
+        ),
+      );
+      rotations.add(
+        const DeviceRotation(DevicePosture.landscape, autoRotate: true),
+      );
+      await _pumpFrames(tester);
+      expect(window.fullScreen, isTrue);
+      expect(engine.currentSnapshot.desiredPlaying, isFalse);
+      unawaited(
+        showDialog<void>(
+          context: tester.element(find.byType(Dialog)),
+          builder: (_) => const AlertDialog(content: Text('rotation guard')),
+        ),
+      );
+      await tester.pumpAndSettle();
+      rotations.add(
+        const DeviceRotation(DevicePosture.portrait, autoRotate: true),
+      );
+      await _pumpFrames(tester);
+      expect(find.text('rotation guard'), findsOneWidget);
+      expect(window.fullScreen, isTrue);
+      final snapshot = engine.currentSnapshot;
+      Navigator.of(tester.element(find.byType(AlertDialog))).pop();
+      // No new sensor event or playback snapshot follows dismissal. Route
+      // visibility alone must reconsider the already-known portrait posture.
+      await tester.pumpAndSettle();
+      expect(find.text('rotation guard'), findsNothing);
+      expect(window.fullScreen, isFalse);
+      expect(window.orientations.last, isNull);
+      expect(identical(engine.currentSnapshot, snapshot), isTrue);
+      expect(engine.opens, 1);
+      expect(engine.maxSurfaces, 1);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await _pumpFrames(tester);
+    },
+  );
+
+  testWidgets(
     'manual portrait fullscreen waits for an actual landscape to portrait turn',
     (tester) async {
       tester.view.devicePixelRatio = 1;

@@ -15,7 +15,7 @@
 
 `SystemChrome.setPreferredOrientations` 会把窗口锁横，`didChangeMetrics` 无法再证明用户物理转竖。因此新增应用自有小型 EventChannel `bilisail/device_orientation`，不引入传感器依赖、不新增权限：Android 使用 `OrientationEventListener`（轴附近稳定区和未知姿态），iOS 使用 `UIDevice.orientationDidChangeNotification`。事件包含物理姿态、系统自动旋转许可及设备/窗口资格。
 
-Flutter 由可注入的 `deviceRotationProvider` 共用广播流；仅可见前台播放页订阅。纯 Dart `FullscreenRotation` 保存物理方向历史。平台命令沿用既有 owner 串行队列，迟到平台回复再次检查页面和姿态，防止退出、隐藏或重新进入时遗留方向锁。手动退出允许 `WindowService.setFullScreen(false, orientation: portrait)`，后续 null 请求释放本服务安装的限制。
+Flutter 由可注入的 `deviceRotationProvider` 共用广播流；仅可见前台播放页订阅。纯 Dart `FullscreenRotation` 保存物理方向历史。全屏路由恢复current时重新协调物理姿态；暂停时设置弹窗可先关闭，再完成延后的转竖退出，无需新播放快照/传感事件或轮询。退出显式请求surface交接所需的下一帧。平台命令沿用既有 owner 串行队列，迟到平台回复再次检查页面和姿态，防止退出、隐藏或重新进入时遗留方向锁。手动退出允许 `WindowService.setFullScreen(false, orientation: portrait)`，后续 null 请求释放本服务安装的限制。
 
 ## 验证
 
@@ -24,6 +24,7 @@ Flutter 由可注入的 `deviceRotationProvider` 共用广播流；仅可见前�
 - `flutter test --no-pub test/features/playback/fullscreen_rotation_test.dart test/features/playback/playback_panel_test.dart`：294项通过；随后新增的竖视频传感器序列用例单独通过，合计295项。
 - `flutter test --no-pub test/core/platform/window_service_test.dart`：17项通过，4项Windows专属跳过；覆盖横全屏→竖屏退出→释放限制→重复释放不再改方向。
 - `flutter test --no-pub test/features/video/inline_video_height_test.dart test/features/video/video_screen_test.dart`：54项通过；最后简化维度订阅后新portrait用例再次通过。
+- 补充暂停全屏上方模态弹窗关闭后的转竖回归后，完整panel与方向策略296项通过；最后的调度回归仅靠 `pumpAndSettle` 通过（无额外固定帧或新传感器/播放快照）。
 - 新增/修改Dart文件格式检查、定向静态分析与 `git diff --check` 通过。
 - `tool/check.ps1 -SkipPub` 已完成全仓格式、静态分析、平台边界脚本及根应用3252项测试（5项平台专属跳过）、bili_api 495项、bili_player 83项、bili_danmaku 116项。旧检查进程在最后mux阶段被环境安全策略拦截遥测请求，不能宣称整脚本通过；随后在官方禁遥测配置下直接重跑mux：5项通过，10项原生用例因未配Linux原生库跳过。检查启动后的最后新增/精简改动另有上述定向复验。
 - 提交此草案时，本分支Android独立构建尚未完成；包含本功能、观看历史搜索和间距调整的集成测试包另行构建，不把集成构建冒充本分支独立构建或实机验收。

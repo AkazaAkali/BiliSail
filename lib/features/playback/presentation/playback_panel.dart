@@ -303,6 +303,9 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
     FocusManager.instance.primaryFocus?.unfocus(
       disposition: UnfocusDisposition.scope,
     );
+    // Rotation reconciliation can run in a post-frame callback while paused;
+    // explicitly request the frame that this surface hand-off awaits.
+    WidgetsBinding.instance.scheduleFrame();
     await WidgetsBinding.instance.endOfFrame;
     if (mounted &&
         navigator != null &&
@@ -514,37 +517,49 @@ class _PlaybackPanelState extends ConsumerState<PlaybackPanel>
         barrierDismissible: false,
         barrierLabel: '全屏播放器',
         transitionDuration: Duration.zero,
-        pageBuilder: (dialogContext, _, _) => UncontrolledProviderScope(
-          container: providerContainer,
-          child: Dialog.fullscreen(
-            backgroundColor: Colors.black,
-            child: _PlayerView(
-              session: _session,
-              settings: _settings,
-              controlsVisible: _controlsVisible,
-              shortcuts: _shortcuts,
-              onToggleComments: () => widget.onToggleComments(),
-              danmakuComposerBuilder: widget.danmakuComposerBuilder == null
-                  ? null
-                  : (context) =>
-                        widget.danmakuComposerBuilder?.call(context) ??
-                        const SizedBox.shrink(),
-              danmakuOverlayBuilder: widget.danmakuOverlayBuilder == null
-                  ? null
-                  : (context) =>
-                        widget.danmakuOverlayBuilder?.call(context) ??
-                        const SizedBox.shrink(),
-              pageCommands: _pageCommands,
-              navigation: _navigation,
-              onNavigate: _navigateFromPlayer,
-              fullScreen: true,
-              onFullScreen: () {
-                if (identical(_fullScreenRoute, ModalRoute.of(dialogContext))) {
-                  navigator.pop();
-                }
-              },
-            ),
-          ),
+        pageBuilder: (dialogContext, _, _) => Builder(
+          builder: (routeContext) {
+            // A modal can defer a physical portrait exit. When it closes,
+            // reconcile even if playback is paused and sensors emit no new data.
+            if (ModalRoute.isCurrentOf(routeContext) == true) {
+              _scheduleRotation();
+            }
+            return UncontrolledProviderScope(
+              container: providerContainer,
+              child: Dialog.fullscreen(
+                backgroundColor: Colors.black,
+                child: _PlayerView(
+                  session: _session,
+                  settings: _settings,
+                  controlsVisible: _controlsVisible,
+                  shortcuts: _shortcuts,
+                  onToggleComments: () => widget.onToggleComments(),
+                  danmakuComposerBuilder: widget.danmakuComposerBuilder == null
+                      ? null
+                      : (context) =>
+                            widget.danmakuComposerBuilder?.call(context) ??
+                            const SizedBox.shrink(),
+                  danmakuOverlayBuilder: widget.danmakuOverlayBuilder == null
+                      ? null
+                      : (context) =>
+                            widget.danmakuOverlayBuilder?.call(context) ??
+                            const SizedBox.shrink(),
+                  pageCommands: _pageCommands,
+                  navigation: _navigation,
+                  onNavigate: _navigateFromPlayer,
+                  fullScreen: true,
+                  onFullScreen: () {
+                    if (identical(
+                      _fullScreenRoute,
+                      ModalRoute.of(dialogContext),
+                    )) {
+                      navigator.pop();
+                    }
+                  },
+                ),
+              ),
+            );
+          },
         ),
       );
       InputScope.of<Object>(context)?.routes.presentation(route);
