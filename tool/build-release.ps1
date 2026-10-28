@@ -11,6 +11,7 @@ $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 . (Join-Path $PSScriptRoot 'windows-installers.ps1')
 . (Join-Path $PSScriptRoot 'windows-msix-identity.ps1')
 . (Join-Path $PSScriptRoot 'macos-release-validation.ps1')
+. (Join-Path $PSScriptRoot 'ios-package-validation.ps1')
 
 function Invoke-BuildCommand([string]$Executable, [string[]]$Parameters) {
   & $Executable @Parameters
@@ -224,6 +225,13 @@ try {
         if (!(Test-Path -LiteralPath $binary)) { throw "iOS framework is missing: $required" }
         Invoke-BuildCommand lipo @($binary, '-verify_arch', 'arm64')
       }
+      $muxFramework = Join-Path $app 'Frameworks/BiliMux.framework'
+      Confirm-IosMuxFrameworkLayout $muxFramework
+      $muxInfo = Join-Path $muxFramework 'Info.plist'
+      foreach ($key in @{ CFBundleExecutable = 'BiliMux'; CFBundleIdentifier = 'dev.bilisail.mux'; CFBundlePackageType = 'FMWK' }.GetEnumerator()) {
+        $actual = & plutil -extract $key.Key raw -o - $muxInfo
+        if ($LASTEXITCODE -ne 0 -or $actual -cne $key.Value) { throw "Invalid iOS BiliMux framework plist key: $($key.Key)" }
+      }
       Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md' -Destination $app
       $package = Join-Path $releaseDir "$name-unsigned.ipa"
       Invoke-BuildCommand ditto @('-c', '-k', '--keepParent', $payload, $package)
@@ -232,6 +240,8 @@ try {
         if (!$ipa.GetEntry('Payload/Runner.app/Info.plist') -or !$ipa.GetEntry('Payload/Runner.app/Frameworks/BiliMux.framework/BiliMux')) {
           throw 'Unsigned IPA has an invalid Payload layout.'
         }
+        $muxPrefix = 'Payload/Runner.app/Frameworks/BiliMux.framework/'
+        Confirm-IosMuxFrameworkEntries @($ipa.Entries.FullName | Where-Object { $_.StartsWith($muxPrefix, [System.StringComparison]::Ordinal) } | ForEach-Object { $_.Substring($muxPrefix.Length) })
       } finally { $ipa.Dispose() }
       $signing = 'unsigned-requires-apple-signing'
     }

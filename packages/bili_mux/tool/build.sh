@@ -161,14 +161,6 @@ if [[ "$target" == windows-x64 ]]; then
   cp "$package_dir/native/prebuilt/$target/configure.log" "$package_dir/native/prebuilt/$target/bili_mux.configuration.txt"
 fi
 if [[ "$target" == macos-arm64 || "$target" == ios-arm64 ]]; then
-  apple_platform=macos
-  if [[ "$target" == ios-arm64 ]]; then apple_platform=ios; fi
-  pod_framework="$package_dir/$apple_platform/Frameworks/BiliMux.framework"
-  mkdir -p "$pod_framework/Resources"
-  cp "$output_name" "$pod_framework/BiliMux"
-  cp "$framework_info" "$pod_framework/Info.plist"
-  cp "$package_dir/native/prebuilt/$target/COPYING.LGPLv2.1" "$pod_framework/Resources/"
-  cp "$package_dir/native/prebuilt/$target/source.txt" "$pod_framework/Resources/"
-  cp "$package_dir/native/prebuilt/$target/configure.log" "$pod_framework/Resources/"
+  bash "$package_dir/tool/package-apple-framework.sh" "$target"
 fi
 echo "Built $target: $output_name"

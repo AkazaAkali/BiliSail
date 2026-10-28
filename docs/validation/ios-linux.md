@@ -21,6 +21,20 @@
 - 安全存储继续使用系统 Keychain；[entitlements](../../ios/Runner/Runner.entitlements) 声明空的 Keychain access groups，不添加团队或共享组标识。后续安装签名须结合实际 provisioning profile 重新生成应用及 framework 签名和最终 entitlement。
 - **GitHub Actions token 不能替代 Apple 开发者证书或 provisioning profile**。未签名 IPA 需自行签署才能安装；本轮没有配置 Apple 账号、上传 App Store 或承诺商店审核。[Flutter iOS 发布说明](https://docs.flutter.dev/deployment/ios)
 
+### 2026-10-28：BiliMux framework 安装检查失败
+
+用户报告当前构建的未签名 IPA 在后续安装时失败，错误为 `MIInstallerErrorDomain error 35` / `PackageInspectionFailed`，提示 `BiliMux.framework` 的 Info.plist 没有预期键；将 framework 根目录的 `Resources/` 改名后即可安装。
+
+根因在 [原生构建脚本](../../packages/bili_mux/tool/build.sh)的 CocoaPods 资产生成步骤：iOS／macOS 共用 `mkdir -p BiliMux.framework/Resources`，将 `configure.log`、`COPYING.LGPLv2.1` 和 `source.txt` 放入该目录，但 iOS `Info.plist` 位于 framework 根目录。[iOS plist 模板](../../packages/bili_mux/native/Info.ios.plist)已经包含可执行名、标识、包类型和版本；旧发布检查仅验证二进制架构和少量 ZIP 路径，没有检查 framework 布局。
+
+Apple 公开的 [bundle 布局识别实现](https://github.com/apple-oss-distributions/CF/blob/main/CFBundle_Resources.c)中，`_CFBundleGetBundleVersionForURL` 会优先将具有 `Resources/` 的 framework 识别为旧式 bundle；对应的 [plist 查找实现](https://github.com/apple-oss-distributions/CF/blob/main/CFBundle_InfoPlist.c)从该目录读取 Info.plist，找不到时返回空字典。结合用户的改名验证，这解释了根 plist 明明有键却仍报缺键的现象；这里没有直接调试设备上的私有 installd 实现。[CMake 官方文档](https://cmake.org/cmake/help/latest/prop_sf/MACOSX_PACKAGE_LOCATION.html)也明确说明 iOS 使用扁平布局，没有 `Resources` 目录。
+
+[Apple 打包步骤](../../packages/bili_mux/tool/package-apple-framework.sh)现在重新生成各平台 CocoaPods 使用的 framework，清除旧构建目录及签名残留。iOS 将三份许可／来源／配置材料直接放在根目录，与 `BiliMux`、`Info.plist` 同层；macOS 的材料仍位于 `Resources/`。二进制、FFI 路径、plist 模板和签名方式沿用原值。[发布校验](../../tool/ios-package-validation.ps1)同时检查暂存 `.app` 和最终 IPA 的 BiliMux 条目，拒绝 `Resources/`／`Versions/`，要求五个根文件齐全；Xcode 主机另用 `plutil` 核对实际 framework plist 的可执行名、标识及包类型。
+
+Windows/MSYS2 与 WSL Ubuntu 22.04 上的 [目录生成回归](../../packages/bili_mux/tool/test-apple-framework.sh)通过：从含旧 `Resources/` 和签名文件的目录分别构造 iOS／macOS 产物，连续生成两次，逐文件比对内容并检查无陈旧文件。另有 [14 项目录与 ZIP 边界检查](../../tool/test-ios-package-validation.ps1)通过，覆盖原错误布局、空目录残留、根文件缺失及正常归档；已分别接入 CI 和根检查。Bash／PowerShell 语法、actionlint 1.7.12 与 `git diff --check` 通过。本机为 Windows，没有重建、重签或安装修复后的真实 IPA；最终 iOS 安装结果仍需 Xcode 构建与设备验证。
+
+本轮 `tool/check.ps1 -SkipPub` 完整通过格式、静态分析、打包边界检查和 3897 项离线测试（根应用 3198、API 495、播放器 83、弹幕 116、封装 5）。13 项 Windows 符号链接用例因权限条件跳过，另有 10 项 mux 原生用例因未配置 `BILI_MUX_LIBRARY` 跳过；这些跳过项不计为通过。五份锁文件无变化。
+
 ## Linux
 
 [GTK runner](../../linux/runner/my_application.cc) 使用系统原生标题栏。桌面窗口、全屏、快捷键、音视频和弹幕沿用共享能力；独立播放窗口目前仅在 Windows／macOS 开放，Linux 双标签在同一应用窗口中显示。
