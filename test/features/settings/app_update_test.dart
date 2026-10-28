@@ -56,10 +56,14 @@ ProviderContainer _container(
   AppUpdateRepository repository,
   _CheckStore store, {
   DateTime? now,
+  _SettingsRepository? settings,
 }) {
   final container = ProviderContainer(
     overrides: [
       appUpdateRepositoryProvider.overrideWithValue(repository),
+      settingsRepositoryProvider.overrideWithValue(
+        settings ?? _SettingsRepository(),
+      ),
       updateCheckStoreProvider.overrideWithValue(store),
       updateClockProvider.overrideWithValue(() => now ?? DateTime(2026, 10, 6)),
     ],
@@ -76,6 +80,7 @@ Widget _app(
   bool openSucceeds = true,
   Brightness brightness = Brightness.light,
   DateTime? now,
+  _SettingsRepository? settings,
 }) {
   final navigatorKey = GlobalKey<NavigatorState>();
   return ProviderScope(
@@ -83,7 +88,9 @@ Widget _app(
       appUpdateRepositoryProvider.overrideWithValue(repository),
       updateCheckStoreProvider.overrideWithValue(store),
       updateClockProvider.overrideWithValue(() => now ?? DateTime(2026, 10, 6)),
-      settingsRepositoryProvider.overrideWithValue(_SettingsRepository()),
+      settingsRepositoryProvider.overrideWithValue(
+        settings ?? _SettingsRepository(),
+      ),
       appUpdateLinkOpenerProvider.overrideWithValue((uri) async {
         opened.add(uri);
         return openSucceeds;
@@ -106,6 +113,46 @@ Widget _app(
 }
 
 void main() {
+  for (final failSave in [false, true]) {
+    testWidgets(
+      'prerelease switch controls the next check and rolls back failed saves: $failSave',
+      (tester) async {
+        final settings = _SettingsRepository()..failSave = failSave;
+        final repository = _UpdateRepository();
+        await tester.pumpWidget(
+          _app(
+            repository,
+            _CheckStore()..day = '2026-10-06',
+            [],
+            settings: settings,
+            home: const Scaffold(
+              body: SettingsScreen(category: SettingsCategory.about),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final toggle = find.widgetWithText(SwitchListTile, '检查预发布更新');
+        expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+        await tester.ensureVisible(toggle);
+        await tester.pumpAndSettle();
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect(settings.settings.checkPrereleaseUpdates, !failSave);
+        expect(tester.widget<SwitchListTile>(toggle).value, !failSave);
+        expect(
+          find.text('设置保存失败，请重试'),
+          failSave ? findsOneWidget : findsNothing,
+        );
+        final check = find.widgetWithText(FilledButton, '检查更新');
+        await tester.ensureVisible(check);
+        await tester.pumpAndSettle();
+        await tester.tap(check);
+        await tester.pumpAndSettle();
+        expect(repository.requestedPrereleases, [!failSave]);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
   for (final (older, newer) in [
     ('0.1.0+1', 'v0.1.0+2'),
     ('0.9.0+90', '0.10.0+1'),
@@ -169,6 +216,59 @@ void main() {
       expect(
         GitHubUpdateRepository.parseReleases(jsonEncode(releases)),
         isNull,
+      );
+    }
+  });
+  test('opted-in checks compare both channels and always exclude drafts', () {
+    final release = GitHubUpdateRepository.parseReleases(
+      jsonEncode([
+        _jsonRelease('v10.0.0', draft: true),
+        _jsonRelease('v11.0.0', draft: true, prerelease: true),
+        _jsonRelease('v0.2.0+20'),
+        _jsonRelease('v0.3.0+2', prerelease: true),
+        _jsonRelease('v0.3.0+10', prerelease: true),
+      ]),
+      includePrereleases: true,
+    );
+    expect(release?.version.label, '0.3.0+10');
+    expect(release?.prerelease, isTrue);
+    final stable = GitHubUpdateRepository.parseReleases(
+      jsonEncode([
+        _jsonRelease('v0.3.0-beta.2', prerelease: true),
+        _jsonRelease('v0.3.0'),
+        _jsonRelease('v0.2.0+999', prerelease: true),
+      ]),
+      includePrereleases: true,
+    );
+    expect(stable?.version.label, '0.3.0');
+    expect(stable?.prerelease, isFalse);
+    expect(
+      GitHubUpdateRepository.parseReleases(
+        jsonEncode([_jsonRelease('v9.0.0', draft: true)]),
+        includePrereleases: true,
+      ),
+      isNull,
+    );
+  });
+  test('opted-in prereleases retain protocol and link validation', () {
+    for (final release in [
+      _jsonRelease('nightly', prerelease: true),
+      _jsonRelease('v9.0.0', prerelease: true, url: 'https://evil.example'),
+      {..._jsonRelease('v9.0.0', prerelease: true), 'draft': 'false'},
+      {..._jsonRelease('v9.0.0'), 'prerelease': 'true'},
+    ]) {
+      expect(
+        () => GitHubUpdateRepository.parseReleases(
+          jsonEncode([release]),
+          includePrereleases: true,
+        ),
+        throwsA(
+          isA<AppFailure>().having(
+            (e) => e.kind,
+            'kind',
+            AppFailureKind.protocol,
+          ),
+        ),
       );
     }
   });
@@ -271,42 +371,151 @@ void main() {
     repository.close();
   });
   for (final automatic in [true, false]) {
-    for (final hasFullRelease in [true, false]) {
-      test('${automatic ? 'automatic' : 'manual'} check excludes prereleases '
-          'with full release available: $hasFullRelease', () async {
-        final repository = GitHubUpdateRepository(
-          versionLoader: () async => _version('0.1.0+1'),
-          fetcher: (_) async => jsonEncode([
-            _jsonRelease('v9.0.0', prerelease: true),
-            _jsonRelease('v8.0.0', draft: true),
-            if (hasFullRelease) _jsonRelease('v0.2.0+1'),
-          ]),
+    for (final includePrereleases in [false, true]) {
+      for (final hasFullRelease in [true, false]) {
+        test(
+          '${automatic ? 'automatic' : 'manual'} check includes prereleases: '
+          '$includePrereleases, '
+          'with full release available: $hasFullRelease',
+          () async {
+            final repository = GitHubUpdateRepository(
+              versionLoader: () async => _version('0.1.0+1'),
+              fetcher: (_) async => jsonEncode([
+                _jsonRelease('v9.0.0', prerelease: true),
+                _jsonRelease('v8.0.0', draft: true),
+                if (hasFullRelease) _jsonRelease('v0.2.0+1'),
+              ]),
+            );
+            addTearDown(repository.close);
+            final store = _CheckStore();
+            final container = _container(
+              repository,
+              store,
+              settings: _SettingsRepository()
+                ..settings = AppSettings(
+                  checkPrereleaseUpdates: includePrereleases,
+                ),
+            );
+            final controller = container.read(
+              appUpdateControllerProvider.notifier,
+            );
+            if (automatic) {
+              await controller.checkOnStartup();
+            } else {
+              await controller.checkManually();
+            }
+            final state = container.read(appUpdateControllerProvider);
+            expect(state.failure, isNull);
+            final expectedVersion = includePrereleases
+                ? '9.0.0'
+                : hasFullRelease
+                ? '0.2.0+1'
+                : null;
+            expect(state.pendingRelease?.version.label, expectedVersion);
+            expect(
+              store.promptedVersion,
+              automatic
+                  ? (includePrereleases
+                        ? '9.0.0'
+                        : hasFullRelease
+                        ? '0.2.0'
+                        : null)
+                  : null,
+            );
+            if (expectedVersion == null) {
+              expect(state.message, automatic ? null : '暂无已发布的正式版本');
+            }
+          },
         );
-        addTearDown(repository.close);
-        final store = _CheckStore();
-        final container = _container(repository, store);
-        final controller = container.read(appUpdateControllerProvider.notifier);
-        if (automatic) {
-          await controller.checkOnStartup();
-        } else {
-          await controller.checkManually();
-        }
-        final state = container.read(appUpdateControllerProvider);
-        expect(state.failure, isNull);
-        expect(
-          state.pendingRelease?.version.label,
-          hasFullRelease ? '0.2.0+1' : null,
-        );
-        expect(
-          store.promptedVersion,
-          automatic && hasFullRelease ? '0.2.0' : null,
-        );
-        if (!hasFullRelease) {
-          expect(state.message, automatic ? null : '暂无已发布的正式版本');
-        }
-      });
+      }
     }
   }
+  test(
+    'checks wait for saved settings and honor later changes without restart',
+    () async {
+      final pending = Completer<AppSettings>();
+      final settings = _SettingsRepository()..pending = pending;
+      final repository = GitHubUpdateRepository(
+        versionLoader: () async => _version('0.1.0+1'),
+        fetcher: (_) async => jsonEncode([
+          _jsonRelease('v9.0.0', prerelease: true),
+          _jsonRelease('v0.2.0'),
+        ]),
+      );
+      addTearDown(repository.close);
+      final container = _container(
+        repository,
+        _CheckStore(),
+        settings: settings,
+      );
+      final controller = container.read(appUpdateControllerProvider.notifier);
+      final check = controller.checkOnStartup();
+      await Future<void>.delayed(Duration.zero);
+      expect(container.read(appUpdateControllerProvider).checking, isTrue);
+      expect(
+        container.read(appUpdateControllerProvider).pendingRelease,
+        isNull,
+      );
+      pending.complete(AppSettings(checkPrereleaseUpdates: true));
+      await check;
+      expect(
+        container
+            .read(appUpdateControllerProvider)
+            .pendingRelease
+            ?.version
+            .label,
+        '9.0.0',
+      );
+      expect(
+        container.read(appUpdateControllerProvider).pendingRelease?.prerelease,
+        isTrue,
+      );
+      final preferences = container.read(settingsControllerProvider.notifier);
+      await preferences.setCheckPrereleaseUpdates(false);
+      await controller.checkManually();
+      expect(
+        container
+            .read(appUpdateControllerProvider)
+            .pendingRelease
+            ?.version
+            .label,
+        '0.2.0',
+      );
+      await preferences.setCheckPrereleaseUpdates(true);
+      await controller.checkManually();
+      expect(
+        container
+            .read(appUpdateControllerProvider)
+            .pendingRelease
+            ?.version
+            .label,
+        '9.0.0',
+      );
+    },
+  );
+  test(
+    'opted-in manual check with only drafts reports no published versions',
+    () async {
+      final repository = GitHubUpdateRepository(
+        versionLoader: () async => _version('0.1.0+1'),
+        fetcher: (_) async => jsonEncode([_jsonRelease('v9.0.0', draft: true)]),
+      );
+      addTearDown(repository.close);
+      final container = _container(
+        repository,
+        _CheckStore(),
+        settings: _SettingsRepository()
+          ..settings = AppSettings(checkPrereleaseUpdates: true),
+      );
+      await container
+          .read(appUpdateControllerProvider.notifier)
+          .checkManually();
+      final state = container.read(appUpdateControllerProvider);
+      expect(state.failure, isNull);
+      expect(state.pendingRelease, isNull);
+      expect(state.message, '暂无已发布的版本');
+    },
+  );
   test(
     'external links allow this project and reject other GitHub destinations',
     () {
@@ -499,7 +708,10 @@ void main() {
   test('dispose cancels requests and prevents late prompts', () async {
     final repository = _UpdateRepository()..pending = Completer<AppRelease?>();
     final container = ProviderContainer(
-      overrides: [appUpdateRepositoryProvider.overrideWithValue(repository)],
+      overrides: [
+        appUpdateRepositoryProvider.overrideWithValue(repository),
+        settingsRepositoryProvider.overrideWithValue(_SettingsRepository()),
+      ],
     );
     final operation = container
         .read(appUpdateControllerProvider.notifier)
@@ -847,11 +1059,16 @@ final class _UpdateRepository implements AppUpdateRepository {
   Completer<AppRelease?>? pending;
   RequestCancellation? cancellation;
   int calls = 0;
+  final requestedPrereleases = <bool>[];
   @override
   Future<AppVersion> installedVersion() async => _version('0.1.0+1');
   @override
-  Future<AppRelease?> latestRelease(RequestCancellation token) async {
+  Future<AppRelease?> latestRelease(
+    RequestCancellation token, {
+    bool includePrereleases = false,
+  }) async {
     calls++;
+    requestedPrereleases.add(includePrereleases);
     cancellation = token;
     if (pending case final result?) return result.future;
     if (error case final failure?) throw failure;
@@ -880,8 +1097,14 @@ final class _CheckStore implements UpdateCheckStore {
 }
 
 final class _SettingsRepository implements SettingsRepository {
+  AppSettings settings = const AppSettings.defaults();
+  Completer<AppSettings>? pending;
+  bool failSave = false;
   @override
-  Future<AppSettings> load() async => const AppSettings.defaults();
+  Future<AppSettings> load() async => pending?.future ?? settings;
   @override
-  Future<void> save(AppSettings settings) async {}
+  Future<void> save(AppSettings value) async {
+    if (failSave) throw StateError('disk');
+    settings = value;
+  }
 }

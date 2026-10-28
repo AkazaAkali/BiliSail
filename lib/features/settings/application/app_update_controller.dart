@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../domain/app_failure.dart';
 import '../../../domain/request_cancellation.dart';
 import '../domain/app_update.dart';
+import 'settings_controller.dart';
 
 final appUpdateRepositoryProvider = Provider<AppUpdateRepository>(
   (ref) =>
@@ -103,9 +104,14 @@ final class AppUpdateController extends Notifier<AppUpdateState> {
         }
         final installed = await ref.read(installedAppVersionProvider.future);
         if (!ref.mounted || cancellation.isCancelled) return;
+        final settings = await ref.read(settingsControllerProvider.future);
+        if (!ref.mounted || cancellation.isCancelled) return;
         final release = await ref
             .read(appUpdateRepositoryProvider)
-            .latestRelease(cancellation);
+            .latestRelease(
+              cancellation,
+              includePrereleases: settings.checkPrereleaseUpdates,
+            );
         if (!ref.mounted || cancellation.isCancelled) return;
         final newer =
             release != null && release.version.compareTo(installed) > 0;
@@ -124,7 +130,9 @@ final class AppUpdateController extends Notifier<AppUpdateState> {
               : newer
               ? '发现新版本 ${release.version.label}'
               : release == null
-              ? '暂无已发布的正式版本'
+              ? settings.checkPrereleaseUpdates
+                    ? '暂无已发布的版本'
+                    : '暂无已发布的正式版本'
               : '当前已是最新版本（${installed.label}）',
         );
       })().timeout(const Duration(seconds: 20));

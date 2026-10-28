@@ -8,7 +8,9 @@
 
 2026-10-24 调整自动提醒规则：按 `major.minor.patch` 持久化最后自动提醒的版本，同一版本跨日、重启或仅增加 `+N` 构建号均不再自动弹窗；例如已提醒 `1.1.1+3` 后，`1.1.1+4` 保持安静，发现 `1.1.2` 时再次提醒。记录只向更新的版本推进，远端候选回退不会重新提醒旧版本。每日查询仍照常进行；手动点击“检查更新”绕过自动提醒记录，每次仍可提示包含最新构建号的新版本，合并进自动请求的手动检查也遵守此规则。
 
-2026-10-25 调整版本渠道：手动与每日自动检查均排除 GitHub 标记为 `prerelease: true` 的预览版本和 `draft: true` 的草稿，只从正式 Release 中选择候选；即使预览版使用普通 `v1.2.3+4` 标签也会排除。只有草稿／预览版时不报协议错误，手动检查提示“暂无已发布的正式版本”，自动检查保持安静，也不写入自动版本提醒记录。
+2026-10-28 增加“设置 → 关于 → 检查预发布更新”，默认关闭，沿用 2026-10-25 的正式版筛选行为。关闭时，手动与每日自动检查均排除 GitHub 标记为 `prerelease: true` 的预发布版本，只从正式 Release 中选择候选；开启时，两类检查均将正式版和预发布版按完整版本号比较，选择最新候选，弹窗保留预发布标记。`draft: true` 的草稿始终排除，渠道不按标签拼写猜测。没有候选时，手动检查按开关提示“暂无已发布的正式版本”或“暂无已发布的版本”，自动检查保持安静，也不写入自动版本提醒记录。
+
+开关通过 `AppSettings`、设置控制器与 `SqliteSettingsRepository` 保存，保存后用于后续检查，无需重启；在途检查沿用发起请求时的渠道选择。检查等待已保存设置加载后再请求，避免启动时把已开启的选择当作默认关闭。保存失败沿用回退和错误提示；旧快照缺失字段、非法值及恢复默认均关闭，显式保存的布尔值保持有效。偏好 JSON 快照版本由 30 增至 31，SQLite 表结构不变。每日检查次数及自动提醒按三段版本号去重的规则保持不变，切换渠道后可手动检查。
 
 新版本弹窗显示版本与更新说明；“稍后再说”关闭弹窗，“前往 Release”调用系统浏览器打开该版本页面。只有用户点击才打开外部页面，不自动下载、安装或打开浏览器。提示由进程级宿主管理，切换或关闭设置标签不会取消整个应用的更新检查；同一请求不产生重复弹窗。退出或请求超时会取消网络读取，迟到响应不更新状态。
 
@@ -17,8 +19,8 @@
 ## 协议、版本与存储
 
 - 独立无凭据 `HttpClient`，单次 GET `https://api.github.com/repos/CKopoer/BiliSail/releases?per_page=100`；`Accept: application/vnd.github+json`、`X-GitHub-Api-Version: 2026-03-10`。不附 Bilibili Cookie/token，不跟随重定向、不自动重试，保留系统 TLS 验证。
-- 检查列表第一页最多 100 个 Release，要求 `draft`、`prerelease` 为 JSON 布尔值，且二者均为 `false` 才参与版本比较；不根据标签名称推断 GitHub 的预览标记。空列表或全部被渠道筛选排除表示暂无正式发布；存在正式候选但格式错误时不伪装成“已是最新”。仍保留最多 100 项的查询上限，不继续翻页查找更早的正式版。
-- 2026-10-25 核对 [GitHub List releases 官方协议（API 2026-03-10）](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10#list-releases)：公开资源可匿名读取，响应为 Release 数组，分页参数只有 `per_page`（最多 100）和 `page`，不提供服务端排除预览版的查询参数，因此在客户端检查 `draft`／`prerelease`。另有 [Get the latest release](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10#get-the-latest-release) 返回单个非草稿、非预览版对象；官方说明其 latest 选择关联 `created_at`，不等同于本项目按语义版本和数字构建号取最大值，因此继续使用列表端点筛选正式版。
+- 检查列表第一页最多 100 个 Release，要求 `draft`、`prerelease` 为 JSON 布尔值；始终要求 `draft: false`，默认还要求 `prerelease: false`，仅在开启“检查预发布更新”时接受预发布版。不根据标签名称推断 GitHub 的预发布标记。空列表或全部被渠道筛选排除表示暂无符合渠道的发布；存在符合渠道的记录但均非有效版本时不伪装成“已是最新”。仍保留最多 100 项的查询上限，不继续翻页查找更早的版本。
+- 2026-10-25 核对并于 2026-10-28 复核 [GitHub List releases 官方协议（API 2026-03-10）](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10#list-releases)：公开资源可匿名读取，响应为 Release 数组，分页参数只有 `per_page`（最多 100）和 `page`，不提供服务端排除预览版的查询参数，因此在客户端检查 `draft`／`prerelease`。另有 [Get the latest release](https://docs.github.com/en/rest/releases/releases?apiVersion=2026-03-10#get-the-latest-release) 返回单个非草稿、非预览版对象；官方说明其 latest 选择关联 `created_at`，不等同于本项目按语义版本和数字构建号取最大值，因此继续使用列表端点按设置筛选渠道。
 - 版本先按 `major.minor.patch` 与预发布标识比较，再比较数字 Flutter `+N` 构建号，支持 `v0.1.0+2`。同一语义版本的不同数字构建仍被识别为更新，但自动弹窗按三段版本号去重，手动检查不受此限制；非数字构建元数据不改变优先级，不按字符串字典序比较。
 - `package_info_plus 10.2.2` 从已有锁定的传递依赖提升为直接依赖，BSD-3-Clause，支持 Android/Windows/macOS，未改变解析版本。常规运行读取平台包版本，[Release 脚本](../../tool/build-release.ps1) 通过 `BILISAIL_RELEASE_VERSION` 注入实际 `x.y.z+N`，避免 Android split APK 的 `versionCode +2000` 被当作 Release 构建号。自行执行 split APK 构建时应传相同 Dart define。
 - 网络总读取期限 12 秒，整个检查期限 20 秒；响应最多 2 MiB，展示说明最多 12000 字符。说明按 Markdown 显示；作为更新目标的 Release 链接只接受本仓库的 HTTPS 地址，拒绝其他 host、仓库、端口、userinfo、query 或 fragment。正文链接与图片限制为不含 userinfo 的 HTTP(S) URL；打开正文链接最多等待 12 秒。
@@ -37,6 +39,8 @@
 仅借鉴流程与职责，独立编写 Dart/Flutter；未复制 C#/XAML、资源、版本描述 schema，亦不依赖或修改相邻仓库。参考项目每次 release 启动检查，本项目按用户要求增加每日尝试记录；未加入忽略版本或镜像更新地址功能。
 
 ## 验证
+
+2026-10-28 预发布开关：更新检查、SQLite 设置与恢复默认的 104 项定向测试通过，覆盖两类检查的渠道选择、草稿排除、跨渠道版本排序、预发布标记与协议校验、设置加载等待、无需重启切换、空候选提示、界面保存失败回退、旧快照及非法值回退、保存选择和各平台恢复默认。`tool/check.ps1 -SkipPub` 通过格式、静态分析、打包边界和离线测试：根应用 3209、bili_api 495、bili_player 83、bili_danmaku 116、bili_mux 5 项通过，共 3908 项；根应用 13 项因 Windows 符号链接权限不足跳过，mux 10 项原生用例因未配置 `BILI_MUX_LIBRARY` 跳过。日志 `artifacts/app-updates-prerelease-setting-check-20261028.log`。本次复核 GitHub 官方文档，未执行实际发布列表的在线烟测；未构建安装包或进行平台实机验收，未发现可热重载的运行中调试实例。验证结束时存在其他会话的导航与标签保留相关修改，本次保持原样，验证结果以本轮日志为准。
 
 离线测试覆盖版本及构建号排序、预览/草稿、空列表、错误协议与链接、容量、SQLite 日期重开、跨日/失败后重启、手动合并、取消/超时与迟到结果、窄窗口、弹窗确认及浏览器打开失败。Windows 原生入口为 [windows_app_updates_test.dart](../../integration_test/windows_app_updates_test.dart)，在线读取需显式 `--dart-define=BILI_UPDATES_ONLINE=true`，正常检查不访问真实账号或外网。
 

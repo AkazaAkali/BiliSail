@@ -49,6 +49,7 @@ void main() {
           font: AppFontPreference.installed,
           systemFontFamily: 'Custom font',
           cacheImages: false,
+          checkPrereleaseUpdates: true,
           wheelDampingRatio: .5,
           autoPlay: false,
           videoCardHoverPlayback: !defaults.videoCardHoverPlayback,
@@ -102,6 +103,7 @@ void main() {
           defaults.shortcuts.keysFor(ShortcutAction.nextTab),
         );
         expect(settings.theme, AppThemePreference.system);
+        expect(settings.checkPrereleaseUpdates, isFalse);
         expect(settings.navigationMode, defaults.navigationMode);
         expect(settings.danmakuArea, defaults.danmakuArea);
         expect(settings.danmakuFontScale, defaults.danmakuFontScale);

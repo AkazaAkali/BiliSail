@@ -17,6 +17,32 @@ void main() {
     repository = SqliteSettingsRepository(database);
   });
   tearDown(() => database.close());
+  test('prerelease checks default off, preserve saved choices and migrate old snapshots', () async {
+    expect(AppSettings().checkPrereleaseUpdates, isFalse);
+    expect(const AppSettings.defaults().checkPrereleaseUpdates, isFalse);
+    expect((await repository.load()).checkPrereleaseUpdates, isFalse);
+    for (final snapshot in <Map<String, Object?>>[
+      {'schemaVersion': 30, 'theme': 'dark'},
+      for (final invalid in <Object?>[null, 'true', 1, <Object>[]])
+        {
+          'schemaVersion': 30,
+          'theme': 'dark',
+          'checkPrereleaseUpdates': invalid,
+        },
+    ]) {
+      await database.writeSetting('preferences.v1', jsonEncode(snapshot));
+      final loaded = await repository.load();
+      expect(loaded.checkPrereleaseUpdates, isFalse);
+      expect(loaded.theme, AppThemePreference.dark);
+      for (final enabled in [true, false]) {
+        await repository.save(loaded.copyWith(checkPrereleaseUpdates: enabled));
+        final reloaded = await SqliteSettingsRepository(database).load();
+        expect(reloaded.checkPrereleaseUpdates, enabled);
+        expect(reloaded.theme, AppThemePreference.dark);
+      }
+    }
+    expect(database.schemaVersion, 3);
+  });
   for (final platform in [TargetPlatform.macOS, TargetPlatform.iOS]) {
     test(
       'Apple shortcut defaults persist, preserve custom bindings and reset on $platform',

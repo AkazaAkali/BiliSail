@@ -59,6 +59,7 @@ final class AppSettings {
     this.font = AppFontPreference.harmonyOsSans,
     this.systemFontFamily = '',
     this.cacheImages = true,
+    this.checkPrereleaseUpdates = false,
     this.wheelDampingRatio = 1.3,
     this.danmakuEnabled = true,
     this.danmakuOpacity = 0.8,
@@ -127,6 +128,7 @@ final class AppSettings {
        font = AppFontPreference.harmonyOsSans,
        systemFontFamily = '',
        cacheImages = true,
+       checkPrereleaseUpdates = false,
        wheelDampingRatio = 1.3,
        danmakuEnabled = true,
        danmakuOpacity = 0.8,
@@ -183,6 +185,7 @@ final class AppSettings {
   final String systemFontFamily;
   String? get fontFamily => font.resolveFamily(systemFontFamily);
   final bool cacheImages;
+  final bool checkPrereleaseUpdates;
 
   /// Mouse-wheel spring damping ratio; 1 is critically damped.
   final double wheelDampingRatio;
@@ -258,6 +261,7 @@ final class AppSettings {
     AppFontPreference? font,
     String? systemFontFamily,
     bool? cacheImages,
+    bool? checkPrereleaseUpdates,
     double? wheelDampingRatio,
     bool? danmakuEnabled,
     double? danmakuOpacity,
@@ -317,6 +321,8 @@ final class AppSettings {
     font: font ?? this.font,
     systemFontFamily: systemFontFamily ?? this.systemFontFamily,
     cacheImages: cacheImages ?? this.cacheImages,
+    checkPrereleaseUpdates:
+        checkPrereleaseUpdates ?? this.checkPrereleaseUpdates,
     wheelDampingRatio: wheelDampingRatio ?? this.wheelDampingRatio,
     danmakuEnabled: danmakuEnabled ?? this.danmakuEnabled,
     danmakuOpacity: danmakuOpacity ?? this.danmakuOpacity,

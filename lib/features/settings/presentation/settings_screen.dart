@@ -642,6 +642,12 @@ final class _SettingsCategoryPageState
                         ]),
                       if (widget.category == SettingsCategory.about)
                         _section('关于', [
+                          _toggle(
+                            '检查预发布更新',
+                            s.checkPrereleaseUpdates,
+                            controller.setCheckPrereleaseUpdates,
+                            '开启后，手动和自动检查更新都会包含预发布版本（pre-release）。',
+                          ),
                           const _AboutSettingsContent(),
                           const SizedBox(height: 12),
                           ..._usageNotice,

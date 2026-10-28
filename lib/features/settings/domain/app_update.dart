@@ -100,7 +100,10 @@ final class AppRelease {
 
 abstract interface class AppUpdateRepository {
   Future<AppVersion> installedVersion();
-  Future<AppRelease?> latestRelease(RequestCancellation cancellation);
+  Future<AppRelease?> latestRelease(
+    RequestCancellation cancellation, {
+    bool includePrereleases = false,
+  });
 }
 
 abstract interface class UpdateCheckStore {

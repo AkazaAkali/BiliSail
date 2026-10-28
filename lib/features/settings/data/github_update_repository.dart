@@ -28,11 +28,14 @@ final class GitHubUpdateRepository implements AppUpdateRepository {
   Future<AppVersion> installedVersion() => versionLoader();
 
   @override
-  Future<AppRelease?> latestRelease(RequestCancellation cancellation) async {
+  Future<AppRelease?> latestRelease(
+    RequestCancellation cancellation, {
+    bool includePrereleases = false,
+  }) async {
     _checkCancellation(cancellation);
     final body = await (fetcher?.call(cancellation) ?? _fetch(cancellation));
     _checkCancellation(cancellation);
-    return parseReleases(body);
+    return parseReleases(body, includePrereleases: includePrereleases);
   }
 
   void _checkCancellation(RequestCancellation cancellation) {
@@ -103,7 +106,10 @@ final class GitHubUpdateRepository implements AppUpdateRepository {
     }
   }
 
-  static AppRelease? parseReleases(String body) {
+  static AppRelease? parseReleases(
+    String body, {
+    bool includePrereleases = false,
+  }) {
     try {
       if (utf8.encode(body).length > maxResponseBytes) {
         throw const FormatException();
@@ -121,7 +127,10 @@ final class GitHubUpdateRepository implements AppUpdateRepository {
           throw const FormatException();
         }
         // GitHub release flags determine eligibility, not the tag spelling.
-        if (item['draft'] == true || item['prerelease'] == true) continue;
+        if (item['draft'] == true ||
+            !includePrereleases && item['prerelease'] == true) {
+          continue;
+        }
         final tag = item['tag_name'];
         if (tag is! String) throw const FormatException();
         final version = AppVersion.tryParse(tag);
@@ -147,6 +156,7 @@ final class GitHubUpdateRepository implements AppUpdateRepository {
         final text = notes is String ? notes : '';
         final release = AppRelease(
           version: version,
+          prerelease: item['prerelease'] == true,
           url: url,
           notes: text.length > 12000
               ? '${text.substring(0, 12000)}\n…完整说明请查看 Release 页面'
@@ -162,7 +172,7 @@ final class GitHubUpdateRepository implements AppUpdateRepository {
             (item) =>
                 item is Map<String, Object?> &&
                 item['draft'] == false &&
-                item['prerelease'] == false,
+                (includePrereleases || item['prerelease'] == false),
           )) {
         throw const FormatException();
       }
