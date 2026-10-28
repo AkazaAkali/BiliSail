@@ -89,6 +89,124 @@ final class _Transport implements ApiTransport, ApiFormTransport {
 }
 
 void main() {
+  test('history search uses server pagination and preserves enriched watch snapshots', () async {
+    final transport = _Transport(
+      (uri) => {
+        'code': 0,
+        'data': uri.path.endsWith('/search')
+            ? {
+                'list': [history('BV1234567890', page: 2, progress: -1)],
+                'has_more': true,
+                'page': {'pn': 2, 'total': 45},
+              }
+            : detail('BV1234567890'),
+      },
+    );
+    final requests = ApiRequests();
+    final repository = ApiLibraryRepository(
+      WatchHistoryClient(
+        BiliApiClient(transport: transport, sessionProvider: requests),
+      ),
+      requests,
+      accountScope: () => 'user:1',
+    );
+    final result = await repository.searchHistory(
+      keyword: ' 云端视频 ',
+      cursor: '2',
+      cancellation: RequestCancellation(),
+    );
+    expect(transport.requests.first.path, '/x/web-interface/history/search');
+    expect(transport.requests.first.queryParameters['keyword'], '云端视频');
+    expect(transport.requests.first.queryParameters['pn'], '2');
+    expect(result.nextCursor, '3');
+    expect(result.hasMore, isTrue);
+    final item = result.items.single;
+    expect(item.video.title, '云端 BV1234567890');
+    expect(item.video.playCount, 12345);
+    expect(item.part.cid, '2');
+    expect(item.position, const Duration(seconds: 100));
+    expect(item.deletionKey, 'archive_9007199254740997');
+    expect(
+      transport.requests.where((uri) => uri.path.endsWith('/cursor')),
+      isEmpty,
+    );
+  });
+
+  test(
+    'guest search is rejected without a request or public search fallback',
+    () async {
+      final transport = _Transport((_) => throw StateError('Must not request'));
+      final repository = ApiLibraryRepository(
+        WatchHistoryClient(BiliApiClient(transport: transport)),
+        ApiRequests(),
+        accountScope: () => 'guest',
+      );
+      await expectLater(
+        repository.searchHistory(
+          keyword: 'fixture',
+          cancellation: RequestCancellation(),
+        ),
+        throwsA(
+          isA<AppFailure>().having(
+            (e) => e.kind,
+            'kind',
+            AppFailureKind.authentication,
+          ),
+        ),
+      );
+      expect(transport.requests, isEmpty);
+    },
+  );
+
+  for (final change in ['scope', 'epoch', 'cancel']) {
+    test('history search rejects late response after $change', () async {
+      final gate = Completer<Map<String, Object?>>();
+      final started = Completer<void>();
+      final transport = _Transport((_) {
+        started.complete();
+        return gate.future;
+      });
+      final requests = ApiRequests();
+      var scope = 'user:1';
+      final token = RequestCancellation();
+      final repository = ApiLibraryRepository(
+        WatchHistoryClient(
+          BiliApiClient(transport: transport, sessionProvider: requests),
+        ),
+        requests,
+        accountScope: () => scope,
+      );
+      final pending = repository.searchHistory(
+        keyword: 'fixture',
+        cancellation: token,
+      );
+      final assertion = expectLater(
+        pending,
+        throwsA(
+          isA<AppFailure>().having(
+            (e) => e.kind,
+            'kind',
+            AppFailureKind.cancelled,
+          ),
+        ),
+      );
+      await started.future;
+      if (change == 'scope') scope = 'user:2';
+      if (change == 'epoch') requests.advanceSession();
+      if (change == 'cancel') token.cancel();
+      gate.complete({
+        'code': 0,
+        'data': {
+          'list': [history('BV1234567890')],
+          'has_more': false,
+          'page': {'pn': 1, 'total': 1},
+        },
+      });
+      await assertion;
+      expect(transport.requests, hasLength(1));
+    });
+  }
+
   for (final clear in [false, true]) {
     for (final change in [
       'none',

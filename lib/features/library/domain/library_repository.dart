@@ -46,6 +46,15 @@ abstract interface class LibraryRepository {
   });
 }
 
+/// Server-side search over the current account's available cloud history.
+abstract interface class WatchHistorySearch {
+  Future<WatchHistoryPage> searchHistory({
+    required String keyword,
+    String? cursor,
+    required RequestCancellation cancellation,
+  });
+}
+
 final class WatchHistoryPage {
   const WatchHistoryPage(this.items, {required this.hasMore, this.nextCursor});
   final List<WatchHistoryEntry> items;

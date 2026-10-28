@@ -17,6 +17,32 @@ import 'package:flutter/gestures.dart';
 import 'package:go_router/go_router.dart';
 
 void main() {
+  testWidgets(
+    'history search submits only on action and clear restores browse',
+    (tester) async {
+      final repository = _HistoryRepository(_entries());
+      await _pump(tester, repository);
+      final field = find.byKey(const ValueKey('history-search'));
+      await tester.enterText(field, '  没有的视频  ');
+      await tester.pump();
+      expect(repository.searches, isEmpty);
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pumpAndSettle();
+      expect(repository.searches, ['没有的视频']);
+      expect(find.text('没有找到相关的云端观看记录'), findsOneWidget);
+      expect(find.textContaining('范围以服务器保留的记录为准'), findsOneWidget);
+      await tester.tap(find.byTooltip('清除历史搜索'));
+      await tester.pumpAndSettle();
+      expect(find.byType(VideoCard), findsNWidgets(2));
+      expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+      await tester.enterText(field, '按钮提交');
+      await tester.tap(find.byTooltip('搜索观看历史'));
+      await tester.pumpAndSettle();
+      expect(repository.searches, ['没有的视频', '按钮提交']);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final config in [
     (width: 320.0, platform: TargetPlatform.android, scale: 2.0),
     (width: 390.0, platform: TargetPlatform.iOS, scale: 1.0),
@@ -123,9 +149,16 @@ void main() {
           lessThan(1),
         );
         expect(
-          tester.getRect(find.byType(VideoCard).first).top -
+          tester.getRect(find.byKey(const ValueKey('history-search'))).top -
               tester.getRect(clear).bottom,
           closeTo(8, 1),
+        );
+        expect(
+          tester.getRect(find.byType(VideoCard).first).top -
+              tester
+                  .getRect(find.byKey(const ValueKey('history-search')))
+                  .bottom,
+          closeTo(16, 1),
         );
         if (config.scale == 1) expect(find.text('清空历史'), findsOneWidget);
         expect(tester.takeException(), isNull);
@@ -351,7 +384,7 @@ List<WatchHistoryEntry> _entries() => [
 ];
 
 final class _HistoryRepository
-    implements LibraryRepository, WatchHistoryMutations {
+    implements LibraryRepository, WatchHistoryMutations, WatchHistorySearch {
   _HistoryRepository(this.entries);
   final List<WatchHistoryEntry> entries;
   @override
@@ -378,6 +411,17 @@ final class _HistoryRepository
   Future<void> clearHistory({required RequestCancellation cancellation}) async {
     clears++;
     await _result();
+  }
+
+  final searches = <String>[];
+  @override
+  Future<WatchHistoryPage> searchHistory({
+    required String keyword,
+    String? cursor,
+    required RequestCancellation cancellation,
+  }) async {
+    searches.add(keyword);
+    return const WatchHistoryPage([], hasMore: false);
   }
 
   @override

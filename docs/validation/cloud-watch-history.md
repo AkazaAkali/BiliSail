@@ -55,3 +55,15 @@
 本轮 `tool/check.ps1 -SkipPub` 全量通过：根应用 2945、API 478、播放器 83、弹幕 93、mux 5，共 3604 项；格式、静态分析和打包边界脚本通过。根应用 13 项符号链接测试因 Windows 权限不足跳过，mux 10 项原生测试因未设置 `BILI_MUX_LIBRARY` 跳过，不作为原生集成覆盖。日志为 `build/history-actions-check.log`。另用假仓储渲染并检查 360/1280 浅色与 800/320 深色页面及确认框（320 为两倍字体），Windows Debug 预览构建、启动、热重载成功，未检出运行时错误。首次调试构建与全量测试并行时遇到原生资产占用，结束测试后重试成功。关闭预览后，`flutter build windows --debug --no-pub` 普通 `lib/main.dart` 入口构建成功，恢复常规 Debug 产物；日志为 `build/validation/history-actions/windows-debug-build.log`。未读取或删除真实账号历史，未做 Windows Release、Android/iOS/macOS/Linux 设备构建或实机验收；预览入口仅位于忽略的 build 目录，不进入正式产品。
 
 窄屏样式修正复验（同日）：新增 320/402/600/960 宽度与两倍字体的内嵌工具栏几何回归，确认说明与操作垂直居中、首排卡片间距为 8px、普通窄屏保留按钮文字；页面及虚拟化定向 21 项通过。重新渲染并检查 402px 内嵌页、360px 独立页和 320px 两倍字体预览。当前工作区重新执行 tool/check.ps1 -SkipPub 通过，根应用 2951、四包 478/83/93/5，共 3610 项；仍因符号链接权限和 BILI_MUX_LIBRARY 缺失跳过 13+10 项。日志为 build/history-toolbar-check.log。本次没有运行中的调试连接，未完成热重载或设备实测；未重新构建平台产物。
+
+## 云端观看历史搜索（2026-10-28）
+
+观看历史页（含“我的”内嵌页）提供独立搜索框：输入草稿不发请求，按搜索按钮或键盘搜索键提交去除首尾空白的关键词，清除按钮恢复普通历史列表。此处搜索看过的视频，不是保存搜索关键词或搜索公共视频库。
+
+通过 `WatchHistorySearch` 扩展现有仓储，沿用 `ApiLibraryRepository` 的账号 scope/session epoch、取消、最多三个详情读取及视频/影视卡片映射。API profile 为 Web Cookie，`GET https://api.bilibili.com/x/web-interface/history/search`，参数 `keyword`、`pn`、`business=all`，无需 CSRF/WBI；沿用 `BiliApiClient.requestJson` 的有界只读重试/超时。响应 JSON 的 `list` 与普通历史共用解析，`has_more` 决定分页，`page.pn` 必须匹配请求。搜索页码游标与普通历史游标不混用。
+
+协议首先只读核对 [Bilibili 官方历史页脚本](https://s1.hdslb.com/bfs/static/history-record/app_d0026f29.js) 的 `getsearchResult`：上述参数、Cookie 与 `has_more/page.pn/list` 均一致；交叉核对 [BewlyBewly 自有历史 API 声明](https://github.com/BewlyBewly/BewlyBewly/blob/main/src/background/messageListeners/api/history.ts) 及[搜索响应类型](https://github.com/BewlyBewly/BewlyBewly/blob/main/src/models/video/historySearch.ts)。只据请求/响应协议独立实现 Dart 与人工 fixture，未复制参考实现、资源或引入依赖。未使用真实账号在线读取历史，服务端实际匹配规则与保留范围尚未实测。
+
+搜索在服务端执行，不限于已加载的一页；页面只显示现有支持的视频和影视，范围以服务器仍保留、允许搜索的历史为准，不承诺完整的终身观看记录。每个查询沿用 500 条内存上限与空页防循环保护。关键词切换取消旧请求、重置游标和滚动位置，迟到查询/分页不能覆盖新结果；刷新保留关键词，清除关键词重新读取普通历史。搜索中删除成功会从第一页重新加载当前关键词，避免页码偏移导致后续漏项；删除/清空仍沿用原确认和写入单飞规则，“清空历史”明确清空全部云端记录而非仅搜索结果。关键词不写 SQLite、日志或遥测。
+
+本次锁文件解析、根应用/四包格式、全仓静态分析与打包边界检查通过；历史模块定向 72 项、API 包全部 510 项离线测试通过。根应用全量测试因与另一 worktree 并行检查造成内存拥塞而主动中止，不计作全量通过；播放器、弹幕、mux 包测试未在本分支重新完成，后续集成/CI 继续验证。新增离线 API、仓储、控制器和界面测试覆盖搜索参数/分页/错误载荷、账号/epoch/取消、快速换词、旧响应隔离、清空返回普通列表及按钮/键盘提交。真实登录搜索、各平台原生构建和设备验收未执行；离线 fixture 通过不代表在线端点已验证。

@@ -10,7 +10,7 @@ import '../../../domain/video.dart';
 import '../domain/library_repository.dart';
 
 final class ApiLibraryRepository
-    implements LibraryRepository, WatchHistoryMutations {
+    implements LibraryRepository, WatchHistoryMutations, WatchHistorySearch {
   ApiLibraryRepository(
     this.client,
     this.requests, {
@@ -28,6 +28,23 @@ final class ApiLibraryRepository
   Future<WatchHistoryPage> loadHistory({
     String? cursor,
     required RequestCancellation cancellation,
+  }) => _loadHistory(cursor: cursor, cancellation: cancellation);
+
+  @override
+  Future<WatchHistoryPage> searchHistory({
+    required String keyword,
+    String? cursor,
+    required RequestCancellation cancellation,
+  }) => _loadHistory(
+    keyword: keyword,
+    cursor: cursor,
+    cancellation: cancellation,
+  );
+
+  Future<WatchHistoryPage> _loadHistory({
+    String? keyword,
+    String? cursor,
+    required RequestCancellation cancellation,
   }) {
     final scope = accountScope;
     return requests.run((context) async {
@@ -43,7 +60,18 @@ final class ApiLibraryRepository
       }
 
       checkCurrent();
-      final page = await client.load(cursor: cursor, context: context);
+      if (keyword != null &&
+          cursor != null &&
+          !RegExp(r'^[1-9][0-9]*$').hasMatch(cursor)) {
+        throw const AppFailure(AppFailureKind.protocol, '历史搜索页码无效');
+      }
+      final page = keyword == null
+          ? await client.load(cursor: cursor, context: context)
+          : await client.search(
+              keyword: keyword,
+              page: cursor == null ? 1 : int.parse(cursor),
+              context: context,
+            );
       checkCurrent();
       // At most three reads in flight and one read per BVID in this page.
       // Detail failures affect optional metadata only, never the history list.

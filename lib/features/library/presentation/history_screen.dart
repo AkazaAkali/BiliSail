@@ -108,6 +108,8 @@ final class HistoryScreen extends ConsumerWidget {
     final history = ref.watch(historyProvider);
     final controller = ref.read(historyProvider.notifier);
     return PagedScrollViewport(
+      key: ValueKey(history.query),
+      keepScrollOffset: false,
       active: true,
       canLoadMore:
           history.hasMore &&
@@ -226,6 +228,7 @@ final class HistoryScreen extends ConsumerWidget {
                       ),
                     ),
                   ),
+                  const SliverToBoxAdapter(child: _HistorySearchField()),
                   const _HistoryEntriesSliver(),
                   SliverToBoxAdapter(
                     child: Column(
@@ -246,9 +249,13 @@ final class HistoryScreen extends ConsumerWidget {
                             ),
                           ),
                         if (history.limitReached)
-                          const Padding(
+                          Padding(
                             padding: EdgeInsets.all(16),
-                            child: Text('已显示最近 500 条云端记录'),
+                            child: Text(
+                              history.query.isEmpty
+                                  ? '已显示最近 500 条云端记录'
+                                  : '已显示前 500 条搜索结果',
+                            ),
                           ),
                       ],
                     ),
@@ -271,6 +278,7 @@ final class _HistoryEntriesSliver extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final items = ref.watch(historyProvider.select((state) => state.items));
     final controller = ref.read(historyProvider.notifier);
+    final query = ref.watch(historyProvider.select((state) => state.query));
     final writeBlocked = ref.watch(
       historyProvider.select(
         (state) => state.writeBusy || state.writeUncertain,
@@ -290,10 +298,12 @@ final class _HistoryEntriesSliver extends ConsumerWidget {
         ),
       ),
       data: (entries) => entries.isEmpty
-          ? const SliverToBoxAdapter(
+          ? SliverToBoxAdapter(
               child: SizedBox(
                 height: 280,
-                child: StateView.empty(message: '还没有云端观看记录'),
+                child: StateView.empty(
+                  message: query.isEmpty ? '还没有云端观看记录' : '没有找到相关的云端观看记录',
+                ),
               ),
             )
           : SliverVideoGrid.indexed(
@@ -324,6 +334,90 @@ final class _HistoryEntriesSliver extends ConsumerWidget {
                     .clamp(0, 1);
               },
             ),
+    );
+  }
+}
+
+final class _HistorySearchField extends ConsumerStatefulWidget {
+  const _HistorySearchField();
+
+  @override
+  ConsumerState<_HistorySearchField> createState() =>
+      _HistorySearchFieldState();
+}
+
+final class _HistorySearchFieldState
+    extends ConsumerState<_HistorySearchField> {
+  late final TextEditingController _text;
+
+  @override
+  void initState() {
+    super.initState();
+    _text = TextEditingController(text: ref.read(historyProvider).query);
+  }
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen(historyProvider.select((state) => state.query), (_, query) {
+      if (_text.text.trim() != query) _text.text = query;
+    });
+    final history = ref.watch(historyProvider);
+    final controller = ref.read(historyProvider.notifier);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            type: MaterialType.transparency,
+            child: TextField(
+              key: const ValueKey('history-search'),
+              controller: _text,
+              enabled: !history.writeBusy,
+              textInputAction: TextInputAction.search,
+              onSubmitted: controller.search,
+              decoration: InputDecoration(
+                hintText: '搜索观看历史中的视频',
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: '清除历史搜索',
+                      onPressed: history.writeBusy
+                          ? null
+                          : () {
+                              _text.clear();
+                              controller.search('');
+                            },
+                      icon: const Icon(Icons.close),
+                    ),
+                    IconButton(
+                      tooltip: '搜索观看历史',
+                      onPressed: history.writeBusy
+                          ? null
+                          : () => controller.search(_text.text),
+                      icon: const Icon(Icons.search),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (history.query.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              '“${history.query}” 的云端搜索结果（视频与影视）；范围以服务器保留的记录为准。',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

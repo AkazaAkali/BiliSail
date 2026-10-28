@@ -17,6 +17,7 @@ final historyProvider =
 
 final class HistoryState {
   const HistoryState({
+    this.query = '',
     this.items = const AsyncLoading(),
     this.hasMore = false,
     this.loadingMore = false,
@@ -25,12 +26,14 @@ final class HistoryState {
     this.writeBusy = false,
     this.writeUncertain = false,
   });
+  final String query;
   final AsyncValue<List<WatchHistoryEntry>> items;
   final bool hasMore, loadingMore, limitReached;
   final Object? pageError;
   final bool writeBusy, writeUncertain;
 
   HistoryState withWrite({required bool busy, bool? uncertain}) => HistoryState(
+    query: query,
     items: items,
     hasMore: hasMore,
     pageError: pageError,
@@ -100,6 +103,7 @@ final class HistoryController extends Notifier<HistoryState> {
     _emptyPages = items.length == beforeCount ? _emptyPages + 1 : 0;
     final limit = items.length >= maxEntries;
     state = HistoryState(
+      query: state.query,
       items: AsyncData(items),
       hasMore: page.hasMore && !limit,
       limitReached: limit,
@@ -109,7 +113,29 @@ final class HistoryController extends Notifier<HistoryState> {
     );
   }
 
-  Future<void> refresh() async {
+  Future<void> search(String input) => _refresh(input.trim());
+
+  Future<void> refresh() => _refresh(state.query);
+
+  Future<WatchHistoryPage> _loadPage({
+    String? cursor,
+    required RequestCancellation cancellation,
+  }) {
+    final repository = ref.read(libraryRepositoryProvider);
+    if (state.query.isEmpty) {
+      return repository.loadHistory(cursor: cursor, cancellation: cancellation);
+    }
+    if (repository is! WatchHistorySearch) {
+      throw const AppFailure(AppFailureKind.protocol, '观看历史搜索暂不可用');
+    }
+    return (repository as WatchHistorySearch).searchHistory(
+      keyword: state.query,
+      cursor: cursor,
+      cancellation: cancellation,
+    );
+  }
+
+  Future<void> _refresh(String query) async {
     if (!ref.mounted || state.writeBusy) return;
     final uncertain = state.writeUncertain;
     final generation = ++_generation;
@@ -121,11 +147,9 @@ final class HistoryController extends Notifier<HistoryState> {
     _emptyPages = 0;
     _scope = ref.read(libraryRepositoryProvider).accountScope;
     _epoch = ref.read(sessionEpochProvider)();
-    state = HistoryState(writeUncertain: uncertain);
+    state = HistoryState(query: query, writeUncertain: uncertain);
     try {
-      final page = await ref
-          .read(libraryRepositoryProvider)
-          .loadHistory(cancellation: cancellation);
+      final page = await _loadPage(cancellation: cancellation);
       if (!_current(generation, cancellation)) return;
       _validateCursor(page);
       _accept(page, _merge(const [], page.items), 0);
@@ -135,6 +159,7 @@ final class HistoryController extends Notifier<HistoryState> {
         return;
       }
       state = HistoryState(
+        query: state.query,
         items: AsyncError(error, stack),
         writeUncertain: uncertain,
       );
@@ -155,14 +180,13 @@ final class HistoryController extends Notifier<HistoryState> {
     if (!_current(generation, cancellation)) return;
     _emptyPages = state.pageError == null ? _emptyPages : 0;
     state = HistoryState(
+      query: state.query,
       items: AsyncData(items),
       hasMore: true,
       loadingMore: true,
     );
     try {
-      final page = await ref
-          .read(libraryRepositoryProvider)
-          .loadHistory(cursor: _cursor, cancellation: cancellation);
+      final page = await _loadPage(cursor: _cursor, cancellation: cancellation);
       if (!_current(generation, cancellation)) return;
       _validateCursor(page);
       _accept(page, _merge(items, page.items), items.length);
@@ -172,6 +196,7 @@ final class HistoryController extends Notifier<HistoryState> {
         return;
       }
       state = HistoryState(
+        query: state.query,
         items: AsyncData(items),
         hasMore: true,
         pageError: error,
@@ -219,10 +244,11 @@ final class HistoryController extends Notifier<HistoryState> {
         _cursor = null;
         _seenCursors.clear();
         _emptyPages = 0;
-        state = const HistoryState(items: AsyncData([]));
+        state = HistoryState(query: state.query, items: const AsyncData([]));
       } else {
         final items = state.items.requireValue;
         state = HistoryState(
+          query: state.query,
           items: AsyncData(
             List.unmodifiable(
               items.where((entry) => entry.deletionKey != deletionKey),
@@ -232,6 +258,9 @@ final class HistoryController extends Notifier<HistoryState> {
           pageError: state.pageError,
           limitReached: state.limitReached,
         );
+        // Search uses offset pages: deletion shifts later pages left. Reload
+        // from page one rather than skipping a result with the old page number.
+        if (state.query.isNotEmpty) await refresh();
       }
       return true;
     } on HistoryWriteUncertain {

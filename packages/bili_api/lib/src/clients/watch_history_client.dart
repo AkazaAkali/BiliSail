@@ -57,10 +57,77 @@ final class WatchHistoryClient {
     );
     final list = data['list'];
     if (list is! List<Object?> || list.length > 20) _protocol();
+    final items = _parseItems(list, _endpoint);
+    if (list.isEmpty) return const ApiPage([], hasMore: false);
+    final next = _map(data['cursor']);
+    final max = _decimalId(next['max']);
+    final viewAt = _decimalId(next['view_at']);
+    final business = next['business'];
+    if (max == null ||
+        viewAt == null ||
+        business is! String ||
+        !RegExp(r'^[a-z_]*$').hasMatch(business)) {
+      _protocol();
+    }
+    final nextCursor = '$max:$viewAt:$business';
+    final hasMore = max != '0';
+    if (hasMore && nextCursor == cursor) _protocol();
+    return ApiPage(
+      List.unmodifiable(items),
+      hasMore: hasMore,
+      nextCursor: hasMore ? nextCursor : null,
+    );
+  }
+
+  /// Searches the account's cloud history, not the public video catalog.
+  Future<ApiPage<ApiWatchHistoryEntry>> search({
+    required String keyword,
+    int page = 1,
+    ApiRequestContext? context,
+  }) async {
+    keyword = keyword.trim();
+    if (keyword.isEmpty || page < 1) {
+      throw ArgumentError('Invalid watch history search options');
+    }
+    const endpoint = 'watch_history_search';
+    final data = await api.requestJson(
+      Uri.https('api.bilibili.com', '/x/web-interface/history/search', {
+        'keyword': keyword,
+        'pn': '$page',
+        'business': 'all',
+      }),
+      endpoint,
+      context: context,
+    );
+    final list = data['list'];
+    final hasMore = data['has_more'];
+    final pagination = _map(data['page'], endpoint);
+    final currentPage = _integer(pagination['pn']);
+    final total = _integer(pagination['total']);
+    if (list is! List<Object?> ||
+        list.length > 20 ||
+        hasMore is! bool ||
+        currentPage != page ||
+        total == null ||
+        total < 0 ||
+        (hasMore && list.isEmpty)) {
+      _protocol(endpoint);
+    }
+    return ApiPage(
+      _parseItems(list, endpoint),
+      hasMore: hasMore,
+      nextCursor: hasMore ? '${page + 1}' : null,
+    );
+  }
+
+  static List<ApiWatchHistoryEntry> _parseItems(
+    List<Object?> list,
+    String endpoint,
+  ) {
     final items = <ApiWatchHistoryEntry>[];
     for (final raw in list) {
-      final item = _map(raw);
-      final history = _map(item['history']);
+      final item = _map(raw, endpoint);
+      final history = _map(item['history'], endpoint);
       final business = history['business'];
       // Live/article histories have their own destinations, outside this page.
       if (business != 'archive' && business != 'pgc') continue;
@@ -69,7 +136,7 @@ final class WatchHistoryClient {
       if (business == 'pgc' && episodeId == null ||
           business == 'archive' &&
               !RegExp(r'^BV[0-9A-Za-z]{10}$').hasMatch(bvid)) {
-        _protocol();
+        _protocol(endpoint);
       }
       final title = item['title'];
       final timestamp = _integer(item['view_at']);
@@ -84,7 +151,7 @@ final class WatchHistoryClient {
           seconds < 0 ||
           progress == null ||
           progress < -1) {
-        _protocol();
+        _protocol(endpoint);
       }
       final duration = Duration(seconds: seconds);
       final cid = _id(history['cid']) ?? '';
@@ -115,25 +182,7 @@ final class WatchHistoryClient {
         ),
       );
     }
-    if (list.isEmpty) return const ApiPage([], hasMore: false);
-    final next = _map(data['cursor']);
-    final max = _decimalId(next['max']);
-    final viewAt = _decimalId(next['view_at']);
-    final business = next['business'];
-    if (max == null ||
-        viewAt == null ||
-        business is! String ||
-        !RegExp(r'^[a-z_]*$').hasMatch(business)) {
-      _protocol();
-    }
-    final nextCursor = '$max:$viewAt:$business';
-    final hasMore = max != '0';
-    if (hasMore && nextCursor == cursor) _protocol();
-    return ApiPage(
-      List.unmodifiable(items),
-      hasMore: hasMore,
-      nextCursor: hasMore ? nextCursor : null,
-    );
+    return List.unmodifiable(items);
   }
 
   Future<void> delete(String deletionKey, {ApiRequestContext? context}) async {
@@ -182,8 +231,10 @@ final class WatchHistoryClient {
         : null;
   }
 
-  static Map<String, Object?> _map(Object? value) =>
-      value is Map<String, Object?> ? value : _protocol();
-  static Never _protocol() =>
-      throw const ApiFailure(ApiFailureCategory.protocol, _endpoint);
+  static Map<String, Object?> _map(
+    Object? value, [
+    String endpoint = _endpoint,
+  ]) => value is Map<String, Object?> ? value : _protocol(endpoint);
+  static Never _protocol([String endpoint = _endpoint]) =>
+      throw ApiFailure(ApiFailureCategory.protocol, endpoint);
 }
