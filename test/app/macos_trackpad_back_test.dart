@@ -10,7 +10,10 @@ import 'package:go_router/go_router.dart';
 import '../support/input_test_app.dart';
 
 void main() {
-  for (final mode in WorkspaceNavigationMode.values) {
+  for (final mode in [
+    WorkspaceNavigationMode.singlePage,
+    WorkspaceNavigationMode.dualTabs,
+  ]) {
     testWidgets('macOS back follows page and video history in $mode', (
       tester,
     ) async {
@@ -46,6 +49,147 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('multi-tab Back closes the current tab in tab order', (
+    tester,
+  ) async {
+    final router = _router(mode: WorkspaceNavigationMode.multipleTabs);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(_app(router));
+    router.go('/video/A');
+    await tester.pumpAndSettle();
+    router.go('/video/B');
+    await tester.pumpAndSettle();
+    router.go('/user/42');
+    await tester.pumpAndSettle();
+
+    // Revisiting A changes the visit history but not the tab strip order.
+    await tester.tap(find.byKey(const ValueKey('workspace-tab-tab-1')));
+    await tester.pumpAndSettle();
+    await _back(tester);
+    expect(router.routeInformationProvider.value.uri.path, '/');
+    expect(find.byKey(const ValueKey('workspace-tab-tab-1')), findsNothing);
+    expect(find.byKey(const ValueKey('workspace-tab-tab-2')), findsOneWidget);
+    expect(find.byKey(const ValueKey('workspace-tab-tab-3')), findsOneWidget);
+
+    // The fixed root is not closed even though other visits remain in history.
+    await _back(tester);
+    expect(router.routeInformationProvider.value.uri.path, '/');
+    expect(find.byKey(const ValueKey('workspace-tab-home')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('workspace-tab-tab-3')));
+    await tester.pumpAndSettle();
+    await _back(tester);
+    expect(router.routeInformationProvider.value.uri.path, '/video/B');
+    expect(find.byKey(const ValueKey('workspace-tab-tab-3')), findsNothing);
+    await _back(tester);
+    expect(router.routeInformationProvider.value.uri.path, '/');
+    expect(find.byKey(const ValueKey('workspace-tab-tab-2')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final path in ['/video/A', '/pgc/42', '/live/42', '/offline/42']) {
+    for (final swipe in [false, true]) {
+      testWidgets(
+        'multi-tab ${swipe ? 'swipe' : 'close button'} releases $path',
+        (tester) async {
+          final router = _router(mode: WorkspaceNavigationMode.multipleTabs);
+          addTearDown(router.dispose);
+          await tester.pumpWidget(_app(router));
+          router.go(path);
+          await tester.pumpAndSettle();
+          final player = tester.element(find.text('page $path'));
+          router.go('/user/42');
+          await tester.pumpAndSettle();
+          final profile = tester.element(find.text('page /user/42'));
+          await tester.tap(find.byKey(const ValueKey('workspace-tab-tab-1')));
+          await tester.pumpAndSettle();
+
+          if (swipe) {
+            await _back(tester);
+          } else {
+            await tester.tap(
+              find.byKey(const ValueKey('close-workspace-tab-tab-1')),
+            );
+            await tester.pumpAndSettle();
+          }
+          expect(router.routeInformationProvider.value.uri.path, '/');
+          expect(player.mounted, isFalse);
+          expect(
+            find.byKey(const ValueKey('workspace-tab-tab-1')),
+            findsNothing,
+          );
+          expect(profile.mounted, isTrue);
+          await tester.tap(find.byKey(const ValueKey('workspace-tab-tab-2')));
+          await tester.pumpAndSettle();
+          expect(tester.element(find.text('page /user/42')), same(profile));
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  testWidgets(
+    'single-page Back releases visits and restores the original page',
+    (tester) async {
+      final router = _router();
+      addTearDown(router.dispose);
+      await tester.pumpWidget(_app(router));
+      router.go('/video/A');
+      await tester.pumpAndSettle();
+      final firstVideo = tester.element(find.text('page /video/A'));
+      router.go('/user/42');
+      await tester.pumpAndSettle();
+      final profile = tester.element(find.text('page /user/42'));
+      router.go('/video/B');
+      await tester.pumpAndSettle();
+      final secondVideo = tester.element(find.text('page /video/B'));
+
+      await _back(tester);
+      expect(router.routeInformationProvider.value.uri.path, '/user/42');
+      expect(tester.element(find.text('page /user/42')), same(profile));
+      expect(secondVideo.mounted, isFalse);
+      await _back(tester);
+      expect(router.routeInformationProvider.value.uri.path, '/video/A');
+      expect(tester.element(find.text('page /video/A')), same(firstVideo));
+      expect(profile.mounted, isFalse);
+      await _back(tester);
+      expect(router.routeInformationProvider.value.uri.path, '/');
+      expect(firstVideo.mounted, isFalse);
+      await _back(tester);
+      expect(router.routeInformationProvider.value.uri.path, '/');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('multi-tab Back handles page detail before closing its tab', (
+    tester,
+  ) async {
+    var detail = true;
+    final router = _router(
+      mode: WorkspaceNavigationMode.multipleTabs,
+      builder: (_, tab) => StatefulBuilder(
+        builder: (context, setState) => PageBackHandler(
+          enabled: tab.isProfile && detail,
+          onBack: () {
+            setState(() => detail = false);
+            return true;
+          },
+          child: Text('page ${tab.location.path}'),
+        ),
+      ),
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(_app(router));
+    router.go('/user/42');
+    await tester.pumpAndSettle();
+    await _back(tester);
+    expect(detail, isFalse);
+    expect(find.byKey(const ValueKey('workspace-tab-tab-1')), findsOneWidget);
+    await _back(tester);
+    expect(find.byKey(const ValueKey('workspace-tab-tab-1')), findsNothing);
+    expect(router.routeInformationProvider.value.uri.path, '/');
+  });
 
   testWidgets('page-local Back wins before the workspace page changes', (
     tester,
@@ -184,7 +328,14 @@ GoRouter _router({
         child: child,
       ),
       routes: [
-        for (final path in ['/', '/video/:id', '/user/:id'])
+        for (final path in [
+          '/',
+          '/video/:id',
+          '/pgc/:id',
+          '/live/:id',
+          '/offline/:id',
+          '/user/:id',
+        ])
           GoRoute(path: path, builder: (_, _) => const SizedBox.shrink()),
       ],
     ),

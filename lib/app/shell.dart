@@ -240,6 +240,24 @@ final class _BiliAppShellState extends State<BiliAppShell>
 
   bool _goBackWithinPage() => _pageBack[_displayTab.id]?.goBack() ?? false;
 
+  bool get _canTrackpadBack => !_dualTabs && !_singlePage
+      ? (_pageBack[_displayTab.id]?.canGoBack ?? false) || !_displayTab.pinned
+      : _canGoBack;
+
+  void _closeCurrentTabOrBackWithinPage() {
+    if (!_goBackWithinPage()) _closeTab(_workspace.activeId);
+  }
+
+  void _trackpadBack() {
+    // Separate tabs close just like the close command; visit history can
+    // otherwise select an old player while retaining the page being left.
+    if (!_dualTabs && !_singlePage) {
+      _closeCurrentTabOrBackWithinPage();
+    } else {
+      _goBack();
+    }
+  }
+
   TabPagingProgress _pagingFor(WorkspaceTab tab) {
     final settings = tab.location.path == '/settings';
     final channels = channelsForSection(
@@ -627,8 +645,8 @@ final class _BiliAppShellState extends State<BiliAppShell>
       case ShortcutAction.closeTab:
         if (_desktopDual || _singlePage) {
           _goBack();
-        } else if (!_goBackWithinPage()) {
-          _closeTab(_workspace.activeId);
+        } else {
+          _closeCurrentTabOrBackWithinPage();
         }
       case ShortcutAction.nextTab:
         _cycleTabs();
@@ -672,7 +690,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
     );
     final windowBuilder = widget.playbackWindowBuilder;
     final presented = TrackpadBackRegion(
-      enabled: _canGoBack,
+      enabled: _canTrackpadBack,
       identity: (
         _backIdentity(_displayTab),
         _desktopDual
@@ -680,7 +698,7 @@ final class _BiliAppShellState extends State<BiliAppShell>
             : _workspace.backDestination()?.location,
         _pageBack[_displayTab.id]?.canGoBack ?? false,
       ),
-      onBack: _goBack,
+      onBack: _trackpadBack,
       child: _withBackPreview(context, main),
     );
     if (windowBuilder == null) return presented;

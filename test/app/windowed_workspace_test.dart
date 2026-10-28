@@ -16,6 +16,67 @@ import 'package:go_router/go_router.dart';
 import '../support/detached_window_fake.dart';
 
 void main() {
+  testWidgets(
+    'macOS browser swipe closes browsing pages and retains playback',
+    (tester) async {
+      final fixture = _WindowedWorkspace(
+        tester,
+        platform: TargetPlatform.macOS,
+      );
+      addTearDown(fixture.dispose);
+      await tester.pumpWidget(fixture.app);
+      await tester.pumpAndSettle();
+      fixture.router.go('/history');
+      await tester.pumpAndSettle();
+      final history = tester.element(_page('tab-1'));
+      fixture.router.go('/user/42');
+      await tester.pumpAndSettle();
+      final profile = tester.element(_page('tab-2'));
+      fixture.router.go('/video/A');
+      await tester.pumpAndSettle();
+      fixture.router.go('/pgc/42');
+      await tester.pumpAndSettle();
+      final player = tester.element(_page('tab-3'));
+
+      Future<void> back(String id) async {
+        final page = tester.element(_page(id));
+        final view = View.of(page);
+        final drag = await tester.createGesture(
+          kind: PointerDeviceKind.trackpad,
+        );
+        await drag.panZoomStart(tester.getCenter(_page(id)), view: view);
+        await drag.moveBy(const Offset(150, 0), view: view);
+        await drag.up(view: view);
+        await tester.pumpAndSettle();
+      }
+
+      // The active route is playback, but this gesture belongs to the browser.
+      await back('tab-2');
+      expect(
+        fixture.router.routeInformationProvider.value.uri.path,
+        '/history',
+      );
+      expect(profile.mounted, isFalse);
+      expect(tester.element(_page('tab-1')), same(history));
+      expect(tester.element(_page('tab-3')), same(player));
+      await back('tab-1');
+      expect(fixture.router.routeInformationProvider.value.uri.path, '/');
+      expect(history.mounted, isFalse);
+      await back('home');
+      expect(fixture.router.routeInformationProvider.value.uri.path, '/');
+      expect(tester.element(_page('tab-3')), same(player));
+      expect(fixture.tab(tester, 'tab-3').location.path, '/pgc/42');
+      // Browser gestures never consume the detached player's media history.
+      await back('tab-3');
+      expect(fixture.tab(tester, 'tab-3').location.path, '/video/A');
+      expect(tester.element(_page('tab-3')), same(player));
+      expect(fixture.windows.creationCount, 1);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    },
+  );
+
   testWidgets('macOS trackpad Back stays in its detached playback view', (
     tester,
   ) async {
