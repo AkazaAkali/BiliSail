@@ -33,7 +33,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(repository.searches, ['没有的视频']);
       expect(find.text('没有找到相关的云端观看记录'), findsOneWidget);
-      expect(find.text('搜索：没有的视频'), findsOneWidget);
+      expect(find.text('搜索：没有的视频'), findsNothing);
       await tester.tap(find.byTooltip('清除历史搜索'));
       await tester.pumpAndSettle();
       expect(find.byType(VideoCard), findsNWidgets(2));
@@ -46,6 +46,96 @@ void main() {
       await tester.pumpAndSettle();
       expect(field, findsNothing);
       expect(find.byType(VideoCard), findsNWidgets(2));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'one magnifier tap focuses input, reopen works and disposal is safe',
+    (tester) async {
+      final repository = _HistoryRepository(_entries());
+      await _pump(tester, repository);
+      final toggle = find.byKey(const ValueKey('history-search-toggle'));
+      final field = find.byKey(const ValueKey('history-search'));
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(field).focusNode!.hasFocus, true);
+      expect(tester.testTextInput.isVisible, true);
+      // Send text to the focused input directly: enterText would focus it for us.
+      tester.testTextInput.enterText('一次点击');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pumpAndSettle();
+      expect(repository.searches, ['一次点击']);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(field, findsNothing);
+      expect(tester.testTextInput.isVisible, false);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(field).focusNode!.hasFocus, true);
+      expect(tester.testTextInput.isVisible, true);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      await tester.tap(toggle);
+      // Unmount before the deferred focus request gets its frame.
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'search preview has one upper spinner and preserves results on failure',
+    (tester) async {
+      final repository = _HistoryRepository(_entries());
+      await _pump(tester, repository);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('history-search-toggle')));
+      await tester.pumpAndSettle();
+      final field = find.byKey(const ValueKey('history-search'));
+      Future<void> search(String query) async {
+        repository.pendingSearch = Completer<WatchHistoryPage>();
+        await tester.enterText(field, query);
+        await tester.testTextInput.receiveAction(TextInputAction.search);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      await search('历史');
+      expect(find.byType(VideoCard), findsNWidgets(2));
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.byKey(const ValueKey('video-card-title-menu')), findsNothing);
+      expect(
+        tester.getBottomLeft(find.byType(CircularProgressIndicator)).dy,
+        lessThan(tester.getTopLeft(find.byType(VideoCard).first).dy),
+      );
+      repository.pendingSearch!.complete(
+        WatchHistoryPage(_entries(), hasMore: false),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(
+        find.byKey(const ValueKey('video-card-title-menu')),
+        findsNWidgets(2),
+      );
+      await search('历史');
+      repository.pendingSearch!.completeError(
+        const AppFailure(AppFailureKind.network, '离线'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(VideoCard), findsNWidgets(2));
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('重试'), findsOneWidget);
+      await tester.tap(field);
+      await search('没有匹配');
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('没有找到相关的云端观看记录'), findsNothing);
+      repository.pendingSearch!.complete(
+        const WatchHistoryPage([], hasMore: false),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('没有找到相关的云端观看记录'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -434,6 +524,7 @@ final class _HistoryRepository
   }
 
   final searches = <String>[];
+  Completer<WatchHistoryPage>? pendingSearch;
   @override
   Future<WatchHistoryPage> searchHistory({
     required String keyword,
@@ -441,7 +532,8 @@ final class _HistoryRepository
     required RequestCancellation cancellation,
   }) async {
     searches.add(keyword);
-    return const WatchHistoryPage([], hasMore: false);
+    return await pendingSearch?.future ??
+        const WatchHistoryPage([], hasMore: false);
   }
 
   @override

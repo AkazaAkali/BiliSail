@@ -109,6 +109,13 @@ final class HistoryScreen extends ConsumerStatefulWidget {
 
 final class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   bool _searchExpanded = false;
+  final _searchFocus = FocusNode(debugLabel: 'watch-history-search');
+
+  @override
+  void dispose() {
+    _searchFocus.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -213,9 +220,23 @@ final class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                                           () => _searchExpanded =
                                               !_searchExpanded,
                                         );
-                                        if (!_searchExpanded &&
-                                            history.query.isNotEmpty) {
-                                          controller.search('');
+                                        if (_searchExpanded) {
+                                          // Wait until the newly expanded field is attached.
+                                          WidgetsBinding.instance
+                                              .addPostFrameCallback((_) {
+                                                if (mounted &&
+                                                    _searchExpanded &&
+                                                    WorkspaceActivity.isActive(
+                                                      context,
+                                                    )) {
+                                                  _searchFocus.requestFocus();
+                                                }
+                                              });
+                                        } else {
+                                          _searchFocus.unfocus();
+                                          if (history.query.isNotEmpty) {
+                                            controller.search('');
+                                          }
                                         }
                                       },
                                 icon: const Icon(Icons.search),
@@ -259,7 +280,9 @@ final class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     ),
                   ),
                   if (_searchExpanded || history.query.isNotEmpty)
-                    const SliverToBoxAdapter(child: _HistorySearchField()),
+                    SliverToBoxAdapter(
+                      child: _HistorySearchField(focusNode: _searchFocus),
+                    ),
                   if (history.preview)
                     SliverToBoxAdapter(
                       child: Padding(
@@ -377,16 +400,20 @@ final class _HistoryEntriesSliver extends ConsumerWidget {
           : SliverVideoGrid.indexed(
               onOpenUser: (id) => context.go('/user/${id.value}'),
               items: [for (final entry in entries) entry.video],
-              menuAt: (index) => VideoCardMenu(
-                actions: const [VideoCardMenuAction.removeHistory],
-                busy: writeBlocked,
-                onSelected: (_) => HistoryScreen._perform(
-                  context,
-                  ref,
-                  (controller) => controller.delete(entries[index]),
-                  '已删除观看记录',
-                ),
-              ),
+              // Preview records cannot be mutated yet. Hide their menus rather
+              // than displaying a redundant busy spinner on every card.
+              menuAt: (index) => preview
+                  ? null
+                  : VideoCardMenu(
+                      actions: const [VideoCardMenuAction.removeHistory],
+                      busy: writeBlocked,
+                      onSelected: (_) => HistoryScreen._perform(
+                        context,
+                        ref,
+                        (controller) => controller.delete(entries[index]),
+                        '已删除观看记录',
+                      ),
+                    ),
               onOpen: (index) => context.go(entries[index].location.toString()),
               publishTextAt: (index) =>
                   HistoryScreen._watchDate(entries[index].watchedAt),
@@ -407,7 +434,8 @@ final class _HistoryEntriesSliver extends ConsumerWidget {
 }
 
 final class _HistorySearchField extends ConsumerStatefulWidget {
-  const _HistorySearchField();
+  const _HistorySearchField({required this.focusNode});
+  final FocusNode focusNode;
 
   @override
   ConsumerState<_HistorySearchField> createState() =>
@@ -447,6 +475,7 @@ final class _HistorySearchFieldState
             child: TextField(
               key: const ValueKey('history-search'),
               controller: _text,
+              focusNode: widget.focusNode,
               enabled: !history.writeBusy,
               textInputAction: TextInputAction.search,
               onSubmitted: controller.search,
@@ -477,13 +506,6 @@ final class _HistorySearchFieldState
               ),
             ),
           ),
-          if (history.query.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              '搜索：${history.query}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
         ],
       ),
     );
