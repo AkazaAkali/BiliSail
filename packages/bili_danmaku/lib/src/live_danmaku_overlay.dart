@@ -144,14 +144,7 @@ final class _LivePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.clipRect(Offset.zero & size);
-    for (final item in controller.frame()) {
-      controller.paintText(
-        item.event,
-        canvas,
-        Offset(item.x, item.y),
-        pixelRatio: pixelRatio,
-      );
-    }
+    controller.paintFrame(canvas, pixelRatio: pixelRatio);
     onPainted();
   }
 

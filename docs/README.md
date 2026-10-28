@@ -35,6 +35,7 @@
 | [播放控制、视频输出与平台合成拆分](player-output-composition-design.md) | 三层接口、当前 Flutter 基线、输出所有权与后续平台迁移边界 |
 | [播放合成重绘与卡顿分析](validation/playback-composition-performance-2026-10-24.md) | 进度／字幕绘制传播、合成边界、Windows Profile 对照与偶发慢放的证据边界 |
 | [弹幕调度与图像缓存合成优化](validation/playback-composition-performance-2026-10-28.md) | 当前播放链路、静止/等待停帧、PiliPlus 设计取舍和 Windows Profile 对照 |
+| [滚动与混合弹幕性能复查](validation/scrolling-mixed-danmaku-performance-2026-10-28.md) | 逐帧分配、直接绘制、混合覆盖顺序和图集候选对照 |
 | [首页推荐与三类播放性能热点](validation/performance-hotspots-2026-10-11.md) | 当前源码定位、图片／播放器／影视／直播结构探针、优化优先级与验收方案 |
 | [Windows 播放器与网页 GPU 对照分析](validation/windows-player-gpu-analysis-2026-10-12.md) | copy-back、ANGLE／纹理复制、空弹幕调度、纯视频 GPU 实测与优化顺序 |
 | [Windows GPU 优化结果](validation/windows-gpu-optimization-2026-10-13.md) | 非 copy-back 硬解、GPU 有序提交、空弹幕单次唤醒与同素材前后实测 |

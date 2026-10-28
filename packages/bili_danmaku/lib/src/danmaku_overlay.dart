@@ -151,15 +151,7 @@ final class _DanmakuPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.clipRect(Offset.zero & size);
-    final placements = controller.frame();
-    for (final placement in placements) {
-      controller.paintText(
-        placement.event,
-        canvas,
-        Offset(placement.x, placement.y),
-        pixelRatio: pixelRatio,
-      );
-    }
+    controller.paintFrame(canvas, pixelRatio: pixelRatio);
     onPainted();
   }
 

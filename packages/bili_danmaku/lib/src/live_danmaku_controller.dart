@@ -290,16 +290,33 @@ final class LiveDanmakuController extends ChangeNotifier {
   }
 
   List<LiveDanmakuPlacement> frame() {
-    if (!_enabled) return const [];
+    final result = <LiveDanmakuPlacement>[];
+    _visitFrame((event, x, y) {
+      result.add(LiveDanmakuPlacement(event, x, y));
+    });
+    return result;
+  }
+
+  /// Paint the current receipt-clock frame in arrival order without building
+  /// an intermediate position list. The caller owns clipping.
+  void paintFrame(Canvas canvas, {double pixelRatio = 1}) {
+    _visitFrame((event, x, y) {
+      paintText(event, canvas, Offset(x, y), pixelRatio: pixelRatio);
+    });
+  }
+
+  void _visitFrame(void Function(LiveDanmakuEvent, double, double) visit) {
+    if (!_enabled) return;
     final now = _now();
+    final nowMicros = now.inMicroseconds;
+    final scrollMicros = _scrollLifetime.inMicroseconds;
+    final fixedMicros = fixedDuration.inMicroseconds;
     _removeVisibleWhere(
       (item) =>
-          now - item.at >=
-          (item.event.mode == DanmakuMode.scroll
-              ? _scrollLifetime
-              : fixedDuration),
+          nowMicros - item.at.inMicroseconds >=
+          (item.event.mode == DanmakuMode.scroll ? scrollMicros : fixedMicros),
     );
-    if (_width <= 0 || _height <= 0) return const [];
+    if (_width <= 0 || _height <= 0) return;
     // Keep the receipt clock moving every frame; only arrivals need an index.
     if (_pending.isNotEmpty && _pending.first.at <= now) _admit(now);
     if (_rasterProtectionDirty) {
@@ -311,21 +328,19 @@ final class LiveDanmakuController extends ChangeNotifier {
       _rasterProtectionDirty = false;
       _rasterProtectionUpdateCount++;
     }
-    return [
-      for (final item in _visible)
-        LiveDanmakuPlacement(
-          item.event,
-          item.event.mode == DanmakuMode.scroll
-              ? _width -
-                    (_width + item.width) *
-                        ((now - item.at).inMicroseconds /
-                            _scrollLifetime.inMicroseconds)
-              : (_width - item.width) / 2,
-          item.event.mode == DanmakuMode.bottom
-              ? _top + _availableHeight - (item.lane + 1) * _laneHeight
-              : _top + item.lane * _laneHeight,
-        ),
-    ];
+    final top = _top;
+    final bottom = top + _availableHeight;
+    for (final item in _visible) {
+      final x = item.event.mode == DanmakuMode.scroll
+          ? _width -
+                (_width + item.width) *
+                    ((nowMicros - item.at.inMicroseconds) / scrollMicros)
+          : (_width - item.width) / 2;
+      final y = item.event.mode == DanmakuMode.bottom
+          ? bottom - (item.lane + 1) * _laneHeight
+          : top + item.lane * _laneHeight;
+      visit(item.event, x, y);
+    }
   }
 
   void _admit(Duration now) {

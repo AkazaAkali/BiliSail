@@ -463,17 +463,34 @@ final class DanmakuController extends ChangeNotifier {
   }
 
   List<DanmakuPlacement> frame() {
+    final result = <DanmakuPlacement>[];
+    _visitFrame((event, x, y) {
+      result.add(DanmakuPlacement(event: event, x: x, y: y));
+    });
+    return result;
+  }
+
+  /// Advance admission once and paint in arrival order without allocating a
+  /// position snapshot for every visible comment. The caller owns clipping.
+  void paintFrame(Canvas canvas, {double pixelRatio = 1}) {
+    _visitFrame((event, x, y) {
+      paintText(event, canvas, Offset(x, y), pixelRatio: pixelRatio);
+    });
+  }
+
+  void _visitFrame(void Function(DanmakuEvent, double, double) visit) {
     final now = _now();
     final mediaAt = _estimate(now) - _offset;
     final at = _animationAt(now);
+    final atMicros = at.inMicroseconds;
+    final scrollMicros = _scrollLifetime.inMicroseconds;
+    final fixedMicros = fixedDuration.inMicroseconds;
     _removeActiveWhere(
       (item) =>
-          at - item.start >=
-          (item.event.mode == DanmakuMode.scroll
-              ? _scrollLifetime
-              : fixedDuration),
+          atMicros - item.start.inMicroseconds >=
+          (item.event.mode == DanmakuMode.scroll ? scrollMicros : fixedMicros),
     );
-    if (_width <= 0 || _height <= 0) return const [];
+    if (_width <= 0 || _height <= 0) return;
     // Animation-only frames need positions, not admission/collision indexes.
     if (_next < _events.length && _events[_next].at <= mediaAt) {
       _admit(mediaAt, at);
@@ -487,20 +504,18 @@ final class DanmakuController extends ChangeNotifier {
       _rasterProtectionDirty = false;
       _rasterProtectionUpdateCount++;
     }
-    final result = <DanmakuPlacement>[];
+    final top = _top;
+    final bottom = top + _availableHeight;
     for (final item in _active) {
-      final age = at - item.start;
+      final ageMicros = atMicros - item.start.inMicroseconds;
       final x = item.event.mode == DanmakuMode.scroll
-          ? _width -
-                (_width + item.width) *
-                    (age.inMicroseconds / _scrollLifetime.inMicroseconds)
+          ? _width - (_width + item.width) * (ageMicros / scrollMicros)
           : (_width - item.width) / 2;
       final y = item.event.mode == DanmakuMode.bottom
-          ? _top + _availableHeight - (item.lane + 1) * _laneHeight
-          : _top + item.lane * _laneHeight;
-      result.add(DanmakuPlacement(event: item.event, x: x, y: y));
+          ? bottom - (item.lane + 1) * _laneHeight
+          : top + item.lane * _laneHeight;
+      visit(item.event, x, y);
     }
-    return result;
   }
 
   void _admit(Duration mediaAt, Duration at) {
